@@ -113,6 +113,7 @@ import { openWorkerChildSession } from "./worker-session.js";
 import { runInWorkspace } from "../_shared/workspace-context.js";
 import * as activation from "./activation.js";
 import * as parentHost from "./parent-host.js";
+import { setAgentMode } from "../agent-mode/modes.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
 import { __resetChildRunsForTest } from "./child-runs.js";
 
@@ -209,6 +210,117 @@ beforeEach(() => {
   });
 });
 
+describe("spawn_agent · Ultra routing", () => {
+  const ultraCtx = { ...ctxM, cwd: "/ultra-routing-test", model: { provider: "a", id: "b" } };
+  const configure = (values: Record<string, string>) => {
+    vi.mocked(getConfig).mockImplementation((key: string) => key === "SUBAGENT_MAX_PER_SESSION" ? "0" : values[key]);
+  };
+  beforeEach(() => setAgentMode("ultra" as never, ultraCtx.cwd));
+  afterEach(() => setAgentMode("agent", ultraCtx.cwd));
+
+  it("Ultra ignores ordinary disabled and ordinary role defaults", async () => {
+    configure({ SUBAGENT_MODE: "disabled", SUBAGENT_MODEL_CHEAP: "ordinary/wrong", ULTRA_SUBAGENT_MODEL_SCOUT: "a/b" });
+    const r = await loadSpawnAgent()("ultra", { task: "find", agent: "scout" }, null, null, ultraCtx).catch((e) => ({ isError: true, content: [{ type: "text", text: String(e) }] }));
+    expect(r.isError).not.toBe(true);
+    const child = vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0];
+    expect(child?.model).toBe("a/b");
+    expect(child?.env?.PI_SUBAGENT_ROUTING_MODE).toBe("ultra");
+    expect(child?.env?.SAFETY_READONLY).toBe("1");
+  });
+
+  it("Ultra uses its default and then the actual parent, never ordinary settings", async () => {
+    configure({ SUBAGENT_MODEL: "ordinary/wrong", ULTRA_SUBAGENT_MODEL: "a/c" });
+    await loadSpawnAgent()("u1", { task: "work", agent: "worker" }, null, null, ultraCtx);
+    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.model).toBe("a/c");
+    configure({ SUBAGENT_MODEL: "ordinary/wrong" });
+    await loadSpawnAgent()("u2", { task: "work", agent: "worker" }, null, null, ultraCtx);
+    expect(vi.mocked(runEmbeddedSubagent).mock.calls[1]?.[0]?.model).toBe("a/b");
+  });
+
+  it("Ultra mixes roles and per-node thinking in one batch", async () => {
+    configure({ ULTRA_SUBAGENT_MODEL_SCOUT: "a/c", ULTRA_SUBAGENT_MODEL_WORKER: "a/b" });
+    const r = await loadSpawnAgent()("u", { tasks: [
+      { task: "find", agent: "scout", thinking_level: "off" },
+      { task: "implement", agent: "worker", thinking_level: "high" },
+    ] }, null, null, ultraCtx);
+    expect(r.isError).not.toBe(true);
+    const children = vi.mocked(runEmbeddedSubagent).mock.calls.map(([child]) => ({ task: child.task, model: child.model, thinking: child.thinkingLevel }));
+    expect(children).toEqual(expect.arrayContaining([
+      { task: "find", model: "a/c", thinking: "off" },
+      { task: "implement", model: "a/b", thinking: "high" },
+    ]));
+  });
+
+  it("Ultra rejects a bad role model with node, role and setting source before any launch", async () => {
+    configure({ ULTRA_SUBAGENT_MODEL_WORKER: "a/b", ULTRA_SUBAGENT_MODEL_REVIEWER: "gone/model" });
+    const r = await loadSpawnAgent()("u", { chain: [
+      { task: "work", agent: "worker" }, { task: "review", agent: "reviewer" },
+    ] }, null, null, ultraCtx);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("chain[1]");
+    expect(r.content[0].text).toContain("reviewer");
+    expect(r.content[0].text).toContain("ULTRA_SUBAGENT_MODEL_REVIEWER");
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+  });
+
+  it("Ultra authorizes explicit models using only its own configuration", async () => {
+    configure({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: '["a/c"]', ULTRA_SUBAGENT_MODEL_ALLOWLIST: '["a/b"]' });
+    const r = await loadSpawnAgent()("u", { task: "work", model: "a/c" }, null, null, ultraCtx);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("Ultra");
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+  });
+
+  it("Ultra discovers its configured roles even if ordinary self-selection is off", async () => {
+    configure({ ULTRA_SUBAGENT_MODEL_SCOUT: "a/c", ULTRA_SUBAGENT_MODEL_WORKER: "a/b", SUBAGENT_MODEL_CHEAP: "ordinary/wrong" });
+    const h = loadSpawnHarness();
+    const tool = h.tools.list_subagent_models;
+    expect(tool).toBeTypeOf("function");
+    const r = await tool("discover", {}, null, null, ultraCtx);
+    expect(r.content[0].text).toContain("cheap → a/c");
+    expect(r.content[0].text).toContain("strong → a/b");
+    expect(r.content[0].text).not.toContain("ordinary/wrong");
+  });
+
+  it("ordinary mode keeps its defaults and ignores Ultra configuration", async () => {
+    setAgentMode("agent", ultraCtx.cwd);
+    configure({ SUBAGENT_MODEL: "ordinary/keep", ULTRA_SUBAGENT_MODEL: "a/b" });
+    await loadSpawnAgent()("ordinary", { task: "work", agent: "worker" }, null, null, ultraCtx);
+    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.model).toBe("ordinary/keep");
+  });
+
+  it("stops unstarted chain nodes after Ultra authorization is revoked and preserves completed results", async () => {
+    const values = { ULTRA_SUBAGENT_MODEL_WORKER: "a/b", ULTRA_SUBAGENT_MODEL_ALLOWLIST: '["a/c"]' };
+    configure(values);
+    vi.mocked(runEmbeddedSubagent).mockImplementationOnce(async () => {
+      values.ULTRA_SUBAGENT_MODEL_ALLOWLIST = "[]";
+      return { ok: true, output: "kept result", exitCode: 0, transcript: "", sessionPath: "/tmp/child.jsonl", stopReason: "completed" };
+    });
+    const r = await loadSpawnAgent()("u", { chain: [
+      { task: "first", agent: "worker" }, { task: "second", agent: "reviewer", model: "a/c" },
+    ] }, null, null, ultraCtx);
+    expect(r.isError).toBe(true);
+    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(1);
+    expect(r.details).toMatchObject({ mode: "chain", stoppedAt: 2, results: [
+      expect.objectContaining({ ok: true, output: "kept result" }),
+      expect.objectContaining({ ok: false, error: expect.stringContaining("Ultra") }),
+    ] });
+  });
+
+  it("validates each requested thinking level against that node's final model", async () => {
+    configure({ ULTRA_SUBAGENT_MODEL_WORKER: "a/b", ULTRA_SUBAGENT_MODEL_REVIEWER: "a/c" });
+    const r = await loadSpawnAgent()("u", { thinking_level: "high", chain: [
+      { task: "work", agent: "worker" }, { task: "review", agent: "reviewer" },
+    ] }, null, null, ultraCtx);
+    // a/c 不是推理模型：显式档收敛到 off 并把实际档告诉调用方，而不是整次调用失败。
+    expect(r.isError).not.toBe(true);
+    expect(r.content[0].text).toContain("chain[1]");
+    expect(r.content[0].text).toContain("没有思考档 high，已改为 off");
+    const thinking = vi.mocked(runEmbeddedSubagent).mock.calls.map(([child]) => child.thinkingLevel);
+    expect(thinking).toEqual(["high", "off"]);
+  });
+});
+
 describe("spawn_agent · approval policy injected into sub-agent (B)", () => {
   const injectedPolicy = () => (vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.env as Record<string, string>).APPROVAL_POLICY;
 
@@ -288,58 +400,76 @@ describe("codemode deadline around spawn_agent", () => {
   });
 });
 
-// 并行健壮性：一个任务出错（这里用未知 agent 触发 agentLayer 抛错）不应 reject 整个 Promise.all
-// 而遗弃其它正在运行的兄弟任务——应就地记为该任务失败、其余照常跑完。
-describe("spawn_agent · early parallel start", () => {
-  it("starts a closed task from the argument stream before execute", async () => {
-    const { handlers, execute } = loadSpawnHarness();
-    await handlers.message_update?.(
-      {
-        type: "message_update",
-        assistantMessageEvent: { type: "toolcall_start", contentIndex: 3, id: "call_p", toolName: "spawn_agent" },
-      } as never,
-      ctx as never,
+describe("spawn_agent · authorization before parallel launch", () => {
+  let streamSequence = 0;
+  async function streamTasks(h: ReturnType<typeof loadSpawnHarness>, chunks: string[]) {
+    const contentIndex = ++streamSequence;
+    const id = `call_auth_${contentIndex}`;
+    await h.handlers.message_update?.(
+      { assistantMessageEvent: { type: "toolcall_start", contentIndex, id, toolName: "spawn_agent" } }, ctxM,
     );
-    await handlers.message_update?.(
-      {
-        type: "message_update",
-        assistantMessageEvent: { type: "toolcall_delta", contentIndex: 3, delta: '{"tasks":["review server"],' },
-      } as never,
-      ctx as never,
-    );
-    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.task).toBe("review server");
-    await execute("call_p", { tasks: ["review server", "review desktop"] }, null, null, ctx);
-    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(runEmbeddedSubagent).mock.calls.map((c) => c[0]?.task).sort()).toEqual([
-      "review desktop",
-      "review server",
-    ]);
+    for (const delta of chunks) {
+      await h.handlers.message_update?.(
+        { assistantMessageEvent: { type: "toolcall_delta", contentIndex, delta } }, ctxM,
+      );
+    }
+    return id;
+  }
+
+  it.each([
+    {
+      name: "task model",
+      chunks: ['{"tasks":[{"task":"review server","model":"a/c"}],'],
+      params: { tasks: [{ task: "review server", model: "a/c" }] },
+    },
+    {
+      name: "late top-level model",
+      chunks: ['{"tasks":["review server"],', '"model":"a/c"}'],
+      params: { tasks: ["review server"], model: "a/c" },
+    },
+    {
+      name: "late inline profile model",
+      chunks: ['{"tasks":["review server"],', '"profile":{"model":"a/c"}}'],
+      params: { tasks: ["review server"], profile: { model: "a/c" } },
+    },
+    {
+      name: "mixed authorized and unauthorized tasks",
+      chunks: ['{"tasks":[{"task":"allowed","model":"a/b"},', '{"task":"denied","model":"a/c"}]}'],
+      params: { tasks: [{ task: "allowed", model: "a/b" }, { task: "denied", model: "a/c" }] },
+    },
+  ])("does not launch $name outside the allowlist, including during argument streaming", async ({ chunks, params }) => {
+    enable('["a/b"]');
+    const h = loadSpawnHarness();
+    const id = await streamTasks(h, chunks);
+    const result = await h.execute(id, params, null, null, ctxM);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("不在授权白名单");
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+    expect(startContinuableEmbedded).not.toHaveBeenCalled();
+    expect(registryRows.rows.size).toBe(0);
   });
 
-  it("registers an early-started task in inflight until it ends, so cancel and stuck reaping reach it", async () => {
+  it("starts authorized tasks concurrently only after complete argument validation", async () => {
+    enable('["a/b"]');
     const { inflight } = await import("./controlPlane.js");
-    const { __resetEarlySpawnForTest } = await import("./parallel-early.js");
     let finish!: (r: Awaited<ReturnType<typeof runEmbeddedSubagent>>) => void;
-    vi.mocked(runEmbeddedSubagent).mockReturnValueOnce(new Promise((res) => {
-      finish = res;
-    }));
-    const { handlers } = loadSpawnHarness();
-    await handlers.message_update?.(
-      { type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 5, id: "call_q", toolName: "spawn_agent" } } as never,
-      ctx as never,
-    );
-    await handlers.message_update?.(
-      { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 5, delta: '{"tasks":["review server"],' } } as never,
-      ctx as never,
-    );
+    const done = new Promise<Awaited<ReturnType<typeof runEmbeddedSubagent>>>((resolve) => { finish = resolve; });
+    vi.mocked(runEmbeddedSubagent).mockImplementation(() => done);
+    const h = loadSpawnHarness();
+    const id = await streamTasks(h, ['{"tasks":[{"task":"review server","model":"a/b"}],']);
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+    const result = h.execute(id, { tasks: [{ task: "review server", model: "a/b" }, { task: "review desktop", model: "a/b" }] }, null, null, ctxM);
+    await vi.waitFor(() => expect(runEmbeddedSubagent).toHaveBeenCalledTimes(2));
     expect(inflight.has("sa_test")).toBe(true);
+    expect(vi.mocked(runEmbeddedSubagent).mock.calls.map((c) => c[0]?.task).sort()).toEqual(["review desktop", "review server"]);
     finish({ ok: true, output: "x", exitCode: 0, transcript: "", sessionPath: "/tmp/c.jsonl", stopReason: "completed" });
-    await vi.waitFor(() => expect(inflight.has("sa_test")).toBe(false));
-    __resetEarlySpawnForTest();
+    expect((await result).isError).toBeFalsy();
+    expect(inflight.has("sa_test")).toBe(false);
   });
 });
 
+// 并行健壮性：一个任务出错（这里用未知 agent 触发 agentLayer 抛错）不应 reject 整个 Promise.all
+// 而遗弃其它正在运行的兄弟任务——应就地记为该任务失败、其余照常跑完。
 describe("spawn_agent · parallel resilience (one failing task does not abort siblings)", () => {
   it("records the bad-agent task as failed and still completes the others", async () => {
     const r = await loadSpawnAgent()(
@@ -945,11 +1075,11 @@ describe("spawn_agent · delegation scope statement", () => {
 });
 
 describe("spawn_agent · model selection policy", () => {
-  it("disabled: schema has no model fields and no list tool", () => {
+  it("disabled: stable schema keeps optional fields and discovery, execution still enforces policy", () => {
     const h = loadSpawnHarness();
-    expect(h.schema).not.toHaveProperty("model");
-    expect(h.schema).not.toHaveProperty("thinking_level");
-    expect(h.toolNames).not.toContain("list_subagent_models");
+    expect(h.schema).toHaveProperty("model");
+    expect(h.schema).toHaveProperty("thinking_level");
+    expect(h.toolNames).toContain("list_subagent_models");
   });
 
   it("disabled: explicit model is rejected before spawning", async () => {
@@ -980,6 +1110,18 @@ describe("spawn_agent · model selection policy", () => {
     expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.model).toBe("x/y");
   });
 
+  it("ordinary self-selection can be enabled and revoked without rebuilding the tool schema", async () => {
+    const h = loadSpawnHarness();
+    enable();
+    const allowed = await h.execute("live-on", { task: "work", model: "a/b" }, null, null, ctxM);
+    expect(allowed.isError).not.toBe(true);
+    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(1);
+    vi.mocked(getConfig).mockImplementation((key) => key === "SUBAGENT_MAX_PER_SESSION" ? "0" : undefined);
+    const revoked = await h.execute("live-off", { task: "work", model: "a/b" }, null, null, ctxM);
+    expect(revoked.isError).toBe(true);
+    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(1);
+  });
+
   it("enabled: schema exposes model + thinking_level and registers the list tool", () => {
     enable();
     const h = loadSpawnHarness();
@@ -1004,11 +1146,12 @@ describe("spawn_agent · model selection policy", () => {
     expect(runEmbeddedSubagent).not.toHaveBeenCalled();
   });
 
-  it("enabled: thinking_level on a non-reasoning model is rejected", async () => {
+  it("enabled: thinking_level on a non-reasoning model is coerced to off and reported", async () => {
     enable();
     const r = await loadSpawnAgent()("t", { task: "x", model: "a/c", thinking_level: "medium" }, null, null, ctxM);
-    expect(r.isError).toBe(true);
-    expect(r.content[0].text).toContain("不支持思考档");
+    expect(r.isError).not.toBe(true);
+    expect(r.content[0].text).toContain("没有思考档 medium，已改为 off");
+    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.thinkingLevel).toBe("off");
   });
 
   it("enabled: one bad task in tasks[] aborts the whole batch", async () => {
@@ -1062,11 +1205,13 @@ describe("spawn_agent · model selection policy", () => {
     it("thinking_level is checked against the model the alias resolves to", async () => {
       enableWith({ SUBAGENT_MODEL_CHEAP: "a/c", SUBAGENT_MODEL_STRONG: "a/b" });
       const bad = await loadSpawnAgent()("t1", { task: "x", model: "cheap", thinking_level: "medium" }, null, null, ctxM);
-      expect(bad.isError).toBe(true);
-      expect(bad.content[0].text).toContain("不支持思考档");
+      expect(bad.isError).not.toBe(true);
+      expect(bad.content[0].text).toContain("没有思考档 medium，已改为 off");
       const good = await loadSpawnAgent()("t2", { task: "x", model: "strong", thinking_level: "high" }, null, null, ctxM);
       expect(good.isError).toBeFalsy();
-      expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.thinkingLevel).toBe("high");
+      const levels = vi.mocked(runEmbeddedSubagent).mock.calls.map(([child]) => child.thinkingLevel);
+      expect(levels).toEqual(["off", "high"]);
+      expect(good.content[0].text).toBe("embedded-out");
     });
   });
 });

@@ -3,6 +3,8 @@ import type { Job } from '../agentData/jobStore';
 import { TaskViewStore } from '../agentData/taskViewStore';
 import { taskFixture } from '../agentData/taskTestFixture';
 import { TaskViewService, type TaskViewServiceOptions } from './taskViewService';
+import { DEFAULT_KNOWLEDGE_BUDGETS } from '../../shared/knowledgeKernelContracts';
+import { projectKnowledgeSnapshot } from '../agentData/knowledgeKernel/projection';
 
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
@@ -116,4 +118,20 @@ describe('TaskViewService', () => {
     await expect(retry).rejects.toThrow('TASK_NOT_FOUND');
     expect(f.dispatch).not.toHaveBeenCalled();
   });
+});
+
+it('routes kernel repair through the coordinator and projects server capabilities',async()=>{
+ const metadata=()=>({version:1 as const,key:{workspaceInstanceId:'w',projectId:'p',portableProjectId:'p',branch:'main',language:'en',domain:'wiki' as const},intent:'generate' as const,revision:0,phase:'prepare' as const,pipelineConfigHash:'p',budgets:structuredClone(DEFAULT_KNOWLEDGE_BUDGETS),resumePolicy:'auto' as const,counts:{planned:0,prepared:0,failed:0,blocked:0,published:0}});
+ let f:ReturnType<typeof fixture>;const readKnowledgeSnapshot=vi.fn(async(job:Job)=>projectKnowledgeSnapshot(job));const actKnowledgeTask=vi.fn(async(job:Job)=>f.jobs.create({kind:job.kind,workspace:job.workspace,metadata:{...job.metadata,retryOf:job.id}}));
+ f=fixture({readKnowledgeSnapshot,actKnowledgeTask,previewKnowledgeRetry:async()=>({model:'model',modelIdentity:'identity',planToken:'plan'})});const job=f.jobs.create({kind:'repoWiki.generate',workspace:'/repo',metadata:{repoWiki:metadata()}});f.jobs.fail(job.id,'failure');const ref={source:'user' as const,id:job.id};
+ expect((await f.service.read(ref))?.knowledge?.run?.capabilities.repair).toBe(true);await f.service.retry(ref,{expectedModel:'model',expectedModelIdentity:'identity',expectedPlanToken:'plan'});expect(actKnowledgeTask).toHaveBeenCalledOnce();expect(f.dispatch).not.toHaveBeenCalled();
+});
+it('refuses kernel retry when the server snapshot disables repair',async()=>{
+ const key={workspaceInstanceId:'w',projectId:'p',portableProjectId:'p',branch:'main',language:'en',domain:'wiki' as const};const meta={version:1 as const,key,intent:'generate' as const,revision:0,phase:'publish' as const,pipelineConfigHash:'p',budgets:structuredClone(DEFAULT_KNOWLEDGE_BUDGETS),resumePolicy:'auto' as const,counts:{planned:0,prepared:0,failed:1,blocked:0,published:0},publication:{id:'p',claimId:'c',intentHash:'h',state:'claimed' as const}};
+ const action=vi.fn();const f=fixture({readKnowledgeSnapshot:async job=>projectKnowledgeSnapshot(job),actKnowledgeTask:action,previewKnowledgeRetry:async()=>({model:'model',modelIdentity:'identity',planToken:'plan'})});const job=f.jobs.create({kind:'repoWiki.generate',workspace:'/repo',metadata:{repoWiki:meta}});f.jobs.fail(job.id,'failure');await expect(f.service.retry({source:'user',id:job.id},{expectedModel:'model',expectedModelIdentity:'identity',expectedPlanToken:'plan'})).rejects.toThrow();expect(action).not.toHaveBeenCalled();
+});
+it('rejects same-name kernel retries when model identity or plan token changed',async()=>{
+ const meta={version:1 as const,key:{workspaceInstanceId:'w',projectId:'p',portableProjectId:'p',branch:'main',language:'en',domain:'wiki' as const},intent:'generate' as const,revision:0,phase:'prepare' as const,pipelineConfigHash:'p',budgets:structuredClone(DEFAULT_KNOWLEDGE_BUDGETS),resumePolicy:'auto' as const,counts:{planned:0,prepared:0,failed:0,blocked:0,published:0}};
+ const action=vi.fn();const f=fixture({readKnowledgeSnapshot:async job=>projectKnowledgeSnapshot(job),actKnowledgeTask:action,previewKnowledgeRetry:async()=>({model:'same name',modelIdentity:'new-identity',planToken:'new-plan'})});const job=f.jobs.create({kind:'repoWiki.generate',workspace:'/repo',metadata:{repoWiki:meta}});f.jobs.fail(job.id,'failure');const ref={source:'user' as const,id:job.id};
+ await expect(f.service.retry(ref,{expectedModel:'same name',expectedModelIdentity:'old-identity',expectedPlanToken:'new-plan'})).rejects.toThrow('MODEL_CHANGED');await expect(f.service.retry(ref,{expectedModel:'same name',expectedModelIdentity:'new-identity',expectedPlanToken:'old-plan'})).rejects.toThrow('PLAN_CHANGED');expect(action).not.toHaveBeenCalled();
 });

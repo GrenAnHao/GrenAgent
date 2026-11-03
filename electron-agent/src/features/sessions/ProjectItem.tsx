@@ -20,7 +20,7 @@ const styles = createStaticStyles(({ css }) => ({
     cursor: pointer;
 
     &:hover {
-      background: ${cssVar.colorFillTertiary};
+      background: var(--gren-sidebar-hover-bg, ${cssVar.colorFillTertiary});
     }
   `,
   car: css`
@@ -30,6 +30,8 @@ const styles = createStaticStyles(({ css }) => ({
   name: css`
     overflow: hidden;
     flex: 1;
+    font-size: var(--pi-font-size-secondary, 13px);
+    font-weight: 500;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,

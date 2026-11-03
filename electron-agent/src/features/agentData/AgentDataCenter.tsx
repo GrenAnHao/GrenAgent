@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Badge, Button, Tabs } from 'antd';
-import { BrainCircuit, BriefcaseBusiness, Code2, Database, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
-import { agentDataApi, type AgentDataStatus, type CodeGraphProject, type MemoryOverview, type ResourceNavigation, type WikiAssetDetail, type WorkbenchOverview } from '../../lib/agentData';
-import { MemoryPanel } from './MemoryPanel';
+import { BookOpen, BrainCircuit, BriefcaseBusiness, Code2, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
+import { agentDataApi, type AgentDataStatus, type CodeGraphProject, type ResourceNavigation, type WikiAssetDetail, type WorkbenchOverview } from '../../lib/agentData';
 import { WikiPanel } from './WikiPanel';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
 import { JobsPanel } from './JobsPanel';
@@ -12,63 +11,81 @@ import { AgentDataTaskProvider, useAgentDataTaskMonitor } from './AgentDataTaskP
 import { PageBanner } from './workbench/PageBanner';
 import type { AgentDataTab } from './agentDataViewTypes';
 import { styles } from './agentDataStyles';
+import { registerModuleLeaveGuard } from '../../stores/moduleStore';
+import { pi } from '../../lib/pi';
+import { applyOpenedProject } from '../../lib/pendingSession';
+import { useSessionStore } from '../../store';
+import { pathsEquivalent } from '../../lib/pathUtils';
+
+const RepoWikiWorkspace = lazy(() => import('../repoWiki/RepoWikiWorkspace').then((module) => ({ default: module.RepoWikiWorkspace })));
 
 interface AgentDataCenterProps {
   userId?: string;
   /** Only the first visit initializes project filters. */
   initialProject?: string;
   visible?: boolean;
-  onOpenSession?: (cwd: string, path: string) => void | Promise<void>;
+  /** Compatibility for callers of the former standalone module. */
+  requestedTab?: AgentDataTab;
 }
 
-const tabs: Array<{ id: AgentDataTab; label: string; Icon: typeof BrainCircuit }> = [
+const tabs: Array<{ id: AgentDataTab; label: string; description?: string; Icon: typeof BrainCircuit }> = [
   { id: 'overview', label: '概览', Icon: BrainCircuit },
-  { id: 'memory', label: 'Memory', Icon: Database },
-  { id: 'wiki', label: 'Wiki', Icon: FileText },
+  { id: 'repoWiki', label: 'Repo Wiki', description: '从项目源码生成、持续更新的项目文档', Icon: BookOpen },
+  { id: 'wiki', label: '资料 Wiki', description: '导入材料并整理为知识库', Icon: FileText },
   { id: 'code', label: '代码索引', Icon: Code2 },
   { id: 'jobs', label: '任务', Icon: BriefcaseBusiness },
   { id: 'audit', label: '审计诊断', Icon: ShieldCheck },
 ];
 
-export function AgentDataCenter({ userId, initialProject, visible = true, onOpenSession }: AgentDataCenterProps) {
-  const [tab, setTab] = useState<AgentDataTab>('overview');
+export function AgentDataCenter({ userId, initialProject, visible = true, requestedTab }: AgentDataCenterProps) {
+  const [tab, setTab] = useState<AgentDataTab>(requestedTab ?? 'overview');
+  useEffect(() => { if (requestedTab) setTab(requestedTab); }, [requestedTab]);
   const [project] = useState(initialProject);
   return <AgentDataTaskProvider key={userId ?? 'local'} visible={visible} activeView={tab}>
-    <AgentDataContent userId={userId} initialProject={project} visible={visible} tab={tab} onSelectTab={setTab} onOpenSession={onOpenSession} />
+    <AgentDataContent userId={userId} initialProject={project} visible={visible} tab={tab} onSelectTab={setTab} />
   </AgentDataTaskProvider>;
 }
 
-function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, onOpenSession }: AgentDataCenterProps & { visible: boolean; tab: AgentDataTab; onSelectTab(tab: AgentDataTab): void }) {
+function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab }: AgentDataCenterProps & { visible: boolean; tab: AgentDataTab; onSelectTab(tab: AgentDataTab): void }) {
   const monitor = useAgentDataTaskMonitor();
   const [visited, setVisited] = useState<Set<AgentDataTab>>(() => new Set([tab]));
+  useEffect(() => { setVisited((current) => current.has(tab) ? current : new Set([...current, tab])); }, [tab]);
   const [status, setStatus] = useState<ResourceState<AgentDataStatus>>({ loading: true });
-  const [memory, setMemory] = useState<ResourceState<MemoryOverview>>({ loading: true });
   const [libraries, setLibraries] = useState<ResourceState<WikiAssetDetail[]>>({ loading: true });
   const [codeProjects, setCodeProjects] = useState<ResourceState<CodeGraphProject[]>>({ loading: true });
   const [workbench, setWorkbench] = useState<ResourceState<WorkbenchOverview>>({ loading: true });
   const [navigation, setNavigation] = useState<{ target: ResourceNavigation; request: number }>();
+  const [navigationError, setNavigationError] = useState<string>();
   const [refreshToken, setRefreshToken] = useState(0);
   const requestEpoch = useRef(0);
+  const repoWikiGuard = useRef<(() => boolean) | undefined>(undefined);
+  const registerRepoWikiGuard = useCallback((guard: () => boolean) => {
+    repoWikiGuard.current = guard;
+    return () => { if (repoWikiGuard.current === guard) repoWikiGuard.current = undefined; };
+  }, []);
+  useEffect(() => {
+    const guard = () => tab !== 'repoWiki' || repoWikiGuard.current?.() !== false;
+    const release = registerModuleLeaveGuard('agentData', guard);
+    const releaseLegacy = registerModuleLeaveGuard('repoWiki', guard);
+    return () => { release(); releaseLegacy(); };
+  }, [tab]);
 
   const refreshResources = useCallback(async () => {
     if (!visible) return;
     const epoch = ++requestEpoch.current;
     setStatus((current) => ({ ...current, loading: true }));
-    setMemory((current) => ({ ...current, loading: true }));
     setLibraries((current) => ({ ...current, loading: true }));
     setCodeProjects((current) => ({ ...current, loading: true }));
     setWorkbench((current) => ({ ...current, loading: true }));
     const settle = <T,>(run: () => Promise<T> | undefined) => { try { return Promise.resolve(run()); } catch (cause) { return Promise.reject(cause); } };
-    const [statusResult, memoryResult, librariesResult, aggregateResult, codeResult] = await Promise.allSettled([
+    const [statusResult, librariesResult, aggregateResult, codeResult] = await Promise.allSettled([
       settle(() => agentDataApi.status()),
-      settle(() => userId ? agentDataApi.memory.overview({ userId, includeOtherProjects: true }) : undefined),
       settle(() => agentDataApi.wiki.list()),
       settle(() => agentDataApi.overview({ userId: userId ?? 'local' })),
       settle(() => agentDataApi.code.projects()),
     ]);
     if (epoch !== requestEpoch.current) return;
     setStatus((current) => applyResult(current, statusResult));
-    setMemory((current) => applyResult(current, memoryResult));
     setLibraries((current) => applyResult(current, librariesResult));
     setWorkbench((current) => applyResult(current, aggregateResult));
     setCodeProjects((current) => applyResult(current, codeResult));
@@ -80,6 +97,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   }, [refreshResources, monitor.watchedTaskVersion]);
 
   function selectTab(next: AgentDataTab): void {
+    if (next !== tab && tab === 'repoWiki' && repoWikiGuard.current?.() === false) return;
     setVisited((current) => new Set([...current, next]));
     onSelectTab(next);
     if (next === 'overview') void refreshResources();
@@ -90,6 +108,13 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   }
 
   function navigate(target: ResourceNavigation): void {
+    setNavigationError(undefined);
+    if (target.view === 'repoWiki' && target.workspace && !pathsEquivalent(useSessionStore.getState().activeWorkspace, target.workspace)) {
+      const origin = useSessionStore.getState().activeWorkspace;
+      void pi.openWorkspace(target.workspace).then((result) => {
+        if (useSessionStore.getState().activeWorkspace === origin) applyOpenedProject(target.workspace!, result.sessionFile);
+      }).catch((error) => setNavigationError(error instanceof Error ? error.message : String(error)));
+    }
     setNavigation((previous) => ({ target, request: (previous?.request ?? 0) + 1 }));
     if (target.view === 'jobs' && target.task) monitor.track(target.task);
     selectTab(target.view);
@@ -98,9 +123,10 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   function panelContent(id: AgentDataTab): ReactNode {
     switch (id) {
       case 'overview':
-        return <OverviewPanel memory={memory} workbench={workbench} libraries={libraries} codeProjects={codeProjects} tasks={monitor.tasks} tasksLoaded={monitor.loaded} tasksError={monitor.error} onNavigate={selectTab} onOpenResource={navigate} />;
-      case 'memory':
-        return <MemoryPanel userId={userId} initialProject={initialProject} visible={visible && tab === 'memory'} refreshToken={refreshToken} onOpenSession={onOpenSession} navigation={navigation?.target.view === 'memory' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'memory' ? navigation.request : undefined} />;
+        return <OverviewPanel workbench={workbench} libraries={libraries} codeProjects={codeProjects} tasks={monitor.tasks} tasksLoaded={monitor.loaded} tasksError={monitor.error} onNavigate={selectTab} onOpenResource={navigate} />;
+      case 'repoWiki':
+        return <Suspense fallback={null}><RepoWikiWorkspace integrated tasks={monitor.tasks} onOpenTasks={() => selectTab('jobs')} visible={visible && tab === 'repoWiki'} registerNavigationGuard={registerRepoWikiGuard} onTaskCreated={(id) => monitor.track({ source: 'user', id })}
+          navigation={navigation?.target.view === 'repoWiki' ? { workspace: navigation.target.workspace ?? '', language: navigation.target.language, request: navigation.request } : undefined} /></Suspense>;
       case 'wiki':
         return <WikiPanel initialProject={initialProject} visible={visible && tab === 'wiki'} refreshToken={refreshToken} onOpenTask={openTask} navigation={navigation?.target.view === 'wiki' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'wiki' ? navigation.request : undefined} />;
       case 'code':
@@ -115,7 +141,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
     }
   }
 
-  const refreshing = status.loading || memory.loading || workbench.loading || libraries.loading || codeProjects.loading;
+  const refreshing = status.loading || workbench.loading || libraries.loading || codeProjects.loading;
   const runtimeState = status.error ? 'error' : status.data?.state ?? 'unknown';
   let runtimeLabel = status.loading ? '连接中' : '未获取';
   if (status.data) runtimeLabel = status.data.state === 'closed' ? '已关闭' : `Runtime v${status.data.version}`;
@@ -131,6 +157,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   };
 
   return <section className={styles.root} data-testid="agent-data-center">
+    {navigationError ? <PageBanner type="error" items={[{ source: '打开项目', message: navigationError }]} /> : null}
     <Tabs
       id="agent-data"
       activeKey={tab}
@@ -143,11 +170,11 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
           <Button type="text" aria-label="刷新 Agent 数据" title="刷新 Agent 数据" icon={<RefreshCw size={15} />} disabled={!visible || refreshing} onClick={refreshAll} />
         </div>,
       }}
-      items={tabs.map(({ id, label, Icon }) => ({
+      items={tabs.map(({ id, label, description, Icon }) => ({
         key: id,
-        label: <span className={styles.tabLabel} title={label}><Icon size={14} aria-hidden="true" /><span data-tab-text>{label}</span>{badge(id)}</span>,
+        label: <span className={styles.tabLabel} title={description ?? label}><Icon size={14} aria-hidden="true" /><span data-tab-text>{label}</span>{badge(id)}</span>,
         forceRender: visited.has(id),
-        children: <div className={styles.panel}>
+        children: <div className={id === 'repoWiki' ? styles.workspacePanel : styles.panel}>
           {id === tab && status.error ? <PageBanner type="error" items={[{ source: '运行时', message: status.error }]} /> : null}
           {visited.has(id) ? panelContent(id) : null}
         </div>,

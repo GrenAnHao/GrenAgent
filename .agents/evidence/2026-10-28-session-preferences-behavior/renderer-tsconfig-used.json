@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "composite": false, "types": ["vite/client", "node"] },
+  "include": [
+    "src/App.tsx",
+    "src/store/session.ts",
+    "src/lib/lastOpen.ts",
+    "src/lib/pendingSession.ts",
+    "src/stores/chatDraftStore.ts",
+    "src/features/chat/ChatInput.tsx",
+    "src/features/chat/ChatView.tsx",
+    "src/features/chat/input/composerFiles.ts",
+    "src/features/chat/input/composerFilesStorage.ts",
+    "ui-harness/scenarios/session-preferences.tsx"
+  ]
+}

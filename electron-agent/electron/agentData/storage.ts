@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
+import { migrateKnowledgeKernel } from './knowledgeKernel/store';
 export class AgentDataStorage {
   readonly db: DatabaseSync;
 
@@ -89,7 +90,9 @@ export class AgentDataStorage {
     );
     CREATE INDEX IF NOT EXISTS tool_audit_session ON tool_audit(session_id, created_at);
     CREATE INDEX IF NOT EXISTS tool_audit_pending ON tool_audit(resolution, created_at) WHERE resolution = 'queued';`);
-    if (this.schemaVersion() < 4) this.db.prepare('UPDATE schema_version SET version = ?').run(4);
+    this.removeRetiredMemory();
+    migrateKnowledgeKernel(this.db);
+    if (this.schemaVersion() < 7) this.db.prepare('UPDATE schema_version SET version = ?').run(7);
   }
 
   schemaVersion(): number {
@@ -98,6 +101,42 @@ export class AgentDataStorage {
   }
 
   close(): void { this.db.close(); }
+
+  private removeRetiredMemory(): void {
+    const legacyTables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('memories','memory_captures','memory_layer_schedules')").all();
+    this.db.exec('BEGIN IMMEDIATE');
+    let removedRows = 0;
+    try {
+      this.db.exec('DROP TABLE IF EXISTS memories; DROP TABLE IF EXISTS memory_captures; DROP TABLE IF EXISTS memory_layer_schedules;');
+      removedRows += Number(this.db.prepare("DELETE FROM service_tasks WHERE kind GLOB 'memory_*'").run().changes);
+      removedRows += Number(this.db.prepare("DELETE FROM plugin_state WHERE id='memory'").run().changes);
+      const tables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((table) => table.name));
+      const jobMetadata = tables.has('agent_jobs') && this.db.prepare('PRAGMA table_info(agent_jobs)').all().some((column) => column.name === 'metadata');
+      const retiredJob = "kind GLOB 'memory_*'" + (jobMetadata ? " OR json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,'$.target.type')='memory'" : '');
+      if (tables.has('agent_config')) removedRows += Number(this.db.prepare("DELETE FROM agent_config WHERE module='memory'").run().changes);
+      if (tables.has('agent_audit')) {
+        const detail = "CASE WHEN json_valid(detail) THEN detail ELSE '{}' END";
+        const memoryJob = tables.has('agent_jobs') ? `OR (action GLOB 'job.*' AND json_extract(${detail},'$.id') IN (SELECT id FROM agent_jobs WHERE ${retiredJob}))` : '';
+        removedRows += Number(this.db.prepare(`DELETE FROM agent_audit WHERE action GLOB 'memory.*'
+          OR (action='config.update' AND json_extract(${detail},'$.module')='memory')
+          OR json_extract(${detail},'$.kind') GLOB 'memory_*'
+          OR json_extract(${detail},'$.resource.type')='memory'
+          OR json_extract(${detail},'$.target.type')='memory'
+          OR json_extract(${detail},'$.metadata.resource.type')='memory'
+          OR json_extract(${detail},'$.metadata.target.type')='memory' ${memoryJob}`).run().changes);
+      }
+      if (tables.has('agent_jobs')) removedRows += Number(this.db.prepare(`DELETE FROM agent_jobs WHERE ${retiredJob}`).run().changes);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+    // Dropping captured transcripts otherwise leaves their pages in the shared file.
+    if (legacyTables.length || removedRows) {
+      this.db.exec('VACUUM');
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    }
+  }
 
   private ensureColumn(table: string, column: string, definition: string): void {
     const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;

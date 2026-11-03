@@ -15,7 +15,7 @@ function messageText(message: unknown): string {
     .join('');
 }
 
-/** 旧 oneshot / memory_extract 短调用会话：侧栏不展示。 */
+/** 旧 oneshot / content_classify 短调用会话：侧栏不展示。 */
 export function isSystemWorkerSessionLines(lines: string[]): boolean {
   for (const line of lines) {
     if (!line.trim()) continue;

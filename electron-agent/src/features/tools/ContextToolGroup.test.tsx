@@ -1,13 +1,21 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { ContextToolGroup } from './ContextToolGroup';
 import type { ToolSegment } from '../chat/groupMessages';
 import { AgentStoreContext } from '../../stores/AgentStoreContext';
+import { useSessionStore } from '../../store/session';
+import { resetSessionViewStateForTests } from '../../stores/sessionViewStateStore';
 
 afterEach(cleanup);
 
-const wrap = (ui: React.ReactElement) =>
+beforeEach(() => {
+  localStorage.clear();
+  resetSessionViewStateForTests();
+  useSessionStore.setState({ activeSessionPath: null, draftConversationCwd: null, draftConversationId: null });
+});
+
+const wrap = (ui: React.ReactElement, sessionPath: string | null = '/ws/.pi/a.jsonl') =>
   render(
     <ThemeProvider themeMode="dark">
       <AgentStoreContext.Provider
@@ -17,6 +25,8 @@ const wrap = (ui: React.ReactElement) =>
           workspaceReady: true,
           setWorkspaceReady: () => {},
           appBooted: true,
+          sessionPath,
+          draftId: null,
         }}
       >
         {ui}
@@ -36,6 +46,45 @@ const tool = (
   args: {},
   result: {},
   status,
+});
+
+describe('ContextToolGroup 展开状态', { timeout: 30_000 }, () => {
+  const group = () => <ContextToolGroup tools={[tool('same-call', 'read'), tool('b', 'ls')]} />;
+  const isOpen = () => document.querySelector('.accordion-content') as HTMLElement;
+
+  it('会话 A 展开：切到 B 收起，回到 A 恢复', () => {
+    const first = wrap(group());
+    expect(isOpen().style.display).toBe('none');
+    fireEvent.click(screen.getByText(/已收集上下文/));
+    expect(isOpen().style.display).toBe('block');
+    first.unmount();
+
+    const inB = wrap(group(), '/ws/.pi/b.jsonl');
+    expect(isOpen().style.display).toBe('none');
+    inB.unmount();
+
+    wrap(group());
+    expect(isOpen().style.display).toBe('block');
+  });
+
+  it('卸载重挂后从会话视图状态恢复', () => {
+    const first = wrap(group());
+    fireEvent.click(screen.getByText(/已收集上下文/));
+    first.unmount();
+    wrap(group());
+    expect(isOpen().style.display).toBe('block');
+  });
+
+  it('没有会话身份时不写全局 key（不因同 workspace 共享）', () => {
+    const first = wrap(group(), null);
+    fireEvent.click(screen.getByText(/已收集上下文/));
+    expect(isOpen().style.display).toBe('block');
+    first.unmount();
+    // 另一份无身份视图不继承。
+    wrap(group(), null);
+    expect(isOpen().style.display).toBe('none');
+    expect(localStorage.getItem('pi-session-view-state')).toBeNull();
+  });
 });
 
 describe('ContextToolGroup', { timeout: 30_000 }, () => {

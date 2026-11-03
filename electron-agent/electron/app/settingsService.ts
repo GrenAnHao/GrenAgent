@@ -25,12 +25,24 @@ export function agentModeConfigKey(workspace: string): string {
   return `AGENT_MODE:${workspaceConfigSuffix(workspace)}`;
 }
 
+/**
+ * 项目级的模型 / 思考默认（新建会话的初始快照）。模式与审查档沿用 AGENT_MODE / APPROVAL_POLICY，
+ * 模型和思考档与它们同一套规范化 workspace 键，主机端没有应用级 defaultSessionModel，由前端回退合并。
+ */
+export function sessionDefaultsConfigKey(workspace: string): string {
+  return `SESSION_DEFAULTS:${workspaceConfigSuffix(workspace)}`;
+}
+
+export function isSessionDefaultsConfigKey(key: string): boolean {
+  return key.startsWith('SESSION_DEFAULTS:');
+}
+
 export function isAgentModeConfigKey(key: string): boolean {
   return key === 'AGENT_MODE' || key.startsWith('AGENT_MODE:');
 }
 
 export function isPreservedRuntimeConfigKey(key: string): boolean {
-  return isApprovalPolicyConfigKey(key) || isContextExclusionConfigKey(key) || isAgentModeConfigKey(key);
+  return isApprovalPolicyConfigKey(key) || isContextExclusionConfigKey(key) || isAgentModeConfigKey(key) || isSessionDefaultsConfigKey(key);
 }
 
 const runtimeFileWrites = new Map<string, Promise<void>>();
@@ -141,7 +153,7 @@ function runtimeSettings(settings: Record<string, string>): Record<string, strin
 }
 
 function isSettings(value: unknown): value is Record<string, string> {
-  return Boolean(value)
+  return value !== null
     && typeof value === 'object'
     && !Array.isArray(value)
     && Object.values(value).every((item) => typeof item === 'string');

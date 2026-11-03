@@ -10,11 +10,15 @@ import { Worker } from 'node:worker_threads';
 import { RpcPeer, toWireError, type WireMessage } from '../../agentProcess/rpcPeer';
 import { CodeGraphService } from './codeGraphService';
 import { CodeGraphThreads, type WorkerHandle } from './codeGraphThreads';
-import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, CODEGRAPH_SYNC_EVENT_CHANNEL, type CodeGraphDiagSample, type CodeGraphProgressEvent, type CodeGraphSyncEvent } from './hostContract';
+import { applyHostLimits, rssLimitBytes } from './hostLimits';
+import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, CODEGRAPH_STATE_CHANNEL, CODEGRAPH_SYNC_EVENT_CHANNEL, type CodeGraphDiagSample, type CodeGraphProgressEvent, type CodeGraphStateEvent, type CodeGraphSyncEvent } from './hostContract';
 import { createCodeGraphHostMethods } from './hostMethods';
 
 const DISCONNECT_SHUTDOWN_MS = 10_000;
-const DIAG_INTERVAL_MS = 10_000;
+const GUARD_INTERVAL_MS = 5_000;
+const READ_HEAP_MB = 512;
+
+applyHostLimits();
 
 // 本进程已经按 Node 模式起来；SDK 只开 worker 线程，不再起子进程，但仍不把这个变量传下去。
 delete process.env.ELECTRON_RUN_AS_NODE;
@@ -34,10 +38,17 @@ process.on('message', (message) => peer.receive(message));
 const workerEntry = process.env.CODEGRAPH_WORKER_ENTRY;
 const threaded = process.env.GREN_CODEGRAPH_THREADS !== 'off';
 if (threaded && !workerEntry) throw new Error('CODEGRAPH_WORKER_ENTRY is not set');
+const readHeap = Number(process.env.GREN_CODEGRAPH_READ_HEAP_MB ?? READ_HEAP_MB);
 const service = threaded
   ? new CodeGraphThreads({
-    createWorker: (role) => new Worker(workerEntry!, { workerData: { role } }) as unknown as WorkerHandle,
+    createWorker: (role) => new Worker(workerEntry!, {
+      workerData: { role },
+      resourceLimits: { maxOldGenerationSizeMb: role === 'read' ? (Number.isFinite(readHeap) && readHeap > 0 ? readHeap : READ_HEAP_MB) : 2048 },
+    }) as unknown as WorkerHandle,
+    statePath: process.env.CODEGRAPH_STATE_PATH,
     onSyncEvent: (event) => peer.emit(CODEGRAPH_SYNC_EVENT_CHANNEL, event satisfies CodeGraphSyncEvent),
+    onState: (event) => { try { peer.emit(CODEGRAPH_STATE_CHANNEL, event satisfies CodeGraphStateEvent); } catch { /* 父进程已断开 */ } },
+    onStall: () => { console.error('[codegraph-host] index write stalled, exiting'); process.exit(1); },
   })
   : Object.assign(new CodeGraphService({ listWorkspaces: () => [] }), { syncing: 0 });
 const tracker = { active: new Set<string>() };
@@ -73,15 +84,23 @@ function startDiagSampling(): void {
   const lag = monitorEventLoopDelay({ resolution: 20 });
   lag.enable();
   const mb = (bytes: number) => Math.round((bytes / 1048576) * 10) / 10;
+  const rssLimit = rssLimitBytes(process.env.GREN_CODEGRAPH_MAX_RSS_MB);
+  let ticks = 0;
   const timer = setInterval(() => {
     const memory = process.memoryUsage();
+    if (rssLimit > 0 && memory.rss > rssLimit) {
+      console.error(`[codegraph-host] rss ${memory.rss} exceeds ${rssLimit} bytes, exiting`);
+      process.exit(1);
+    }
+    ticks += 1;
+    if (ticks % 2 !== 0) return;
     peer.emit(CODEGRAPH_DIAG_CHANNEL, {
       memory: { rss: mb(memory.rss), heapUsed: mb(memory.heapUsed), heapTotal: mb(memory.heapTotal), heapLimit: mb(getHeapStatistics().heap_size_limit) },
       lag: { maxMs: Math.round(lag.max / 1e6), p99Ms: Math.round(lag.percentile(99) / 1e6), meanMs: Math.round(lag.mean / 1e6) },
       syncing: Math.max(tracker.active.size, service.syncing),
     } satisfies CodeGraphDiagSample);
     lag.reset();
-  }, DIAG_INTERVAL_MS);
+  }, GUARD_INTERVAL_MS);
   timer.unref();
 }
 

@@ -1,0 +1,92 @@
+[
+  {
+    "scenario": "partial-repair-controls",
+    "httpPeak": 1,
+    "stagePeaks": {
+      "catalogue": 2,
+      "generate": 2
+    },
+    "acknowledgements": 47,
+    "abortedHTTP": 2
+  },
+  {
+    "scenario": "cards",
+    "httpPeak": 1,
+    "stagePeaks": {
+      "catalogue": 0,
+      "generate": 2
+    },
+    "acknowledgements": 7,
+    "abortedHTTP": 0
+  },
+  {
+    "scenario": "parallel-refill",
+    "httpPeak": 2,
+    "stagePeaks": {
+      "catalogue": 3,
+      "generate": 3
+    },
+    "acknowledgements": 23,
+    "abortedHTTP": 0
+  },
+  {
+    "scenario": "parallel-global-1-cancel",
+    "httpPeak": 1,
+    "stagePeaks": {
+      "catalogue": 3,
+      "generate": 3
+    },
+    "acknowledgements": 14,
+    "abortedHTTP": 1
+  },
+  {
+    "scenario": "parallel-global-2-cancel",
+    "httpPeak": 2,
+    "stagePeaks": {
+      "catalogue": 3,
+      "generate": 3
+    },
+    "acknowledgements": 14,
+    "abortedHTTP": 2
+  },
+  {
+    "scenario": "legacy-v1-recovery",
+    "httpPeak": 1,
+    "stagePeaks": {
+      "catalogue": 1,
+      "generate": 1
+    },
+    "acknowledgements": 8,
+    "abortedHTTP": 0
+  },
+  {
+    "scenario": "parallel-catalogue",
+    "httpPeak": 2,
+    "stagePeaks": {
+      "catalogue": 3,
+      "generate": 3
+    },
+    "acknowledgements": 23,
+    "abortedHTTP": 0
+  },
+  {
+    "scenario": "resume-incremental",
+    "httpPeak": 1,
+    "stagePeaks": {
+      "catalogue": 2,
+      "generate": 2
+    },
+    "acknowledgements": 22,
+    "abortedHTTP": 1
+  },
+  {
+    "scenario": "parallel-crash-recovery",
+    "httpPeak": 2,
+    "stagePeaks": {
+      "catalogue": 3,
+      "generate": 3
+    },
+    "acknowledgements": 23,
+    "abortedHTTP": 2
+  }
+]

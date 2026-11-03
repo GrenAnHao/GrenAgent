@@ -1,11 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Channel, getCurrentWebview, invoke, listen, openDirectory } from './runtime';
+import { Channel, getCurrentWebview, invoke, listen, openDirectory, openFile } from './runtime';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('Electron runtime bridge', () => {
+  it('opens a filtered file and preserves cancellation from preload', async () => {
+    const pickFile = vi.fn().mockResolvedValueOnce('C:/skills/example.zip').mockResolvedValueOnce(null);
+    vi.stubGlobal('window', { gren: { pickFile } });
+    await expect(openFile({ filters: [{ name: 'Zip', extensions: ['zip'] }] })).resolves.toBe('C:/skills/example.zip');
+    expect(pickFile).toHaveBeenCalledWith({ filters: [{ name: 'Zip', extensions: ['zip'] }] });
+    await expect(openFile()).resolves.toBeNull();
+  });
+
+  it('rejects a missing file picker instead of selecting a directory', async () => {
+    const pickDirectory = vi.fn().mockResolvedValue('C:/skills');
+    vi.stubGlobal('window', { gren: { pickDirectory } });
+    await expect(openFile()).rejects.toThrow('不支持文件选择');
+    expect(pickDirectory).not.toHaveBeenCalled();
+  });
+
   it('forwards invoke and event subscriptions to preload', async () => {
     const unlisten = vi.fn();
     const subscribe = vi.fn(async (_event: string, handler: (event: { payload: string }) => void) => {

@@ -42,6 +42,10 @@ output/
 !/.agents/skills/
 /.codebuddy/
 
+# Local scratch: Electron userdata caches, brand build temp, boot previews
+/tmp/
+/electron-agent/tmp/
+
 # Debug + throwaway run artifacts
 /.playwright-cli/
 /.playwright-mcp/

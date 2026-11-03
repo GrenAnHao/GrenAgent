@@ -22,6 +22,8 @@ Status: implemented
 
 ## Decision
 
+[AgentData 长期记忆裁撤](../simplification/2026-10-31-remove-agentdata-memory.md)不改变本篇的 session-memory 当前分支状态与压缩摘要职责。
+
 ### 旧工具结果默认按压力裁并冷时定案；压缩时一次状态抽取兼作摘要
 
 `COMPACTION_POLICY_PRUNE` 未设置时按压力裁。缓存冷时（距最后一条助手消息与最后一次 `cache_warm` 保温中较晚的那个已超过 `COMPACTION_POLICY_PRUNE_TTL_MS`，默认 5 分钟），按未裁占用定一份 `toolCallId → soft | replace` 的计划；热时原样重放这份计划，压缩或换会话后清空。读 `SKILL.md` 的结果不参与压力裁剪，但超过熔断阈值时仍会被熔断。

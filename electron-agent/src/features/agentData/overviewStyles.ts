@@ -29,5 +29,4 @@ export const overviewStyles = createStaticStyles(({ css }) => ({
     small { display: block; margin-block-start: 2px; color: ${cssVar.colorTextTertiary}; font-size: 11px; }
   `,
   rowMain: css`flex: 1; min-width: 0; overflow-wrap: anywhere;`,
-  clamp: css`display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;`,
 }));

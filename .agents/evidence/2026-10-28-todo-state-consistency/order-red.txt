@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:13516) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/stores/todoConsistency.test.ts (10 tests | 1 failed | 9 skipped) 14ms
+     × 完整结果修正遗漏 start 加乱序回执造成的清单顺序 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > 完整结果修正遗漏 start 加乱序回执造成的清单顺序
+AssertionError: expected [ 'in_progress' ] to deeply equal [ 'completed' ]
+
+- Expected
++ Received
+
+  [
+-   "completed",
++   "in_progress",
+  ]
+
+ ❯ src/stores/todoConsistency.test.ts:77:38
+     75|       type: 'agent_end', messages: [result('old', 'in_progress'), resu…
+     76|     } as AgentEvent);
+     77|     expect(statuses(state.messages)).toEqual(['completed']);
+       |                                      ^
+     78|     expect(state.messages.filter((m) => m.kind === 'tool').map((m) => …
+     79|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  14:51:53
+   Duration  18.40s (transform 1.10s, setup 10.32s, import 1.20s, tests 14ms, environment 5.64s)
+

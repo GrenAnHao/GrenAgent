@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentDataRuntime } from './runtime';
 import { AgentDataClient } from './client';
-import type { WorkbenchOverview } from './operationsContracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,48 +27,12 @@ describe('AgentDataRuntime', () => {
     expect(runtime.isClosed()).toBe(true);
   });
 
-  it('exposes durable memory capture and commit RPCs', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-capture-'));
-    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
-    const endpoint = await runtime.start();
-    const client = new AgentDataClient(endpoint);
-    const params = { userId: 'u', workspace: '/a', sessionId: 's', source: 'session:s', transcript: 'user: one', fingerprint: 'fp1' };
-    await expect(client.request('memory.capture', params)).resolves.toMatchObject({ changed: true, delta: 'user: one' });
-    await expect(client.request('memory.commitCapture', params)).resolves.toBeNull();
-    await expect(client.request('memory.capture', params)).resolves.toMatchObject({ changed: false, delta: '' });
-    await client.close();
-    runtime.close();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('routes memory extraction through the configured system task executor', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-worker-'));
-    const runtime = new AgentDataRuntime({
-      dataPath: join(dir, 'data.db'),
-      executeServiceTask: async (task) => {
-        if (task.kind === 'memory_scene') return { scenes: [] };
-        if (task.kind === 'memory_persona') return { content: '# Team Operating Doctrine' };
-        return { l1: [{ content: 'prefer dark mode', type: 'work_fact', priority: 80 }] };
-      },
-    });
-    const client = new AgentDataClient(await runtime.start());
-    const params = { userId: 'u', workspace: '/a', projectId: '/a', sessionId: 's', source: 'session:s', transcript: 'user: dark mode', fingerprint: 'fp1' };
-
-    const capture = await client.request<{ taskId: string }>('memory.capture', params);
-    await expect.poll(() => client.request<Array<{ content: string }>>('memory.search', { ...params, query: 'dark', limit: 10 })).toEqual([
-      expect.objectContaining({ content: expect.stringContaining('dark') }),
-    ]);
-    expect(capture.taskId).toBeTruthy();
-
-    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
-  });
-
   it('returns VERSION_CONFLICT for stale admin config writes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-admin-'));
     const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
     const client = new AgentDataClient(await runtime.start());
-    await expect(client.request('admin.config.update', { module: 'memory', value: { enabled: true }, version: 0 })).resolves.toMatchObject({ version: 1 });
-    await expect(client.request('admin.config.update', { module: 'memory', value: { enabled: false }, version: 0 })).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+    await expect(client.request('admin.config.update', { module: 'codeRetrieval', value: { enabled: true }, version: 0 })).resolves.toMatchObject({ version: 1 });
+    await expect(client.request('admin.config.update', { module: 'codeRetrieval', value: { enabled: false }, version: 0 })).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });
 
@@ -77,49 +40,13 @@ describe('AgentDataRuntime', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-overview-'));
     const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
     const client = new AgentDataClient(await runtime.start());
-    const scope = { userId: 'u', workspace: '/workspace' };
-
-    await expect(client.request('memory.admin.overview', scope)).resolves.toMatchObject({
-      total: 0,
-      byLevel: { L0: 0, L1: 0, L2: 0, L3: 0 },
-    });
-    await client.request('memory.upsert', { ...scope, level: 1, content: 'a' });
-    await client.request('memory.upsert', { ...scope, level: 3, content: 'b' });
-    await expect(client.request('memory.admin.overview', scope)).resolves.toMatchObject({
-      total: 2,
-      byLevel: { L0: 0, L1: 1, L2: 0, L3: 1 },
-    });
-
-    await expect(runtime.requestAdmin('wiki.admin.overview', { workspace: '/workspace' })).resolves.toMatchObject({
-      pages: 0,
-      latestUpdatedAt: null,
-    });
-    await runtime.requestAdmin('wiki.replace', { workspace: '/workspace', page: 'guide', title: 'Guide', content: '# Guide\nbody' });
-    await expect(runtime.requestAdmin('wiki.admin.overview', { workspace: '/workspace' })).resolves.toMatchObject({
-      pages: 1,
-      latestUpdatedAt: expect.any(Number),
-    });
+    await runtime.requestAdmin('wiki.create', { name: 'Retained Wiki' });
+    await expect(runtime.requestAdmin('wiki.list')).resolves.toEqual([expect.objectContaining({ name: 'Retained Wiki' })]);
 
     await expect(client.request('codeRetrieval.admin.status')).resolves.toMatchObject({
       connected: false,
       indexed: false,
     });
-    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('answers memory overview and search globally when no workspace is supplied', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-global-'));
-    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
-    const client = new AgentDataClient(await runtime.start());
-
-    await client.request('memory.upsert', { userId: 'u', workspace: '/repo-a', level: 1, content: 'alpha fact' });
-    await client.request('memory.upsert', { userId: 'u', workspace: '/repo-b', level: 1, content: 'beta fact' });
-
-    await expect(client.request('memory.admin.overview', { userId: 'u', includeOtherProjects: true }))
-      .resolves.toMatchObject({ total: 2, byLevel: { L0: 0, L1: 2, L2: 0, L3: 0 } });
-    await expect(client.request<Array<{ content: string }>>('memory.search', { userId: 'u', includeOtherProjects: true, query: 'fact', limit: 10 }))
-      .resolves.toHaveLength(2);
-
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });
 
@@ -144,7 +71,7 @@ describe('AgentDataRuntime', () => {
     const runtime = new AgentDataRuntime({
       dataPath: join(dir, 'data.db'),
       jobRunners: {
-        'wiki.sync': {
+        'codegraph.sync': {
           run: async (id, workspace) => {
             started.push({ id, workspace });
             await gate;
@@ -155,14 +82,14 @@ describe('AgentDataRuntime', () => {
     });
     const client = new AgentDataClient(await runtime.start());
 
-    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
+    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'codegraph.sync', workspace: '/repo' });
     // create 必须 fire-and-forget：返回时 gate 还没 resolve，证明没有 await run。
     expect(released).toBe(false);
     expect(started).toEqual([{ id: job.id, workspace: '/repo' }]);
     await expect(client.request('admin.jobs.get', { id: job.id })).resolves.toMatchObject({ state: 'pending' });
 
     // 同 workspace 同 kind 并发创建被拒绝（避免两个同步进程写同一份索引）。
-    await expect(client.request('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' })).rejects.toMatchObject({ code: 'JOB_ALREADY_RUNNING' });
+    await expect(client.request('admin.jobs.create', { kind: 'codegraph.sync', workspace: '/repo' })).rejects.toMatchObject({ code: 'JOB_ALREADY_RUNNING' });
     // 没有注册 runner 的 kind 仍然只落库，不报错、不做并发拒绝。
     await expect(client.request('admin.jobs.create', { kind: 'unknown.kind', workspace: '/repo' })).resolves.toMatchObject({ state: 'pending' });
 
@@ -179,7 +106,7 @@ describe('AgentDataRuntime', () => {
     const runtime = new AgentDataRuntime({
       dataPath: join(dir, 'data.db'),
       jobRunners: {
-        'wiki.sync': {
+        'codegraph.sync': {
           run: () => {
             runResult = gate.then(() => { throw new Error('runner stopped'); });
             return runResult;
@@ -189,7 +116,7 @@ describe('AgentDataRuntime', () => {
       },
     });
     const client = new AgentDataClient(await runtime.start());
-    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
+    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'codegraph.sync', workspace: '/repo' });
     await client.request('admin.jobs.markCancelled', { id: job.id });
 
     release();
@@ -209,10 +136,10 @@ describe('AgentDataRuntime', () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const runtime = new AgentDataRuntime({
       dataPath: join(dir, 'data.db'),
-      jobRunners: { 'wiki.sync': { run: () => gate, cancel: (id) => { cancelRequests.push(id); } } },
+      jobRunners: { 'codegraph.sync': { run: () => gate, cancel: (id) => { cancelRequests.push(id); } } },
     });
     const client = new AgentDataClient(await runtime.start());
-    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
+    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'codegraph.sync', workspace: '/repo' });
 
     // 取消只是"请求"：runner 收到通知，状态还没落定。
     await client.request('admin.jobs.cancel', { id: job.id });
@@ -270,13 +197,4 @@ describe('AgentDataRuntime', () => {
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });
 
-  it('includes ownership on recent overview memories', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-recent-'));
-    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
-    const client = new AgentDataClient(await runtime.start());
-    await client.request('memory.upsert', { userId: 'u', workspace: '/repo-a', level: 2, content: 'scoped fact' });
-    const overview = await runtime.requestAdmin<WorkbenchOverview>('admin.overview', { userId: 'u' });
-    expect(overview.recentMemories[0]).toMatchObject({ content: 'scoped fact', level: 2, scope: 'project', sourceProjectId: '/repo-a' });
-    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
-  });
 });

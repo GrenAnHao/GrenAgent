@@ -1,0 +1,58 @@
+--- before-review-fix/electron/agentData/knowledgeKernel/pipeline.ts
++++ after-review-fix/electron/agentData/knowledgeKernel/pipeline.ts
+@@ -90,7 +90,7 @@
+   if(graph.definitions.length+entries.length>(graph.maxItems??500))throw new Error('CATALOGUE_LIMIT');
+   graph.definitions.push(...entries);validateDefinitions(graph.definitions,true);graph.expanded.push(id);
+   if(!entries.length && parent)graph.leaves.push(parent.id);
+-  for(const d of entries) { if(d.expand===false)graph.leaves.push(d.id);else graph.nodes.push(node(`catalogue:${d.id}`,'catalogue',[id],graph,{definition:d,depth})); }
++  for(const d of entries) { if(d.expand===false)graph.leaves.push(d.id);else graph.nodes.push(node(`catalogue:item:${d.id}`,'catalogue',[id],graph,{definition:d,depth})); }
+   if(graph.nodes.filter(n=>n.phase==='catalogue').length>(graph.maxCatalogueNodes??64))throw new Error('CATALOGUE_LIMIT');
+   graph.definitions.sort((a,b)=>a.id.localeCompare(b.id));graph.leaves.sort();graph.expanded.sort();
+   graph.nodes.sort((a,b)=>a.phase==='catalogue'&&b.phase==='catalogue' ? (a.depth??0)-(b.depth??0)||a.id.localeCompare(b.id) : 0);
+--- before-review-fix/electron/agentData/knowledgeKernel/wikiPipeline.test.ts
++++ after-review-fix/electron/agentData/knowledgeKernel/wikiPipeline.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, it, expect } from 'vitest';
+-import { buildWikiStageGraph, advanceStageGraph, selectReadyItems } from './pipeline';
++import { buildWikiStageGraph, advanceStageGraph, selectReadyItems, buildCatalogueArtifact } from './pipeline';
+ import { validateStageResult } from './validation';
+ describe('wiki graph', () => {
+  it('expands catalogue and freezes the actual total', () => {
+@@ -86,7 +86,7 @@
+   g=advanceStageGraph(g,'prepare',{});g=advanceStageGraph(g,'readme',{present:false,excerpts:[],truncated:false});g=advanceStageGraph(g,'overview',{});
+   g=advanceStageGraph(g,'plan',{items:[{id:'a',title:'A',goal:'A',dependencies:[]}]});
+   g=advanceStageGraph(g,'catalogue:root',{children:[{id:'a',title:'A',goal:'A',dependencies:[]},{id:'b',title:'B',goal:'B',dependencies:[]}]});
+-  for (const id of order) g=advanceStageGraph(g,`catalogue:${id}`,{children: id==='a' ? [{id:'sub',title:'Sub',goal:'Sub',dependencies:[],expand:false}] : []});
++  for (const id of order) g=advanceStageGraph(g,`catalogue:item:${id}`,{children: id==='a' ? [{id:'sub',title:'Sub',goal:'Sub',dependencies:[],expand:false}] : []});
+   expect(selectReadyItems(g,[]).map(n=>n.id)).toEqual(['catalogue:complete']);
+   const artifact=buildCatalogueArtifact(g);g=advanceStageGraph(g,'catalogue:complete',artifact as any);
+   return {artifact, definitions:g.definitions, expanded:g.expanded, leaves:g.leaves, pageIds: g.nodes.filter(n=>n.phase==='generate').map(n=>n.id)};
+@@ -101,8 +101,8 @@
+  expect(()=>advanceStageGraph(base(),'catalogue:root',{children:defs(64)})).toThrow('CATALOGUE_LIMIT');
+  expect(()=>advanceStageGraph(base(),'catalogue:root',{children:[...defs(1),...defs(1)]})).toThrow();
+  let g=advanceStageGraph(base(),'catalogue:root',{children:[{id:'a',title:'A',goal:'A',dependencies:[]}]});
+- for(const id of ['a','a/b','a/b/b','a/b/b/b','a/b/b/b/b'])g=advanceStageGraph(g,`catalogue:${id}`,{children:[{id:'b',title:`${id} child`,goal:'x',dependencies:[]}]});
+- expect(()=>advanceStageGraph(g,'catalogue:a/b/b/b/b/b',{children:[{id:'b',title:'Too deep',goal:'x',dependencies:[]}]})).toThrow('CATALOGUE_LIMIT');
++ for(const id of ['a','a/b','a/b/b','a/b/b/b','a/b/b/b/b'])g=advanceStageGraph(g,`catalogue:item:${id}`,{children:[{id:'b',title:`${id} child`,goal:'x',dependencies:[]}]});
++ expect(()=>advanceStageGraph(g,'catalogue:item:a/b/b/b/b/b',{children:[{id:'b',title:'Too deep',goal:'x',dependencies:[]}]})).toThrow('CATALOGUE_LIMIT');
+ });
+ 
+ it('tells a catalogue root to emit the initial tree rather than an empty leaf',async()=>{
+@@ -127,8 +127,15 @@
+  const rootOver=base();expect(()=>advanceStageGraph(rootOver,'catalogue:root',{children:leaves(501,'root')})).toThrow('CATALOGUE_LIMIT');expect(rootOver.nodes.some(n=>n.id==='catalogue:complete'||n.phase==='generate')).toBe(false);
+  let limited=buildWikiStageGraph({inputHash:'s',version:2,maxItems:2});for(const [id,payload] of [['prepare',{}],['readme',{}],['overview',{}],['plan',{items:[{id:'seed',title:'Seed',goal:'Seed',dependencies:[]}]}]] as const)limited=advanceStageGraph(limited,id,payload);expect(()=>advanceStageGraph(limited,'catalogue:root',{children:leaves(3,'small')})).toThrow('CATALOGUE_LIMIT');
+  let nested=advanceStageGraph(base(),'catalogue:root',{children:[{id:'group',title:'Group',goal:'x',dependencies:[]},...leaves(498,'root')]});
+- nested=advanceStageGraph(nested,'catalogue:group',{children:leaves(1,'leaf')});expect(nested.definitions).toHaveLength(500);expect(selectReadyItems(nested,[]).map(n=>n.id)).toEqual(['catalogue:complete']);
++ nested=advanceStageGraph(nested,'catalogue:item:group',{children:leaves(1,'leaf')});expect(nested.definitions).toHaveLength(500);expect(selectReadyItems(nested,[]).map(n=>n.id)).toEqual(['catalogue:complete']);
+  let over=advanceStageGraph(base(),'catalogue:root',{children:[{id:'group',title:'Group',goal:'x',dependencies:[]},...leaves(499,'root')]});
+- expect(()=>advanceStageGraph(over,'catalogue:group',{children:leaves(1,'leaf')})).toThrow('CATALOGUE_LIMIT');expect(over.nodes.some(n=>n.phase==='generate')).toBe(false);expect(selectReadyItems(over,[]).map(n=>n.id)).toEqual(['catalogue:group']);
++ expect(()=>advanceStageGraph(over,'catalogue:item:group',{children:leaves(1,'leaf')})).toThrow('CATALOGUE_LIMIT');expect(over.nodes.some(n=>n.phase==='generate')).toBe(false);expect(selectReadyItems(over,[]).map(n=>n.id)).toEqual(['catalogue:item:group']);
+ });
+ 
++it('v2 separates legal root and complete logical IDs from catalogue control nodes',()=>{
++ let g=buildWikiStageGraph({inputHash:'s',version:2});for(const [id,payload] of [['prepare',{}],['readme',{}],['overview',{}],['plan',{items:[{id:'root',title:'Root',goal:'Root',dependencies:[]}]}]] as const)g=advanceStageGraph(g,id,payload);
++ g=advanceStageGraph(g,'catalogue:root',{children:[{id:'root',title:'Root',goal:'Root',dependencies:[]},{id:'complete',title:'Complete',goal:'Complete',dependencies:[]},{id:'normal/nested',title:'Nested',goal:'Nested',dependencies:[]}]});
++ expect(selectReadyItems(g,[]).map(n=>n.id)).toEqual(['catalogue:item:complete','catalogue:item:normal/nested','catalogue:item:root']);
++ for(const id of ['complete','normal/nested','root']){g=advanceStageGraph(g,`catalogue:item:${id}`,{children:[]});if(id!=='root')expect(g.nodes.some(n=>n.id==='catalogue:complete')).toBe(false);}
++ expect(selectReadyItems(g,[]).map(n=>n.id)).toEqual(['catalogue:complete']);const artifact=buildCatalogueArtifact(g);g=advanceStageGraph(g,'catalogue:complete',artifact as any);expect(g.nodes.filter(n=>n.phase==='generate').map(n=>n.id)).toEqual(['generate:complete','generate:normal/nested','generate:root']);
++});

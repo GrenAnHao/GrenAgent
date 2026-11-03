@@ -1,0 +1,560 @@
+diff --git a/electron-agent/electron/app/piRuntimeService.test.ts b/electron-agent/electron/app/piRuntimeService.test.ts
+index ec2e04ed..c17a8b99 100644
+--- a/electron-agent/electron/app/piRuntimeService.test.ts
++++ b/electron-agent/electron/app/piRuntimeService.test.ts
+@@ -201,6 +201,7 @@ describe('PiRuntimeService', () => {
+     await expect(service.send('C:/work', 'agent_get_available_models', {})).resolves.toEqual({
+       models: [{
+         id: 'flash',
++        fast: false,
+         provider: 'deepseek',
+         api: 'openai-completions',
+         reasoning: true,
+diff --git a/extensions/index.ts b/extensions/index.ts
+index dfc67019..8713a724 100644
+--- a/extensions/index.ts
++++ b/extensions/index.ts
+@@ -18,6 +18,7 @@ import batchTools from "./batch-tools/index.js";
+ import diagnostics from "./diagnostics/index.js";
+ import afterToolFeedback from "./after-tool-feedback/index.js";
+ import headerPlaceholders from "./header-placeholders/index.js";
++import fastMode from "./fast-mode/index.js";
+ import goal, { pluginManifest as goalManifest } from "./goal/index.js";
+ import imageGen from "./image-gen/index.js";
+ import sessionMemory from "./session-memory/index.js";
+@@ -50,6 +51,7 @@ import wikiRag from "./wiki-rag/index.js";
+ import { memoryManifest, wikiRagManifest, codeRetrievalManifest } from "./agent-data-manifests.js";
+ 
+ export {
++  fastMode,
+   safety,
+   approval,
+   sandbox,
+@@ -98,6 +100,7 @@ export const allExtensions = [
+   approval,
+   sandbox,
+   headerPlaceholders,
++  fastMode,
+   loopGuard,
+   rulebook,
+   promptCommands,
+@@ -143,6 +146,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
+   { name: "approval", factory: approval },
+   { name: "sandbox", factory: sandbox },
+   { name: "header-placeholders", factory: headerPlaceholders },
++  { name: "fast-mode", factory: fastMode },
+   { name: "loop-guard", factory: loopGuard },
+   { name: "rulebook", factory: rulebook },
+   { name: "prompt-commands", factory: promptCommands },
+diff --git a/extensions/multi-agent/index.test.ts b/extensions/multi-agent/index.test.ts
+index 55e68de0..98f243be 100644
+--- a/extensions/multi-agent/index.test.ts
++++ b/extensions/multi-agent/index.test.ts
+@@ -113,6 +113,7 @@ import { openWorkerChildSession } from "./worker-session.js";
+ import { runInWorkspace } from "../_shared/workspace-context.js";
+ import * as activation from "./activation.js";
+ import * as parentHost from "./parent-host.js";
++import { setAgentMode } from "../agent-mode/modes.js";
+ import { formatSettlementNotice } from "./settlement-notice.js";
+ import { __resetChildRunsForTest } from "./child-runs.js";
+ 
+@@ -209,6 +210,97 @@ beforeEach(() => {
+   });
+ });
+ 
++describe("spawn_agent · Ultra routing", () => {
++  const ultraCtx = { ...ctxM, cwd: "/ultra-routing-test", model: { provider: "a", id: "b" } };
++  const configure = (values: Record<string, string>) => {
++    vi.mocked(getConfig).mockImplementation((key: string) => key === "SUBAGENT_MAX_PER_SESSION" ? "0" : values[key]);
++  };
++  beforeEach(() => setAgentMode("ultra" as never, ultraCtx.cwd));
++  afterEach(() => setAgentMode("agent", ultraCtx.cwd));
++
++  it("Ultra ignores ordinary disabled and ordinary role defaults", async () => {
++    configure({ SUBAGENT_MODE: "disabled", SUBAGENT_MODEL_CHEAP: "ordinary/wrong", ULTRA_SUBAGENT_MODEL_SCOUT: "a/b" });
++    const r = await loadSpawnAgent()("ultra", { task: "find", agent: "scout" }, null, null, ultraCtx).catch((e) => ({ isError: true, content: [{ type: "text", text: String(e) }] }));
++    expect(r.isError).not.toBe(true);
++    const child = vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0];
++    expect(child?.model).toBe("a/b");
++    expect(child?.env?.PI_SUBAGENT_ROUTING_MODE).toBe("ultra");
++    expect(child?.env?.SAFETY_READONLY).toBe("1");
++  });
++
++  it("Ultra uses its default and then the actual parent, never ordinary settings", async () => {
++    configure({ SUBAGENT_MODEL: "ordinary/wrong", ULTRA_SUBAGENT_MODEL: "a/c" });
++    await loadSpawnAgent()("u1", { task: "work", agent: "worker" }, null, null, ultraCtx);
++    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.model).toBe("a/c");
++    configure({ SUBAGENT_MODEL: "ordinary/wrong" });
++    await loadSpawnAgent()("u2", { task: "work", agent: "worker" }, null, null, ultraCtx);
++    expect(vi.mocked(runEmbeddedSubagent).mock.calls[1]?.[0]?.model).toBe("a/b");
++  });
++
++  it("Ultra mixes roles and per-node thinking in one batch", async () => {
++    configure({ ULTRA_SUBAGENT_MODEL_SCOUT: "a/c", ULTRA_SUBAGENT_MODEL_WORKER: "a/b" });
++    const r = await loadSpawnAgent()("u", { tasks: [
++      { task: "find", agent: "scout", thinking_level: "off" },
++      { task: "implement", agent: "worker", thinking_level: "high" },
++    ] }, null, null, ultraCtx);
++    expect(r.isError).not.toBe(true);
++    const children = vi.mocked(runEmbeddedSubagent).mock.calls.map(([child]) => ({ task: child.task, model: child.model, thinking: child.thinkingLevel }));
++    expect(children).toEqual(expect.arrayContaining([
++      { task: "find", model: "a/c", thinking: "off" },
++      { task: "implement", model: "a/b", thinking: "high" },
++    ]));
++  });
++
++  it("Ultra rejects a bad role model with node, role and setting source before any launch", async () => {
++    configure({ ULTRA_SUBAGENT_MODEL_WORKER: "a/b", ULTRA_SUBAGENT_MODEL_REVIEWER: "gone/model" });
++    const r = await loadSpawnAgent()("u", { chain: [
++      { task: "work", agent: "worker" }, { task: "review", agent: "reviewer" },
++    ] }, null, null, ultraCtx);
++    expect(r.isError).toBe(true);
++    expect(r.content[0].text).toContain("chain[1]");
++    expect(r.content[0].text).toContain("reviewer");
++    expect(r.content[0].text).toContain("ULTRA_SUBAGENT_MODEL_REVIEWER");
++    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
++  });
++
++  it("Ultra authorizes explicit models using only its own configuration", async () => {
++    configure({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: '["a/c"]', ULTRA_SUBAGENT_MODEL_ALLOWLIST: '["a/b"]' });
++    const r = await loadSpawnAgent()("u", { task: "work", model: "a/c" }, null, null, ultraCtx);
++    expect(r.isError).toBe(true);
++    expect(r.content[0].text).toContain("Ultra");
++    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
++  });
++
++  it("Ultra discovers its configured roles even if ordinary self-selection is off", async () => {
++    configure({ ULTRA_SUBAGENT_MODEL_SCOUT: "a/c", ULTRA_SUBAGENT_MODEL_WORKER: "a/b", SUBAGENT_MODEL_CHEAP: "ordinary/wrong" });
++    const h = loadSpawnHarness();
++    const tool = h.tools.list_subagent_models;
++    expect(tool).toBeTypeOf("function");
++    const r = await tool("discover", {}, null, null, ultraCtx);
++    expect(r.content[0].text).toContain("cheap → a/c");
++    expect(r.content[0].text).toContain("strong → a/b");
++    expect(r.content[0].text).not.toContain("ordinary/wrong");
++  });
++
++  it("ordinary mode keeps its defaults and ignores Ultra configuration", async () => {
++    setAgentMode("agent", ultraCtx.cwd);
++    configure({ SUBAGENT_MODEL: "ordinary/keep", ULTRA_SUBAGENT_MODEL: "a/b" });
++    await loadSpawnAgent()("ordinary", { task: "work", agent: "worker" }, null, null, ultraCtx);
++    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.model).toBe("ordinary/keep");
++  });
++
++  it("validates each requested thinking level against that node's final model", async () => {
++    configure({ ULTRA_SUBAGENT_MODEL_WORKER: "a/b", ULTRA_SUBAGENT_MODEL_REVIEWER: "a/c" });
++    const r = await loadSpawnAgent()("u", { thinking_level: "high", chain: [
++      { task: "work", agent: "worker" }, { task: "review", agent: "reviewer" },
++    ] }, null, null, ultraCtx);
++    expect(r.isError).toBe(true);
++    expect(r.content[0].text).toContain("chain[1]");
++    expect(r.content[0].text).toContain("不支持思考档");
++    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
++  });
++});
++
+ describe("spawn_agent · approval policy injected into sub-agent (B)", () => {
+   const injectedPolicy = () => (vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.env as Record<string, string>).APPROVAL_POLICY;
+ 
+@@ -288,58 +380,76 @@ describe("codemode deadline around spawn_agent", () => {
+   });
+ });
+ 
+-// 并行健壮性：一个任务出错（这里用未知 agent 触发 agentLayer 抛错）不应 reject 整个 Promise.all
+-// 而遗弃其它正在运行的兄弟任务——应就地记为该任务失败、其余照常跑完。
+-describe("spawn_agent · early parallel start", () => {
+-  it("starts a closed task from the argument stream before execute", async () => {
+-    const { handlers, execute } = loadSpawnHarness();
+-    await handlers.message_update?.(
+-      {
+-        type: "message_update",
+-        assistantMessageEvent: { type: "toolcall_start", contentIndex: 3, id: "call_p", toolName: "spawn_agent" },
+-      } as never,
+-      ctx as never,
++describe("spawn_agent · authorization before parallel launch", () => {
++  let streamSequence = 0;
++  async function streamTasks(h: ReturnType<typeof loadSpawnHarness>, chunks: string[]) {
++    const contentIndex = ++streamSequence;
++    const id = `call_auth_${contentIndex}`;
++    await h.handlers.message_update?.(
++      { assistantMessageEvent: { type: "toolcall_start", contentIndex, id, toolName: "spawn_agent" } }, ctxM,
+     );
+-    await handlers.message_update?.(
+-      {
+-        type: "message_update",
+-        assistantMessageEvent: { type: "toolcall_delta", contentIndex: 3, delta: '{"tasks":["review server"],' },
+-      } as never,
+-      ctx as never,
+-    );
+-    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(1);
+-    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.task).toBe("review server");
+-    await execute("call_p", { tasks: ["review server", "review desktop"] }, null, null, ctx);
+-    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(2);
+-    expect(vi.mocked(runEmbeddedSubagent).mock.calls.map((c) => c[0]?.task).sort()).toEqual([
+-      "review desktop",
+-      "review server",
+-    ]);
++    for (const delta of chunks) {
++      await h.handlers.message_update?.(
++        { assistantMessageEvent: { type: "toolcall_delta", contentIndex, delta } }, ctxM,
++      );
++    }
++    return id;
++  }
++
++  it.each([
++    {
++      name: "task model",
++      chunks: ['{"tasks":[{"task":"review server","model":"a/c"}],'],
++      params: { tasks: [{ task: "review server", model: "a/c" }] },
++    },
++    {
++      name: "late top-level model",
++      chunks: ['{"tasks":["review server"],', '"model":"a/c"}'],
++      params: { tasks: ["review server"], model: "a/c" },
++    },
++    {
++      name: "late inline profile model",
++      chunks: ['{"tasks":["review server"],', '"profile":{"model":"a/c"}}'],
++      params: { tasks: ["review server"], profile: { model: "a/c" } },
++    },
++    {
++      name: "mixed authorized and unauthorized tasks",
++      chunks: ['{"tasks":[{"task":"allowed","model":"a/b"},', '{"task":"denied","model":"a/c"}]}'],
++      params: { tasks: [{ task: "allowed", model: "a/b" }, { task: "denied", model: "a/c" }] },
++    },
++  ])("does not launch $name outside the allowlist, including during argument streaming", async ({ chunks, params }) => {
++    enable('["a/b"]');
++    const h = loadSpawnHarness();
++    const id = await streamTasks(h, chunks);
++    const result = await h.execute(id, params, null, null, ctxM);
++    expect(result.isError).toBe(true);
++    expect(result.content[0].text).toContain("不在授权白名单");
++    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
++    expect(startContinuableEmbedded).not.toHaveBeenCalled();
++    expect(registryRows.rows.size).toBe(0);
+   });
+ 
+-  it("registers an early-started task in inflight until it ends, so cancel and stuck reaping reach it", async () => {
++  it("starts authorized tasks concurrently only after complete argument validation", async () => {
++    enable('["a/b"]');
+     const { inflight } = await import("./controlPlane.js");
+-    const { __resetEarlySpawnForTest } = await import("./parallel-early.js");
+     let finish!: (r: Awaited<ReturnType<typeof runEmbeddedSubagent>>) => void;
+-    vi.mocked(runEmbeddedSubagent).mockReturnValueOnce(new Promise((res) => {
+-      finish = res;
+-    }));
+-    const { handlers } = loadSpawnHarness();
+-    await handlers.message_update?.(
+-      { type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 5, id: "call_q", toolName: "spawn_agent" } } as never,
+-      ctx as never,
+-    );
+-    await handlers.message_update?.(
+-      { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 5, delta: '{"tasks":["review server"],' } } as never,
+-      ctx as never,
+-    );
++    const done = new Promise<Awaited<ReturnType<typeof runEmbeddedSubagent>>>((resolve) => { finish = resolve; });
++    vi.mocked(runEmbeddedSubagent).mockImplementation(() => done);
++    const h = loadSpawnHarness();
++    const id = await streamTasks(h, ['{"tasks":[{"task":"review server","model":"a/b"}],']);
++    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
++    const result = h.execute(id, { tasks: [{ task: "review server", model: "a/b" }, { task: "review desktop", model: "a/b" }] }, null, null, ctxM);
++    await vi.waitFor(() => expect(runEmbeddedSubagent).toHaveBeenCalledTimes(2));
+     expect(inflight.has("sa_test")).toBe(true);
++    expect(vi.mocked(runEmbeddedSubagent).mock.calls.map((c) => c[0]?.task).sort()).toEqual(["review desktop", "review server"]);
+     finish({ ok: true, output: "x", exitCode: 0, transcript: "", sessionPath: "/tmp/c.jsonl", stopReason: "completed" });
+-    await vi.waitFor(() => expect(inflight.has("sa_test")).toBe(false));
+-    __resetEarlySpawnForTest();
++    expect((await result).isError).toBeFalsy();
++    expect(inflight.has("sa_test")).toBe(false);
+   });
+ });
+ 
++// 并行健壮性：一个任务出错（这里用未知 agent 触发 agentLayer 抛错）不应 reject 整个 Promise.all
++// 而遗弃其它正在运行的兄弟任务——应就地记为该任务失败、其余照常跑完。
+ describe("spawn_agent · parallel resilience (one failing task does not abort siblings)", () => {
+   it("records the bad-agent task as failed and still completes the others", async () => {
+     const r = await loadSpawnAgent()(
+diff --git a/extensions/multi-agent/index.ts b/extensions/multi-agent/index.ts
+index b8b86c74..85142252 100644
+--- a/extensions/multi-agent/index.ts
++++ b/extensions/multi-agent/index.ts
+@@ -24,7 +24,7 @@ import { availableModels, registerListSubagentModels } from "./list-models-tool.
+ import type { SubagentStopReason } from "./assistant-output.js";
+ import { currentWorkspaceContext } from "../_shared/workspace-context.js";
+ import { projectCwd } from "../_shared/session-cwd.js";
+-import { closedStringField, normalizeTasks, spawnHasWork } from "./tasks.js";
++import { normalizeTasks, spawnHasWork } from "./tasks.js";
+ import { getApprovalPolicy } from "../_shared/approval.js";
+ import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
+ import { discoverAgents, inferNamedAgentProfile, resolveAgent, suggestAgent, withBuiltinDefaults, type AgentScope } from "./agents.js";
+@@ -45,7 +45,6 @@ import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
+ import { emitCatalogChanged } from "./catalog-events.js";
+ import { completedPrefix } from "./fork-seed.js";
+ import { assertDepthAllowed, childDepthOf } from "./depth.js";
+-import { adoptSpawnBatch, appendSpawnDelta, rekeySpawnTool, rememberSpawnTool, type EarlyBatch, type EarlySlot } from "./parallel-early.js";
+ 
+ function parentSessionPath(ctx: { sessionManager?: { getSessionFile?: () => string | undefined } }): string | undefined {
+   try {
+@@ -254,15 +253,6 @@ function releaseReserved(sessionKey: string, n = 1): void {
+   else sessionSpawnCount.set(sessionKey, left);
+ }
+ 
+-function tryReserveOne(sessionKey: string): boolean {
+-  const max = sessionCap();
+-  if (max <= 0) return true;
+-  const already = sessionSpawnCount.get(sessionKey) ?? 0;
+-  if (already + 1 > max) return false;
+-  sessionSpawnCount.set(sessionKey, already + 1);
+-  return true;
+-}
+-
+ function sessionSpawnKey(ctx: { cwd: string; sessionManager?: { getSessionId?: () => string } }): string {
+   try {
+     const sid = ctx.sessionManager?.getSessionId?.();
+@@ -487,140 +477,6 @@ export default function (pi: ExtensionAPI) {
+     }
+   });
+ 
+-  const launchEarly = (
+-    ctx: Parameters<typeof sessionSpawnKey>[0] & { model?: { provider?: string; id?: string } },
+-    batch: EarlyBatch,
+-    index: number,
+-    task: { task: string; model?: string; agent?: string },
+-  ): Promise<void> => {
+-    const sessionKey = sessionSpawnKey(ctx);
+-    const slot: EarlySlot = { task: task.task, ok: false, output: "", settled: false, model: task.model };
+-    batch.slots[index] = slot;
+-    if (!tryReserveOne(sessionKey)) {
+-      slot.settled = true;
+-      slot.error = "已达单会话子代理上限";
+-      return Promise.resolve();
+-    }
+-    const controller = new AbortController();
+-    batch.abortors.push(controller);
+-    const id = SubAgentRegistry.genId();
+-    slot.agentId = id;
+-    // 和其余前台路径一样登记进 inflight：转到后台以后，界面上的取消和卡死回收只能从这里够到它。
+-    inflight.set(id, controller);
+-    const profileName = closedStringField(batch.raw, "profile");
+-    const profile = resolveProfile(typeof profileName === "string" ? (profileName as ProfileInput) : undefined);
+-    const profileEnv = profileToEnv(profile);
+-    const ownerPolicy = getApprovalPolicy();
+-    profileEnv.APPROVAL_POLICY = ownerPolicy === "full" || ownerPolicy === "workspace" ? "auto" : ownerPolicy;
+-    const depth = childDepthOf(ctx as never);
+-    profileEnv.SUBAGENT_DEPTH = String(depth);
+-    const chosenModel = pickSubagentModel(task.model, undefined, profileToModel(profile, getConfig), ctx.model);
+-    slot.model = chosenModel;
+-    let systemPrompt: string | undefined;
+-    let tools: string[] | undefined;
+-    let backend: "worker" | "in-process" | undefined;
+-    if (task.agent) {
+-      try {
+-        const found = resolveAgent(withBuiltinDefaults(discoverAgents(ctx.cwd, "user").agents), task.agent);
+-        systemPrompt = found?.systemPrompt;
+-        tools = found?.tools;
+-        backend = found?.backend;
+-      } catch {
+-        /* 命名档案解析失败留给 execute 路径记失败 */
+-      }
+-    }
+-    const registry = getRegistry(projectCwd(ctx));
+-    registry.create({
+-      id,
+-      task: task.task,
+-      profile: JSON.stringify(profile),
+-      model: chosenModel ?? null,
+-      parentId: parentSessionId(ctx),
+-      depth,
+-    });
+-    return runSubagent(ctx.cwd, task.task, id, {
+-      projectCwd: projectCwd(ctx),
+-      parentSessionPath: parentSessionPath(ctx),
+-      model: chosenModel,
+-      systemPrompt,
+-      tools,
+-      backend,
+-      env: profileEnv,
+-      timeoutMs: profileLimits(profile).timeoutMs,
+-      depth,
+-      signal: controller.signal,
+-      onUpdate: (u) => {
+-        registry.progress(id, u.transcript);
+-        if (u.sessionPath) {
+-          registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
+-          slot.sessionPath = u.sessionPath;
+-        }
+-      },
+-    }).then((r) => {
+-      slot.ok = r.ok;
+-      slot.output = r.output;
+-      slot.error = r.error;
+-      slot.partial = r.partial;
+-      slot.sessionPath = r.sessionPath;
+-      slot.stopReason = r.stopReason;
+-      slot.settled = true;
+-      // 父回合中止（abortEarly）记 cancelled，和其余路径一致；否则注册表里分不出是被停还是自己失败。
+-      finishQuietly(registry, id, r.ok
+-        ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
+-        : {
+-            status: controller.signal.aborted ? "cancelled" : "error",
+-            output: r.output,
+-            error: r.error,
+-            exitCode: r.exitCode,
+-            transcript: r.transcript,
+-          });
+-    }, (e: unknown) => {
+-      const msg = String((e as Error)?.message ?? e);
+-      slot.ok = false;
+-      slot.error = msg;
+-      slot.settled = true;
+-      finishQuietly(registry, id, { status: "error", error: msg, exitCode: -1 });
+-    }).finally(() => {
+-      inflight.delete(id);
+-      releaseReserved(sessionKey, 1);
+-      // 转后台之后靠它发结算通知，前面记账出错也要走到。
+-      try {
+-        batch.onSettled?.(slot);
+-      } catch {
+-        /* 通知出错不能让这一项的 Promise 失败，连累整组 */
+-      }
+-    });
+-  };
+-
+-  pi.on("message_update", (event, ctx) => {
+-    if (process.env.PI_IS_SUBAGENT === "1") return;
+-    const ame = event.assistantMessageEvent as {
+-      type?: string;
+-      toolName?: string;
+-      contentIndex?: number;
+-      id?: string;
+-      delta?: string;
+-      toolCall?: { id?: string; name?: string };
+-    };
+-    if (ame.type === "toolcall_start" && ame.toolName === "spawn_agent" && typeof ame.contentIndex === "number") {
+-      rememberSpawnTool(ame.contentIndex, ame.id || `idx:${ame.contentIndex}`);
+-      return;
+-    }
+-    if (ame.type === "toolcall_end" && ame.toolCall?.name === "spawn_agent" && typeof ame.contentIndex === "number" && ame.toolCall.id) {
+-      rekeySpawnTool(ame.contentIndex, ame.toolCall.id);
+-      return;
+-    }
+-    if (ame.type !== "toolcall_delta" || typeof ame.contentIndex !== "number" || typeof ame.delta !== "string") return;
+-    const noted = appendSpawnDelta(ame.contentIndex, ame.delta);
+-    if (!noted) return;
+-    if (closedStringField(noted.batch.raw, "profile") === null) return;
+-    for (let i = noted.batch.runs.length; i < noted.tasks.length; i++) {
+-      const task = noted.tasks[i];
+-      if (!task) continue;
+-      noted.batch.runs.push(launchEarly(ctx, noted.batch, i, task));
+-    }
+-  });
+-
+   pi.registerTool({
+     name: "spawn_agent",
+     label: "Spawn Sub-agent",
+@@ -879,12 +735,10 @@ export default function (pi: ExtensionAPI) {
+       if (!spawnHasWork(params)) throw new Error("provide `task`, `tasks`, or `chain`");
+ 
+       // 单会话最大子代理数（0/空＝不限）。预占在实际 spawn 前，防止先并发再统计绕过上限。
+-      // 流式阶段已经开工的并行任务各自占过名额，这里只补还没启动的。
++      // 所有任务只在完整参数通过授权后启动，统一预占本次名额。
+       const sessionKey = sessionSpawnKey(ctx);
+-      const earlyBatch = adoptSpawnBatch(toolCallId);
+-      const earlyStarted = earlyBatch?.runs.length ?? 0;
+       const maxPerSession = sessionCap();
+-      const requested = Math.max(0, (hasChain ? params.chain?.length ?? 0 : list.length) - earlyStarted);
++      const requested = hasChain ? params.chain?.length ?? 0 : list.length;
+       let slotsLeft = 0;
+       // 前台 run 转后台后（detach.ts），还在跑的子代理各自结束时归还名额，这里不能提前一把还掉。
+       let keepReservations = false;
+@@ -896,7 +750,7 @@ export default function (pi: ExtensionAPI) {
+       const transferOne = () => {
+         slotsLeft = Math.max(0, slotsLeft - 1);
+       };
+-      if (maxPerSession > 0 && earlyStarted === 0 && requested > 0) {
++      if (maxPerSession > 0 && requested > 0) {
+         const already = sessionSpawnCount.get(sessionKey) ?? 0;
+         if (already + requested > maxPerSession) {
+           throw new Error(
+@@ -906,12 +760,6 @@ export default function (pi: ExtensionAPI) {
+         }
+         sessionSpawnCount.set(sessionKey, already + requested);
+         slotsLeft = requested;
+-      } else if (maxPerSession > 0 && requested > 0) {
+-        const already = sessionSpawnCount.get(sessionKey) ?? 0;
+-        const room = Math.max(0, maxPerSession - already);
+-        const take = Math.min(room, requested);
+-        if (take > 0) sessionSpawnCount.set(sessionKey, already + take);
+-        slotsLeft = take;
+       }
+ 
+       try {
+@@ -1483,7 +1331,7 @@ export default function (pi: ExtensionAPI) {
+         stopReason?: SubagentStopReason;
+         model?: string;
+         settled?: boolean;
+-      }> = list.map((t, i) => earlyBatch?.slots[i] ?? { task: t.task, ok: false, output: "", model: t.model });
++      }> = list.map((t) => ({ task: t.task, ok: false, output: "", model: t.model }));
+       // 档案显式 limits.maxConcurrency 仍可收紧。默认一次把本次 tasks 全部拉起来：
+       // 固定 4 路会让第 5 个一直排在队列里，会话列表却已经按参数画出 5 行。
+       const concurrency = Math.max(1, limits.maxConcurrency ?? list.length);
+@@ -1520,11 +1368,6 @@ export default function (pi: ExtensionAPI) {
+       };
+       const runOne = async (i: number): Promise<void> => {
+         const t = list[i];
+-        if (maxPerSession > 0 && earlyStarted > 0 && i >= earlyStarted + slotsLeft) {
+-          slots[i] = { task: t.task, ok: false, output: "", error: "已达单会话子代理上限", settled: true };
+-          publishLive();
+-          return;
+-        }
+         let id: string | undefined;
+         let settledAs: Pick<SubagentResult, "stopReason" | "output" | "sessionPath" | "diagnostic"> | undefined;
+         try {
+@@ -1602,7 +1445,7 @@ export default function (pi: ExtensionAPI) {
+           publishLive();
+           settledAs = { stopReason: "error", output: "", diagnostic: msg };
+         } finally {
+-          if (i >= earlyStarted) releaseOne();
++          releaseOne();
+           // 转后台之后靠它发结算通知，上面哪一步出错都要走到。
+           if (id && fgAll.isRunning(id)) {
+             fgAll.finished(id, settledAs ?? { stopReason: "error", output: "", diagnostic: "sub-agent ended without a result" });
+@@ -1611,34 +1454,15 @@ export default function (pi: ExtensionAPI) {
+       };
+       // 滑动窗口并发：concurrency 个 worker 各自从队列取下一个任务，单个卡住只占一个槽位——不再像
+       // 「分批 + Promise.all」那样被批内最慢/卡住的一个拖住，导致后续任务永远不开始。
+-      if (earlyBatch) {
+-        const abortEarly = () => {
+-          for (const controller of earlyBatch.abortors) controller.abort();
+-        };
+-        if (linkedAll.signal.aborted) abortEarly();
+-        else linkedAll.signal.addEventListener("abort", abortEarly, { once: true });
+-        // 流式阶段已经开工的那几个：还在跑的记进这次前台 run，结束时经它（转后台后发通知）。
+-        for (const slot of earlyBatch.slots) if (slot?.agentId && !slot.settled) fgAll.started(slot.agentId);
+-        earlyBatch.onSettled = (slot) => {
+-          if (slot.agentId && fgAll.isRunning(slot.agentId)) {
+-            fgAll.finished(slot.agentId, {
+-              stopReason: (slot.stopReason as SubagentStopReason | undefined) ?? (slot.ok ? "completed" : "error"),
+-              output: slot.output,
+-              sessionPath: slot.sessionPath,
+-              diagnostic: slot.ok ? undefined : slot.error,
+-            });
+-          }
+-        };
+-      }
+       publishLive();
+-      let nextIndex = earlyStarted;
++      let nextIndex = 0;
+       const worker = async (): Promise<void> => {
+         for (let i = nextIndex++; i < list.length; i = nextIndex++) {
+           await runOne(i);
+         }
+       };
+-      const workers = Array.from({ length: Math.min(concurrency, Math.max(0, list.length - earlyStarted)) }, () => worker());
+-      const all = Promise.all([...(earlyBatch?.runs ?? []), ...workers]);
++      const workers = Array.from({ length: Math.min(concurrency, list.length) }, () => worker());
++      const all = Promise.all(workers);
+       const outcome = await waitOrDetach(all, { enabled: !nestedCall, hasPendingInput: () => steerWaiting(ctx) });
+       // 那一刻其实都已经结束、只差收尾的，照常等完返回。
+       const moving = outcome.detached && slots.some((s) => !s.settled || fgAll.isRunning(s.agentId));

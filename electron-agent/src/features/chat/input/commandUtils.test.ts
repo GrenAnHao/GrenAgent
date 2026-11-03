@@ -87,6 +87,11 @@ describe('visibleSlashCommands', () => {
     ];
     expect(visibleSlashCommands(commands).map((c) => c.name)).toEqual(['goal', 'rules']);
   });
+
+  it('does not reserve the removed brainstorm delivery command name', () => {
+    const command: PiCommand = { name: 'brainstorm-deliver', source: 'api', apiSource: 'prompt' };
+    expect(visibleSlashCommands([command])).toEqual([command]);
+  });
 });
 
 describe('toSlashMenuItems', () => {

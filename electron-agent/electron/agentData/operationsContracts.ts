@@ -1,21 +1,34 @@
+import type { KnowledgeTaskMetadata } from '../../shared/knowledgeKernelContracts';
 export type TaskRef = { source: 'user' | 'system'; id: string };
-export type TaskStatus = 'pending' | 'queued' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
-export type ResourceRef = { type: 'wiki' | 'project' | 'memory'; id: string };
+export type TaskStatus = 'pending' | 'queued' | 'running' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled';
+export type ResourceRef = { type: 'wiki' | 'project' | 'repoWiki'; id: string; language?: string };
+export interface RepoWikiJobPayload {
+  projectId: string; language: string; target: 'wiki' | 'cards'; force: boolean; confirmExternal: true;
+  runId?: string;
+}
+export interface NativeWikiPublicationSummary { id: string; coverage: { published: number; readable: number; failed: string[]; partial: boolean }; projection: { status: 'pending' | 'ready' | 'conflict' | 'error'; error?: string } }
+export interface NativeWikiTaskSummary { engine: 'qoder-wiki-local-v1'; operationId: string; projectId?: string; revision: number; publication?: NativeWikiPublicationSummary }
 export interface JobMetadata {
+  repoWiki?: KnowledgeTaskMetadata;
+  nativeWiki?: NativeWikiTaskSummary;
   target?: ResourceRef;
-  payload?: { kbId: string; sourceIds: string[] } | { workspace: string };
+  payload?: { kbId: string; sourceIds: string[] } | { workspace: string } | RepoWikiJobPayload;
   retryOf?: string; resourceName?: string; cancellationRequested?: boolean; cancellationError?: string;
-  stage?: string; processed?: number; total?: number;
+  /** 自动同步熔断后留下的失败任务，用来在任务中心重试。不是用户点的同步。 */
+  origin?: 'breaker';
+  stage?: string; processed?: number; total?: number; message?: string; currentPage?: string;
 }
 export interface TaskView {
   ref: TaskRef; key: string; kind: string; label: string; status: TaskStatus;
   workspace?: string; resource?: ResourceRef; resourceName?: string;
-  progress?: number; stage?: string; cancellationRequested: boolean;
+  progress?: number; stage?: string; message?: string; currentPage?: string; cancellationRequested: boolean;
   processed?: number; total?: number; attempts?: number; retryOf?: string; error?: string;
   createdAt: number; updatedAt: number;
-  capabilities: { cancel: boolean; retry: boolean; remove: boolean };
+  capabilities: { cancel: boolean; retry: boolean; remove: boolean; removeReason?: 'native_referenced' };
+  knowledge?: import('../../shared/knowledgeKernelContracts').RepoWikiKnowledgeSnapshot;
+  nativeWiki?: NativeWikiTaskSummary;
 }
-export interface TaskPage { items: TaskView[]; nextCursor?: string; activeCount?: number }
+export interface TaskPage { items: TaskView[]; nextCursor?: string; activeCount?: number; pollingCount?: number }
 export interface TaskListInput {
   source?: TaskRef['source']; group?: 'active' | 'history'; workspace?: string;
   query?: string; cursor?: string; limit?: number;
@@ -27,8 +40,9 @@ export interface TaskDetail extends TaskView {
 export interface TaskRetryPreview {
   ref: TaskRef; resource?: ResourceRef; label: string; callsModel: boolean;
   sourceIds?: string[]; targetCount?: number; model?: string;
+  modelIdentity?: string; planToken?: string; reusable?: number; redo?: number;
 }
-export interface TaskRetryOptions { expectedModel?: string }
+export interface TaskRetryOptions { expectedModel?: string; expectedModelIdentity?: string; expectedPlanToken?: string }
 export interface AuditQuery {
   action?: string; resource?: ResourceRef; from?: number; to?: number; cursor?: string; limit?: number;
 }
@@ -45,16 +59,15 @@ export interface DiagnosticItem {
 export interface DiagnosticReport { items: DiagnosticItem[]; checkedAt: number }
 export type ResourceNavigation =
   | { view: 'overview' }
-  | { view: 'memory'; id?: string; mode?: 'read' | 'create' }
   | { view: 'wiki'; kbId?: string; pageId?: string; mode?: 'read' | 'create' }
+  | { view: 'repoWiki'; workspace?: string; language?: string }
   | { view: 'code'; workspace?: string; file?: string; line?: number }
   | { view: 'jobs'; task?: TaskRef }
   | { view: 'audit'; resource?: ResourceRef };
 export interface WorkbenchOverview {
   libraries?: { total: number; pendingSources: number; pages: number };
   recentPages: Array<{ kbId: string; pageId: string; title: string; libraryName: string; updatedAt: number }>;
-  recentMemories: Array<{ id: string; content: string; level: number; updatedAt: number; scope?: 'global' | 'project'; sourceProjectId?: string }>;
   activeTasks?: number; failedTasks?: number;
   diagnostics?: { actionRequired: number; unchecked: number };
-  errors: Array<{ domain: 'wiki' | 'memory' | 'tasks' | 'diagnostics'; message: string }>;
+  errors: Array<{ domain: 'wiki' | 'tasks' | 'diagnostics'; message: string }>;
 }

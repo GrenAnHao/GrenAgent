@@ -1,0 +1,16 @@
+{
+  "productionBundle": true,
+  "bundleSha256": "c81d045d72c39d243342d04582d04582f5f6542d4feea478b2bc76e84112b006",
+  "unpackedResourcePath": true,
+  "workerMigration": true,
+  "originalLegacyUnchanged": true,
+  "portableId": "portable-fixture",
+  "runtimeId": "cc4068095dfe1aa04dbe17c1",
+  "nativeFileSave": true,
+  "staleContextRejected": true,
+  "sameChildOnReentry": true,
+  "parentPid": 66948,
+  "childPid": 46732,
+  "modelCalls": 0,
+  "stopped": true
+}

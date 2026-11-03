@@ -21,9 +21,9 @@ const styles = createStaticStyles(({ css }) => ({
 
     height: ${TITLE_BAR_HEIGHT}px;
     padding-inline: 12px;
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+    border-block-end: 1px solid var(--gren-chrome-border, ${cssVar.colorBorderSecondary});
 
-    background: var(--gren-titlebar-bg, ${cssVar.colorBgContainer});
+    background: var(--gren-chrome-bg, ${cssVar.colorBgContainer});
     user-select: none;
     -webkit-app-region: drag;
   `,
@@ -41,7 +41,7 @@ const styles = createStaticStyles(({ css }) => ({
     pointer-events: none;
 
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 500;
     color: ${cssVar.colorText};
   `,
   controls: css`

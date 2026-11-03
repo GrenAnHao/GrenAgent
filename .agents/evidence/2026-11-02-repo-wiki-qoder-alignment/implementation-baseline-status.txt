@@ -1,0 +1,638 @@
+ M .agents/notes/implemented/architecture/2026-08-31-self-owned-agent-data-runtime.md
+ M .agents/notes/implemented/architecture/2026-09-07-embedded-codegraph-sdk.md
+ M .agents/notes/implemented/architecture/2026-09-13-subagent-activation-and-routing.md
+ D .agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md
+ M .agents/notes/implemented/architecture/2026-09-30-compaction-and-context-policy.md
+ M .agents/notes/implemented/architecture/2026-10-16-agentdata-host-process.md
+ M .agents/notes/implemented/architecture/2026-10-16-codegraph-host-process.md
+ M .agents/notes/implemented/architecture/2026-10-18-codegraph-auto-sync-and-stale-reads.md
+ M .agents/notes/implemented/bug-fix/2026-10-16-orphan-job-settle.md
+ M .agents/notes/implemented/bug-fix/2026-10-16-right-dock-session-binding.md
+ M .agents/notes/implemented/feature/2026-10-12-foreground-run-detach.md
+ M .agents/notes/implemented/feature/2026-10-12-send-message-without-waking.md
+ M .agents/notes/implemented/feature/2026-10-19-composer-draft-full-restore.md
+ M .agents/notes/implemented/feature/2026-10-19-session-title-quality.md
+ M .agents/notes/implemented/feature/2026-10-23-plan-mode-redesign.md
+ M .agents/notes/implemented/process/2026-10-16-agentdata-sync-timing-diag.md
+ D .agents/notes/proposed/architecture/2026-10-16-codegraph-host-process-auto-sync.md
+ M AGENTS.md
+ M README.md
+ D _scratch-agent-flow/00-overview.md
+ D _scratch-agent-flow/00-source-map.md
+ D _scratch-agent-flow/01-frozen-decisions.md
+ D _scratch-agent-flow/02-architecture.md
+ D _scratch-agent-flow/02-p0-task-map.md
+ D _scratch-agent-flow/04-open-items.md
+ D _scratch-agent-flow/README.md
+ M cli/package-lock.json
+ M cli/package.json
+ M cli/pnpm-lock.yaml
+ M cli/scripts/patch-pi-edit-preview.mjs
+ M cli/scripts/patch-pi-shell.mjs
+ M cli/src/agent-data-plugins.test.ts
+ M cli/src/extension-profile.ts
+ M cli/src/gren-runtime.test.ts
+ M cli/src/gren-runtime.ts
+ M cli/src/pi-sdk.ts
+ M cli/src/probe-models.test.ts
+ M cli/src/probe-models.ts
+ M docs/agent-data-memory-code.md
+ M docs/agent-data-migration.md
+ M docs/agent-data-operations.md
+ M docs/architecture.md
+ M docs/third-party-dependencies.md
+ M docs/third-party-notices.md
+ M electron-agent/electron-builder.yml
+ M electron-agent/electron.vite.config.ts
+ M electron-agent/electron/agent/copyPiAdjacentAssets.test.ts
+ M electron-agent/electron/agent/copyPiAdjacentAssets.ts
+ D electron-agent/electron/agent/memoryExtraction.test.ts
+ D electron-agent/electron/agent/memoryExtraction.ts
+ D electron-agent/electron/agent/memoryLayerPrompts.test.ts
+ D electron-agent/electron/agent/memoryLayerPrompts.ts
+ D electron-agent/electron/agent/memoryOutputParse.test.ts
+ D electron-agent/electron/agent/memoryOutputParse.ts
+ D electron-agent/electron/agent/memoryPrompts.test.ts
+ D electron-agent/electron/agent/memoryPrompts.ts
+ M electron-agent/electron/agent/modelRuntimeHost.ts
+ M electron-agent/electron/agent/shortCall.test.ts
+ M electron-agent/electron/agent/shortCall.ts
+ M electron-agent/electron/agent/workerEntry.ts
+ M electron-agent/electron/agent/workspaceHandle.test.ts
+ M electron-agent/electron/agent/workspaceHandle.ts
+ M electron-agent/electron/agentData/auditViewStore.ts
+ M electron-agent/electron/agentData/codeRetrievalResult.ts
+ D electron-agent/electron/agentData/extensionIntegration.test.ts
+ M electron-agent/electron/agentData/jobCleanup.test.ts
+ M electron-agent/electron/agentData/jobStore.test.ts
+ M electron-agent/electron/agentData/jobStore.ts
+ D electron-agent/electron/agentData/memoryContracts.ts
+ D electron-agent/electron/agentData/memoryStore.browse.test.ts
+ D electron-agent/electron/agentData/memoryStore.manual.test.ts
+ D electron-agent/electron/agentData/memoryStore.test.ts
+ D electron-agent/electron/agentData/memoryStore.ts
+ M electron-agent/electron/agentData/methodTiming.test.ts
+ M electron-agent/electron/agentData/operationsContracts.ts
+ M electron-agent/electron/agentData/operationsProjection.ts
+ M electron-agent/electron/agentData/requestFrames.test.ts
+ M electron-agent/electron/agentData/runtime.extensions.test.ts
+ D electron-agent/electron/agentData/runtime.memoryManagement.test.ts
+ M electron-agent/electron/agentData/runtime.operations.test.ts
+ M electron-agent/electron/agentData/runtime.test.ts
+ M electron-agent/electron/agentData/runtime.timing.test.ts
+ M electron-agent/electron/agentData/runtime.ts
+ M electron-agent/electron/agentData/storage.test.ts
+ M electron-agent/electron/agentData/storage.ts
+ M electron-agent/electron/agentData/taskViewStore.test.ts
+ M electron-agent/electron/agentData/taskViewStore.ts
+ M electron-agent/electron/agentData/wikiEngine/ingest/concurrency.test.ts
+ M electron-agent/electron/agentData/wikiEngine/ingest/concurrency.ts
+ M electron-agent/electron/agentData/wikiEngine/llm.ts
+ M electron-agent/electron/agentData/wikiEngine/logger.ts
+ M electron-agent/electron/agentData/wikiEngine/service.ts
+ M electron-agent/electron/agentDataProcess/assemble.ts
+ M electron-agent/electron/agentDataProcess/codeGraphClient.ts
+ M electron-agent/electron/agentDataProcess/contract.ts
+ M electron-agent/electron/agentDataProcess/host.test.ts
+ M electron-agent/electron/agentDataProcess/host.ts
+ M electron-agent/electron/agentDataProcess/hostEntry.ts
+ M electron-agent/electron/app/agentDataService.test.ts
+ M electron-agent/electron/app/agentDataService.ts
+ M electron-agent/electron/app/appServer/serviceTaskRegistry.test.ts
+ M electron-agent/electron/app/appServer/serviceTaskRegistry.ts
+ M electron-agent/electron/app/appServer/taskQueue.test.ts
+ M electron-agent/electron/app/codeGraph/codeGraphEngine.test.ts
+ M electron-agent/electron/app/codeGraph/codeGraphEngine.ts
+ M electron-agent/electron/app/codeGraph/codeGraphHostClient.ts
+ M electron-agent/electron/app/codeGraph/codeGraphRuntime.integration.test.ts
+ M electron-agent/electron/app/codeGraph/codeGraphThreads.test.ts
+ M electron-agent/electron/app/codeGraph/codeGraphThreads.ts
+ M electron-agent/electron/app/codeGraph/hostContract.ts
+ M electron-agent/electron/app/codeGraph/hostEntry.ts
+ M electron-agent/electron/app/codeGraph/syncScheduler.test.ts
+ M electron-agent/electron/app/codeGraph/syncScheduler.ts
+ M electron-agent/electron/app/codeGraph/workerEntry.ts
+ M electron-agent/electron/app/enhancePrompt.test.ts
+ M electron-agent/electron/app/enhancePrompt.ts
+ D electron-agent/electron/app/memoryDedup.test.ts
+ D electron-agent/electron/app/memoryDedup.ts
+ D electron-agent/electron/app/memoryExtractionWindow.test.ts
+ D electron-agent/electron/app/memoryExtractionWindow.ts
+ D electron-agent/electron/app/memoryLayerSchedule.test.ts
+ D electron-agent/electron/app/memoryLayerSchedule.ts
+ D electron-agent/electron/app/memoryLayers.test.ts
+ D electron-agent/electron/app/memoryLayers.ts
+ D electron-agent/electron/app/memoryService.test.ts
+ D electron-agent/electron/app/memoryService.ts
+ D electron-agent/electron/app/memoryTerms.test.ts
+ D electron-agent/electron/app/memoryTerms.ts
+ M electron-agent/electron/app/piRuntimeService.test.ts
+ M electron-agent/electron/app/piRuntimeService.ts
+ M electron-agent/electron/app/plugin/builtinPlugins.ts
+ M electron-agent/electron/app/promptLibraryService.test.ts
+ M electron-agent/electron/app/promptLibraryService.ts
+ M electron-agent/electron/app/providerService.ts
+ M electron-agent/electron/app/settingsService.ts
+ M electron-agent/electron/app/skillService.test.ts
+ M electron-agent/electron/app/skillService.ts
+ M electron-agent/electron/app/systemWorkerSession.test.ts
+ M electron-agent/electron/app/systemWorkerSession.ts
+ M electron-agent/electron/app/taskViewService.test.ts
+ M electron-agent/electron/app/taskViewService.ts
+ M electron-agent/electron/app/thirdPartyLicenses.test.ts
+ M electron-agent/electron/app/uiHistoryService.ts
+ D electron-agent/electron/app/validateProject.test.ts
+ D electron-agent/electron/app/validateProject.ts
+ M electron-agent/electron/app/workspaceService.test.ts
+ M electron-agent/electron/app/workspaceService.ts
+ M electron-agent/electron/ipc/commandCoverage.test.ts
+ M electron-agent/electron/ipc/contracts.ts
+ M electron-agent/electron/ipc/register.test.ts
+ M electron-agent/electron/ipc/register.ts
+ M electron-agent/electron/main.ts
+ M electron-agent/electron/pi/systemWorkerManager.test.ts
+ M electron-agent/electron/pi/systemWorkerManager.ts
+ M electron-agent/electron/preload.ts
+ M electron-agent/index.html
+ M electron-agent/package-lock.json
+ M electron-agent/package.json
+ M electron-agent/pnpm-lock.yaml
+ M electron-agent/scripts/collect-third-party-licenses.cjs
+ M electron-agent/src/App.tsx
+ M electron-agent/src/components/PanelHeader.tsx
+ M electron-agent/src/components/ThemeBridge.tsx
+ M electron-agent/src/components/Titlebar.tsx
+ M electron-agent/src/features/agentData/AgentDataCenter.navigation.test.tsx
+ D electron-agent/src/features/agentData/AgentDataCenter.session.test.tsx
+ M electron-agent/src/features/agentData/AgentDataCenter.test.tsx
+ M electron-agent/src/features/agentData/AgentDataCenter.tsx
+ M electron-agent/src/features/agentData/AgentDataTaskProvider.test.tsx
+ M electron-agent/src/features/agentData/AgentDataTaskProvider.tsx
+ M electron-agent/src/features/agentData/AuditDiagnosticsPanel.tsx
+ M electron-agent/src/features/agentData/CodeRetrievalPanel.navigation.test.tsx
+ M electron-agent/src/features/agentData/JobsPanel.operations.test.tsx
+ M electron-agent/src/features/agentData/JobsPanel.tsx
+ D electron-agent/src/features/agentData/MemoryDetail.test.tsx
+ D electron-agent/src/features/agentData/MemoryDetail.tsx
+ D electron-agent/src/features/agentData/MemoryEditor.test.tsx
+ D electron-agent/src/features/agentData/MemoryEditor.tsx
+ D electron-agent/src/features/agentData/MemoryList.tsx
+ D electron-agent/src/features/agentData/MemoryPanel.test.tsx
+ D electron-agent/src/features/agentData/MemoryPanel.tsx
+ M electron-agent/src/features/agentData/OverviewPanel.test.tsx
+ M electron-agent/src/features/agentData/OverviewPanel.tsx
+ M electron-agent/src/features/agentData/TaskDetailDrawer.test.tsx
+ M electron-agent/src/features/agentData/TaskDetailDrawer.tsx
+ M electron-agent/src/features/agentData/agentDataStyles.ts
+ M electron-agent/src/features/agentData/agentDataViewTypes.ts
+ M electron-agent/src/features/agentData/listRowStyles.ts
+ D electron-agent/src/features/agentData/memoryPresentation.test.ts
+ D electron-agent/src/features/agentData/memoryPresentation.ts
+ D electron-agent/src/features/agentData/memoryStyles.ts
+ D electron-agent/src/features/agentData/memoryTestData.ts
+ M electron-agent/src/features/agentData/operationsPresentation.ts
+ M electron-agent/src/features/agentData/operationsStyles.ts
+ M electron-agent/src/features/agentData/overviewStyles.ts
+ D electron-agent/src/features/agentData/useMemoryBrowser.test.tsx
+ D electron-agent/src/features/agentData/useMemoryBrowser.ts
+ M electron-agent/src/features/chat/AgentMessagePill.test.tsx
+ M electron-agent/src/features/chat/AgentMessagePill.tsx
+ M electron-agent/src/features/chat/ChatInput.test.tsx
+ M electron-agent/src/features/chat/ChatInput.tsx
+ M electron-agent/src/features/chat/ChatMessageItems.tsx
+ M electron-agent/src/features/chat/ChatView.test.tsx
+ M electron-agent/src/features/chat/ChatView.tsx
+ M electron-agent/src/features/chat/EmptyChatPrompt.test.tsx
+ M electron-agent/src/features/chat/EmptyChatPrompt.tsx
+ M electron-agent/src/features/chat/JobDonePill.test.tsx
+ M electron-agent/src/features/chat/JobDonePill.tsx
+ M electron-agent/src/features/chat/ReasoningInline.tsx
+ M electron-agent/src/features/chat/SubAgentGroupInline.test.tsx
+ M electron-agent/src/features/chat/SubAgentGroupInline.tsx
+ M electron-agent/src/features/chat/SubagentSettledPill.test.tsx
+ M electron-agent/src/features/chat/SubagentSettledPill.tsx
+ M electron-agent/src/features/chat/TurnTimeline.tsx
+ M electron-agent/src/features/chat/UserMessage.test.tsx
+ M electron-agent/src/features/chat/groupMessages.ts
+ M electron-agent/src/features/chat/input/actions/ApprovalAction.test.tsx
+ M electron-agent/src/features/chat/input/actions/ApprovalAction.tsx
+ M electron-agent/src/features/chat/input/actions/ModeAction.tsx
+ M electron-agent/src/features/chat/input/actions/ModelThinkingAction.test.tsx
+ M electron-agent/src/features/chat/input/actions/ModelThinkingAction.tsx
+ M electron-agent/src/features/chat/input/commandUtils.test.ts
+ M electron-agent/src/features/chat/input/commandUtils.ts
+ M electron-agent/src/features/chat/input/composerFiles.test.ts
+ M electron-agent/src/features/chat/input/composerFiles.ts
+ M electron-agent/src/features/chat/input/editor/MessageEditor.tsx
+ M electron-agent/src/features/chat/input/latestTodos.test.ts
+ M electron-agent/src/features/chat/input/latestTodos.ts
+ M electron-agent/src/features/chat/input/modelUtils.ts
+ M electron-agent/src/features/chat/input/workspace/ProjectContextPanel.test.tsx
+ M electron-agent/src/features/chat/input/workspace/ProjectContextPanel.tsx
+ M electron-agent/src/features/chat/messagePrecompute.test.ts
+ M electron-agent/src/features/chat/messagePrecompute.ts
+ M electron-agent/src/features/chat/structuredMessageText.test.ts
+ M electron-agent/src/features/chat/turnRows.ts
+ M electron-agent/src/features/dock/useDockSessionSwitch.ts
+ M electron-agent/src/features/extensionUi/ExtensionUiHost.tsx
+ M electron-agent/src/features/extensions/CommandsPanel.test.tsx
+ M electron-agent/src/features/extensions/CommandsPanel.tsx
+ M electron-agent/src/features/extensions/ExtensionsPanel.test.tsx
+ M electron-agent/src/features/extensions/ExtensionsPanel.tsx
+ M electron-agent/src/features/extensions/McpServerCard.test.tsx
+ M electron-agent/src/features/extensions/McpServerCard.tsx
+ M electron-agent/src/features/extensions/NativeSkillsPanel.test.tsx
+ M electron-agent/src/features/extensions/NativeSkillsPanel.tsx
+ M electron-agent/src/features/extensions/RulesPanel.test.tsx
+ M electron-agent/src/features/extensions/RulesPanel.tsx
+ M electron-agent/src/features/extensions/libraryStyles.ts
+ M electron-agent/src/features/fileExplorer/markdownLinks.test.ts
+ M electron-agent/src/features/layout/ModuleRail.test.tsx
+ M electron-agent/src/features/layout/ModuleRail.tsx
+ M electron-agent/src/features/layout/PanelShells.tsx
+ M electron-agent/src/features/links/AppLinkGuard.test.tsx
+ M electron-agent/src/features/panels/SubAgentConversation.tsx
+ M electron-agent/src/features/panels/subagentUtils.test.ts
+ M electron-agent/src/features/panels/subagentUtils.ts
+ M electron-agent/src/features/sessions/ProjectItem.tsx
+ M electron-agent/src/features/sessions/SessionItem.tsx
+ M electron-agent/src/features/sessions/Sidebar.tsx
+ M electron-agent/src/features/sessions/SidebarSectionHeader.tsx
+ M electron-agent/src/features/settings/AppearanceSettings.test.tsx
+ M electron-agent/src/features/settings/AppearanceSettings.tsx
+ M electron-agent/src/features/settings/ModelSelectField.tsx
+ M electron-agent/src/features/settings/ProviderModelCard.tsx
+ M electron-agent/src/features/settings/providerConfigAdapter.ts
+ M electron-agent/src/features/settings/scrubLinkedModelSettings.test.ts
+ M electron-agent/src/features/settings/settingsSchema.test.ts
+ M electron-agent/src/features/settings/settingsSchema.ts
+ M electron-agent/src/features/tools/BashJobTerminal.test.tsx
+ M electron-agent/src/features/tools/CodemodeCard.tsx
+ M electron-agent/src/features/tools/ContextToolGroup.test.tsx
+ M electron-agent/src/features/tools/ContextToolGroup.tsx
+ M electron-agent/src/features/tools/ToolExecution.test.tsx
+ M electron-agent/src/features/tools/ToolExecution.tsx
+ M electron-agent/src/features/tools/extensionCards.test.tsx
+ M electron-agent/src/features/workspace/ModuleContainer.test.tsx
+ M electron-agent/src/features/workspace/ModuleContainer.tsx
+ M electron-agent/src/features/workspace/WorkspaceTabs.test.tsx
+ M electron-agent/src/features/workspace/WorkspaceTabs.tsx
+ M electron-agent/src/lib/agentData.test.ts
+ M electron-agent/src/lib/agentData.ts
+ M electron-agent/src/lib/hrefKinds.test.ts
+ M electron-agent/src/lib/hrefKinds.ts
+ M electron-agent/src/lib/idbStorage.ts
+ M electron-agent/src/lib/lastOpen.test.ts
+ M electron-agent/src/lib/lastOpen.ts
+ M electron-agent/src/lib/pendingSession.test.ts
+ M electron-agent/src/lib/pendingSession.ts
+ M electron-agent/src/lib/pi.ts
+ M electron-agent/src/lib/promptLibraryIo.ts
+ M electron-agent/src/lib/sessionMessageCache.ts
+ M electron-agent/src/lib/sidebarSessionSync.ts
+ M electron-agent/src/lib/systemWorkerChat.test.ts
+ M electron-agent/src/lib/systemWorkerChat.ts
+ M electron-agent/src/platform/runtime.test.ts
+ M electron-agent/src/platform/runtime.ts
+ M electron-agent/src/preview.tsx
+ M electron-agent/src/store/session.ts
+ M electron-agent/src/stores/AgentStoreContext.tsx
+ M electron-agent/src/stores/agent.test.ts
+ M electron-agent/src/stores/agent.ts
+ M electron-agent/src/stores/agentReducer.test.ts
+ M electron-agent/src/stores/agentReducer.ts
+ M electron-agent/src/stores/chatDraftStore.test.ts
+ M electron-agent/src/stores/chatDraftStore.ts
+ M electron-agent/src/stores/dockStore.test.ts
+ M electron-agent/src/stores/dockStore.ts
+ M electron-agent/src/stores/fullAccessConfirmStore.test.ts
+ M electron-agent/src/stores/fullAccessConfirmStore.ts
+ M electron-agent/src/stores/modeStore.ts
+ M electron-agent/src/stores/moduleStore.test.ts
+ M electron-agent/src/stores/moduleStore.ts
+ M electron-agent/src/stores/sessionMessageSync.ts
+ M electron-agent/src/stores/sessionSnapshot.ts
+ M electron-agent/src/stores/themeStore.test.ts
+ M electron-agent/src/stores/themeStore.ts
+ D electron-agent/src/theme/colorSchemes.ts
+ M electron-agent/tsconfig.node.json
+ M electron-agent/ui-harness/HarnessRoot.tsx
+ M electron-agent/ui-harness/index.html
+ M electron-agent/ui-harness/probes/agent-message.mjs
+ M electron-agent/ui-harness/probes/agentdata-overview.mjs
+ M electron-agent/ui-harness/probes/prompt-library-panel.mjs
+ M electron-agent/ui-harness/probes/subagent-history.mjs
+ M electron-agent/ui-harness/scenarios/agent-message.tsx
+ M electron-agent/ui-harness/scenarios/agentdata-overview.tsx
+ M electron-agent/ui-harness/scenarios/composer-chips.tsx
+ M electron-agent/ui-harness/scenarios/plan-panel.tsx
+ M electron-agent/ui-harness/scenarios/prompt-library-panel.tsx
+ M electron-agent/ui-harness/scenarios/subagent-history.tsx
+ M extensions/README.md
+ M extensions/_shared/desktop-control.ts
+ M extensions/_shared/llm.ts
+ M extensions/_shared/session-cwd.ts
+ M extensions/_shared/transcript.ts
+ M extensions/agent-data-manifests.ts
+ M extensions/agent-mode/index.test.ts
+ M extensions/agent-mode/index.ts
+ M extensions/agent-mode/modes.test.ts
+ M extensions/agent-mode/modes.ts
+ M extensions/agent-mode/planState.ts
+ M extensions/approval/index.test.ts
+ M extensions/approval/index.ts
+ M extensions/code-retrieval/index.test.ts
+ M extensions/code-retrieval/mcpClient.ts
+ M extensions/context-rules/index.test.ts
+ M extensions/context-rules/index.ts
+ M extensions/context-rules/rules.test.ts
+ M extensions/context-rules/rules.ts
+ M extensions/diagram-hint/index.ts
+ M extensions/fable-behavior/README.md
+ M extensions/fable-behavior/index.test.ts
+ M extensions/fable-behavior/index.ts
+ M extensions/fable-behavior/loader.test.ts
+ M extensions/fable-behavior/loader.ts
+ D extensions/fable-behavior/prompts/modes/brainstorm.md
+ D extensions/fable-behavior/prompts/tier2/refusal.md
+ M extensions/im-platforms/index.ts
+ M extensions/index.test.ts
+ M extensions/index.ts
+ D extensions/memory/capture.test.ts
+ D extensions/memory/capture.ts
+ D extensions/memory/client.test.ts
+ D extensions/memory/client.ts
+ D extensions/memory/context.ts
+ D extensions/memory/index.test.ts
+ D extensions/memory/index.ts
+ D extensions/memory/llm.ts
+ D extensions/memory/prompts.test.ts
+ D extensions/memory/prompts.ts
+ D extensions/memory/store.ts
+ M extensions/multi-agent/activation.ts
+ M extensions/multi-agent/agents.ts
+ M extensions/multi-agent/embedded-runner.ts
+ M extensions/multi-agent/index.test.ts
+ M extensions/multi-agent/index.ts
+ M extensions/multi-agent/list-models-tool.test.ts
+ M extensions/multi-agent/list-models-tool.ts
+ M extensions/multi-agent/model-selection.test.ts
+ M extensions/multi-agent/model-selection.ts
+ D extensions/multi-agent/parallel-early.ts
+ M extensions/multi-agent/registry.ts
+ M extensions/multi-agent/runner.ts
+ M extensions/multi-agent/tasks.ts
+ M extensions/multi-agent/worker-host.ts
+ M extensions/multi-agent/worker-protocol.ts
+ M extensions/multi-agent/worker-session.test.ts
+ M extensions/multi-agent/worker-session.ts
+ M extensions/package-lock.json
+ M extensions/package.json
+ M extensions/pnpm-lock.yaml
+ M extensions/prompt-metadata.test.ts
+ M extensions/todo/index.ts
+ M extensions/todo/todo.test.ts
+ M extensions/todo/todo.ts
+ M extensions/wiki-rag/client.ts
+ D images/chat-diagram.png
+ D images/code-index.png
+ D images/git-graph.png
+ D images/hero-code-graph.jpg
+ D images/mcp-servers.png
+ D images/providers.png
+ D images/skills.png
+ D images/workspace-context.png
+?? .agents/evidence/2026-10-27-codegraph-catchup-and-read-limits/
+?? .agents/evidence/2026-10-28-model-fast/
+?? .agents/evidence/2026-10-28-parallel-subagent-investigation/
+?? .agents/evidence/2026-10-28-session-fast-mode/
+?? .agents/evidence/2026-10-28-session-preferences-behavior/
+?? .agents/evidence/2026-10-28-subagent-empty-array-display/
+?? .agents/evidence/2026-10-28-subagent-message-rendering/
+?? .agents/evidence/2026-10-28-todo-state-consistency/
+?? .agents/evidence/2026-10-28-ultra-mode/
+?? .agents/evidence/2026-10-28-windows-chat-file-links/
+?? .agents/evidence/2026-10-30-header-session-title/
+?? .agents/evidence/2026-10-30-professional-workbench/
+?? .agents/evidence/2026-10-30-remove-brainstorm/
+?? .agents/evidence/2026-10-30-single-workbench-theme/
+?? .agents/evidence/2026-10-31-draft-composer-bottom/
+?? .agents/evidence/2026-10-31-extension-workbench/
+?? .agents/evidence/2026-10-31-mcp-workbench-bounds/
+?? .agents/evidence/2026-10-31-remove-agentdata-memory/
+?? .agents/evidence/2026-10-31-repo-wiki-host-workflow-alignment/
+?? .agents/evidence/2026-10-31-repo-wiki-process-integration/
+?? .agents/evidence/2026-10-31-repo-wiki-project-files-and-lazy-service/
+?? .agents/evidence/2026-10-31-responsive-empty-chat/
+?? .agents/evidence/2026-11-01-extension-pages-cleanup/
+?? .agents/evidence/2026-11-01-mcp-detail-cleanup/
+?? .agents/evidence/2026-11-01-pi-sdk-1.4.0-upgrade/
+?? .agents/evidence/2026-11-01-repo-wiki-agentdata-durable-tasks/
+?? .agents/evidence/2026-11-01-repo-wiki-git-safe-directory/
+?? .agents/evidence/2026-11-01-repo-wiki-knowledge-kernel-design/
+?? .agents/evidence/2026-11-01-repo-wiki-knowledge-kernel/
+?? .agents/evidence/2026-11-01-repo-wiki-real-model-run/
+?? .agents/evidence/2026-11-01-repo-wiki-token-budget-estimate/
+?? .agents/evidence/2026-11-01-repo-wiki-unified-knowledge-ui/
+?? .agents/evidence/2026-11-01-skill-grid-and-yaml-description/
+?? .agents/evidence/2026-11-02-repo-wiki-forbidden-path/
+?? .agents/evidence/2026-11-02-repo-wiki-qoder-alignment/
+?? .agents/notes/archived/architecture/
+?? .agents/notes/archived/manifest.json
+?? .agents/notes/implemented/architecture/2026-10-27-codegraph-catchup-and-read-limits.md
+?? .agents/notes/implemented/architecture/2026-10-31-repo-wiki-process-integration.md
+?? .agents/notes/implemented/architecture/2026-10-31-repo-wiki-project-files-and-lazy-service.md
+?? .agents/notes/implemented/architecture/2026-11-01-pi-sdk-1.4.0-upgrade.md
+?? .agents/notes/implemented/architecture/2026-11-01-repo-wiki-agentdata-durable-tasks.md
+?? .agents/notes/implemented/architecture/2026-11-01-repo-wiki-knowledge-kernel.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-agent-notice-snapshot-overlap.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-composer-chips-reset-owner-storage.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-session-view-updater-compat.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-subagent-authorization-before-launch.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-subagent-empty-array-display.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-todo-state-consistency.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-ultra-rule-boundaries.md
+?? .agents/notes/implemented/bug-fix/2026-10-28-windows-chat-file-links.md
+?? .agents/notes/implemented/bug-fix/2026-10-29-subagent-thinking-level-coercion.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-draft-composer-bottom.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-mcp-policy-initial-read.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-mcp-workbench-bounds.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-repo-wiki-host-workflow-alignment.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-repo-wiki-windows-git-identity.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-repo-wiki-windows-stream-and-wal-tests.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-responsive-empty-chat.md
+?? .agents/notes/implemented/bug-fix/2026-10-31-skill-file-picker.md
+?? .agents/notes/implemented/bug-fix/2026-11-01-repo-wiki-git-safe-directory.md
+?? .agents/notes/implemented/bug-fix/2026-11-01-repo-wiki-partial-tool-output.md
+?? .agents/notes/implemented/bug-fix/2026-11-01-repo-wiki-real-model-shakedown.md
+?? .agents/notes/implemented/bug-fix/2026-11-01-repo-wiki-token-budget-estimate.md
+?? .agents/notes/implemented/bug-fix/2026-11-01-repo-wiki-unified-knowledge-ui.md
+?? .agents/notes/implemented/bug-fix/2026-11-01-skill-grid-and-yaml-description.md
+?? .agents/notes/implemented/feature/2026-10-28-model-fast.md
+?? .agents/notes/implemented/feature/2026-10-28-session-fast-mode.md
+?? .agents/notes/implemented/feature/2026-10-28-session-preferences-behavior.md
+?? .agents/notes/implemented/feature/2026-10-28-subagent-message-rendering.md
+?? .agents/notes/implemented/feature/2026-10-28-ultra-mode.md
+?? .agents/notes/implemented/feature/2026-10-29-gpt-with-taste-as-pi-extension.md
+?? .agents/notes/implemented/feature/2026-10-30-professional-workbench.md
+?? .agents/notes/implemented/feature/2026-10-31-extension-workbench.md
+?? .agents/notes/implemented/feature/2026-11-01-extension-pages-cleanup.md
+?? .agents/notes/implemented/feature/2026-11-01-mcp-detail-cleanup.md
+?? .agents/notes/implemented/simplification/2026-10-30-remove-brainstorm-mode.md
+?? .agents/notes/implemented/simplification/2026-10-30-single-workbench-theme.md
+?? .agents/notes/implemented/simplification/2026-10-31-remove-agentdata-memory.md
+?? .agents/notes/proposed/architecture/2026-11-02-repo-wiki-qoder-alignment.md
+?? .agents/notes/rejected/architecture/2026-10-16-codegraph-host-process-auto-sync.md
+?? cli/src/pi-install-patches.test.ts
+?? docs/repo-wiki.md
+?? docs/repo-wiki/
+?? docs/superpowers/plans/2026-10-31-repo-wiki-project-files-and-lazy-service.md
+?? docs/superpowers/plans/2026-11-01-pi-sdk-1.4-upgrade.md
+?? docs/superpowers/plans/2026-11-01-repo-wiki-knowledge-kernel.md
+?? docs/superpowers/plans/2026-11-02-repo-wiki-qoder-alignment.md
+?? docs/superpowers/specs/2026-11-01-repo-wiki-knowledge-kernel-design.md
+?? electron-agent/electron/agent/completionJson.test.ts
+?? electron-agent/electron/agent/completionJson.ts
+?? electron-agent/electron/agent/knowledgeModelTurn.test.ts
+?? electron-agent/electron/agent/knowledgeModelTurn.ts
+?? electron-agent/electron/agent/repoWikiHostBuild.test.ts
+?? electron-agent/electron/agent/repoWikiHostBuild.ts
+?? electron-agent/electron/agent/repoWikiLicenses.test.ts
+?? electron-agent/electron/agent/repoWikiWorkerEntry.test.ts
+?? electron-agent/electron/agentData/createAgentDataModelPort.test.ts
+?? electron-agent/electron/agentData/createAgentDataModelPort.ts
+?? electron-agent/electron/agentData/knowledgeCompletion.test.ts
+?? electron-agent/electron/agentData/knowledgeKernel/
+?? electron-agent/electron/agentData/runtime.knowledgeKernel.test.ts
+?? electron-agent/electron/agentData/runtime.memoryRemoval.test.ts
+?? electron-agent/electron/agentData/runtime.repoWikiJobs.test.ts
+?? electron-agent/electron/agentData/storage.memoryRemoval.test.ts
+?? electron-agent/electron/agentData/wikiEngine/knowledgeModelSlot.test.ts
+?? electron-agent/electron/agentData/wikiEngine/llm.test.ts
+?? electron-agent/electron/agentDataProcess/modelPort.ts
+?? electron-agent/electron/app/codeGraph/gitHead.test.ts
+?? electron-agent/electron/app/codeGraph/gitHead.ts
+?? electron-agent/electron/app/codeGraph/hostLimits.test.ts
+?? electron-agent/electron/app/codeGraph/hostLimits.ts
+?? electron-agent/electron/app/codeGraph/readAdmission.test.ts
+?? electron-agent/electron/app/codeGraph/readAdmission.ts
+?? electron-agent/electron/app/codeGraph/readConsistency.test.ts
+?? electron-agent/electron/app/codeGraph/readConsistency.ts
+?? electron-agent/electron/app/codeGraph/workspaceRegistry.ts
+?? electron-agent/electron/app/fastMode.integration.test.ts
+?? electron-agent/electron/app/repoWikiDurable.integration.test.ts
+?? electron-agent/electron/app/repoWikiHostProjects.integration.test.ts
+?? electron-agent/electron/app/repoWikiKnowledgeKernel.integration.fixture.ts
+?? electron-agent/electron/app/repoWikiKnowledgeKernel.integration.test.ts
+?? electron-agent/electron/app/repoWikiKnowledgeModel.test.ts
+?? electron-agent/electron/app/repoWikiKnowledgeModel.ts
+?? electron-agent/electron/app/repoWikiLazy.integration.test.ts
+?? electron-agent/electron/app/repoWikiLazyHost.test.ts
+?? electron-agent/electron/app/repoWikiRealModel.e2e.test.ts
+?? electron-agent/electron/app/repoWikiService.test.ts
+?? electron-agent/electron/app/repoWikiService.ts
+?? electron-agent/electron/app/repoWikiTasks.test.ts
+?? electron-agent/electron/app/repoWikiWorkflow.integration.fixture.ts
+?? electron-agent/electron/app/repoWikiWorkflow.integration.test.ts
+?? electron-agent/electron/app/sessionPreferences.integration.test.ts
+?? electron-agent/electron/app/uiHistoryService.ordering.test.ts
+?? electron-agent/electron/ipc/filePicker.ts
+?? electron-agent/electron/ipc/register.dispose.test.ts
+?? electron-agent/electron/knowledgeProcess/
+?? electron-agent/electron/preload.test.ts
+?? electron-agent/scripts/fixtures/
+?? electron-agent/scripts/test-repo-wiki.mjs
+?? electron-agent/shared/
+?? electron-agent/src/features/chat/AgentCommunicationCard.tsx
+?? electron-agent/src/features/chat/JobDonePill.guard.test.tsx
+?? electron-agent/src/features/chat/MessageTimelineContext.ts
+?? electron-agent/src/features/chat/TaskNoticeCard.tsx
+?? electron-agent/src/features/chat/agentCommunicationModel.test.ts
+?? electron-agent/src/features/chat/agentCommunicationModel.ts
+?? electron-agent/src/features/chat/input/actions/FastModeToggle.tsx
+?? electron-agent/src/features/chat/input/actions/ModeAction.test.tsx
+?? electron-agent/src/features/chat/input/actions/composerPreferences.test.ts
+?? electron-agent/src/features/chat/input/actions/composerPreferences.ts
+?? electron-agent/src/features/chat/input/composerFilesStorage.ts
+?? electron-agent/src/features/chat/input/composerOwner.test.ts
+?? electron-agent/src/features/chat/input/composerOwner.ts
+?? electron-agent/src/features/chat/taskNoticeModel.test.ts
+?? electron-agent/src/features/chat/taskNoticeModel.ts
+?? electron-agent/src/features/chat/useSessionViewExpanded.test.tsx
+?? electron-agent/src/features/chat/useSessionViewExpanded.ts
+?? electron-agent/src/features/dock/useDockSessionSwitch.test.tsx
+?? electron-agent/src/features/extensionUi/ExtensionUiHost.sessionPreferences.test.tsx
+?? electron-agent/src/features/extensions/ExtensionPageHeader.tsx
+?? electron-agent/src/features/extensions/McpWorkbench.test.tsx
+?? electron-agent/src/features/extensions/McpWorkbench.tsx
+?? electron-agent/src/features/extensions/mcpPresentation.ts
+?? electron-agent/src/features/repoWiki/
+?? electron-agent/src/features/settings/fastCapability.test.ts
+?? electron-agent/src/features/tools/SendMessageCard.tsx
+?? electron-agent/src/features/tools/toolViewExpansion.test.tsx
+?? electron-agent/src/lib/modelMessages.ts
+?? electron-agent/src/lib/pi.sessionPreferences.test.ts
+?? electron-agent/src/lib/sessionPreferences.test.ts
+?? electron-agent/src/lib/sessionPreferences.ts
+?? electron-agent/src/stores/agentNoticeProjection.test.ts
+?? electron-agent/src/stores/fastModeStore.ts
+?? electron-agent/src/stores/modeStore.test.ts
+?? electron-agent/src/stores/sessionPreferencesStore.storage.test.ts
+?? electron-agent/src/stores/sessionPreferencesStore.test.ts
+?? electron-agent/src/stores/sessionPreferencesStore.ts
+?? electron-agent/src/stores/sessionViewStateStore.test.ts
+?? electron-agent/src/stores/sessionViewStateStore.ts
+?? electron-agent/src/stores/todoConsistency.test.ts
+?? electron-agent/src/theme/WorkbenchThemeProvider.tsx
+?? electron-agent/src/theme/workbenchTheme.test.tsx
+?? electron-agent/src/theme/workbenchTheme.ts
+?? electron-agent/tsconfig.knowledge-kernel.json
+?? electron-agent/tsconfig.repo-wiki.json
+?? electron-agent/ui-harness/probes/agentdata-memory-retirement.mjs
+?? electron-agent/ui-harness/probes/appearance-settings.mjs
+?? electron-agent/ui-harness/probes/chat-file-links.mjs
+?? electron-agent/ui-harness/probes/extensions-workbench.mjs
+?? electron-agent/ui-harness/probes/model-fast.mjs
+?? electron-agent/ui-harness/probes/repo-wiki.mjs
+?? electron-agent/ui-harness/probes/session-preferences.mjs
+?? electron-agent/ui-harness/probes/task-notices.mjs
+?? electron-agent/ui-harness/probes/todo-consistency.mjs
+?? electron-agent/ui-harness/probes/ultra-mode.mjs
+?? electron-agent/ui-harness/probes/workbench-layout.mjs
+?? electron-agent/ui-harness/scenarios/agentdata-memory-retirement.tsx
+?? electron-agent/ui-harness/scenarios/appearance-settings.tsx
+?? electron-agent/ui-harness/scenarios/chat-file-links.tsx
+?? electron-agent/ui-harness/scenarios/extensions-workbench.tsx
+?? electron-agent/ui-harness/scenarios/model-fast.tsx
+?? electron-agent/ui-harness/scenarios/repo-wiki.tsx
+?? electron-agent/ui-harness/scenarios/session-preferences.tsx
+?? electron-agent/ui-harness/scenarios/task-notices.tsx
+?? electron-agent/ui-harness/scenarios/todo-consistency.tsx
+?? electron-agent/ui-harness/scenarios/ultra-mode.tsx
+?? electron-agent/ui-harness/scenarios/workbench-layout.tsx
+?? electron-agent/vendor/
+?? electron-agent/vitest.repo-wiki.config.ts
+?? extensions/_shared/agent-data-client.test.ts
+?? extensions/_shared/agent-data-client.ts
+?? extensions/_shared/fast-mode-preferences.ts
+?? extensions/_shared/fast-mode.ts
+?? extensions/_shared/pi-sdk-compat.integration.test.ts
+?? extensions/_shared/session-preferences.test.ts
+?? extensions/_shared/session-preferences.ts
+?? extensions/_shared/taste-scope.ts
+?? extensions/_shared/ultra-context.test.ts
+?? extensions/_shared/ultra-context.ts
+?? extensions/agent-mode/planState.test.ts
+?? extensions/agent-mode/ultra-rules.md
+?? extensions/agent-mode/ultra-rules.test.ts
+?? extensions/agent-mode/ultra-rules.ts
+?? extensions/agent-mode/ultraRulesInjection.test.ts
+?? extensions/fable-behavior/prompts/modes/ultra.md
+?? extensions/fast-mode/
+?? extensions/gpt-with-taste/
+?? extensions/multi-agent/routing.test.ts
+?? extensions/multi-agent/routing.ts
+?? extensions/multi-agent/ultra-routing-spawn.test.ts
+?? extensions/multi-agent/ultra-sdk.integration.test.ts
+?? extensions/todo/index.test.ts
+?? tmp/

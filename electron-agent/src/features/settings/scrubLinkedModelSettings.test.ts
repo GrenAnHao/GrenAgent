@@ -80,3 +80,37 @@ describe('scrubLinkedModelSettings', () => {
     expect(clearedKeys).toContain('enhancePromptModel');
   });
 });
+
+describe('scrubLinkedModelSettings — ultra keys', () => {
+  it('clears Ultra role / default keys pointing at the deleted provider and edits the Ultra allowlist', () => {
+    const { next, changed, clearedKeys } = scrubLinkedModelSettings(
+      {
+        ULTRA_SUBAGENT_MODEL: 'gone/planner',
+        ULTRA_SUBAGENT_MODEL_SCOUT: 'gone/flash',
+        ULTRA_SUBAGENT_MODEL_WORKER: 'openai/gpt-5',
+        ULTRA_SUBAGENT_MODEL_PLANNER: 'gone/gpt-5',
+        ULTRA_SUBAGENT_MODEL_REVIEWER: 'gone/critic',
+        ULTRA_SUBAGENT_MODEL_ALLOWLIST: JSON.stringify(['gone/flash', 'openai/gpt-5']),
+        SUBAGENT_MODEL: 'openai/gpt-4o',
+      },
+      ['gone'],
+    );
+
+    expect(changed).toBe(true);
+    expect(next.ULTRA_SUBAGENT_MODEL).toBe('');
+    expect(next.ULTRA_SUBAGENT_MODEL_SCOUT).toBe('');
+    expect(next.ULTRA_SUBAGENT_MODEL_WORKER).toBe('openai/gpt-5');
+    expect(next.ULTRA_SUBAGENT_MODEL_PLANNER).toBe('');
+    expect(next.ULTRA_SUBAGENT_MODEL_REVIEWER).toBe('');
+    expect(next.ULTRA_SUBAGENT_MODEL_ALLOWLIST).toBe(JSON.stringify(['openai/gpt-5']));
+    // 普通键不受 Ultra 影响，反之亦然
+    expect(next.SUBAGENT_MODEL).toBe('openai/gpt-4o');
+    expect(clearedKeys).toEqual([
+      'ULTRA_SUBAGENT_MODEL',
+      'ULTRA_SUBAGENT_MODEL_SCOUT',
+      'ULTRA_SUBAGENT_MODEL_PLANNER',
+      'ULTRA_SUBAGENT_MODEL_REVIEWER',
+      'ULTRA_SUBAGENT_MODEL_ALLOWLIST',
+    ]);
+  });
+});

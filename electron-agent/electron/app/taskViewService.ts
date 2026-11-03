@@ -1,6 +1,7 @@
 import type { Job, JobStore } from '../agentData/jobStore';
 import type { TaskViewStore } from '../agentData/taskViewStore';
 import type { TaskDetail, TaskListInput, TaskPage, TaskRef, TaskRetryOptions, TaskRetryPreview, TaskView } from '../agentData/operationsContracts';
+import type { RepoWikiKnowledgeSnapshot } from '../../shared/knowledgeKernelContracts';
 
 export interface TaskViewServiceOptions {
   views: TaskViewStore; jobs: JobStore;
@@ -8,8 +9,12 @@ export interface TaskViewServiceOptions {
   readTarget: (job: Job) => Promise<{ exists: boolean; busy: boolean }>;
   dispatch: (job: Job, metadata: { retryOf: string }, options?: TaskRetryOptions) => Promise<Job>;
   canCancel?: (job: Job) => boolean;
+  describeModel?: () => Promise<string>;
+  readKnowledgeSnapshot?: (job: Job) => Promise<RepoWikiKnowledgeSnapshot>;
+  actKnowledgeTask?: (job: Job, options?: TaskRetryOptions) => Promise<Job>;
+  previewKnowledgeRetry?: (job: Job) => Promise<{ model?: string; modelIdentity?: string; planToken?: string; reusable?: number; redo?: number }>;
 }
-const retryKinds = new Set(['codegraph.sync']);
+const retryKinds = new Set(['codegraph.sync', 'repoWiki.generate']);
 
 export class TaskViewService {
   private readonly pendingTargets = new Set<string>();
@@ -31,7 +36,7 @@ export class TaskViewService {
     return this.preview(job);
   }
 
-  async retry(ref: TaskRef, options?: TaskRetryOptions): Promise<TaskView> {
+  async retry(ref: TaskRef, options?: TaskRetryOptions & { expectedModelIdentity?: string; expectedPlanToken?: string }): Promise<TaskView> {
     const job = this.requireRetryable(ref);
     const key = this.targetKey(job);
     if (this.pendingTargets.has(key)) throw new Error('TASK_TARGET_BUSY');
@@ -39,12 +44,25 @@ export class TaskViewService {
     try {
       await this.assertTarget(job);
       const preview = await this.preview(job);
+      if (job.metadata?.repoWiki) {
+        if (!options?.expectedModelIdentity || !options.expectedPlanToken) throw new Error('CONFIRMATION_REQUIRED');
+        if (preview.modelIdentity !== options.expectedModelIdentity) throw new Error('MODEL_CHANGED');
+        if (preview.planToken !== options.expectedPlanToken) throw new Error('PLAN_CHANGED');
+      }
+      if (job.kind === 'repoWiki.generate') {
+        if (!options?.expectedModel) throw new Error('MODEL_CONFIRMATION_REQUIRED');
+        if (preview.model !== options.expectedModel) throw new Error('MODEL_CHANGED');
+      }
       const current = this.requireRetryable(ref);
       if (this.targetKey(current) !== key) throw new Error('TASK_TARGET_CHANGED');
       await this.assertTarget(current);
       const final = this.requireRetryable(ref);
       if (this.targetKey(final) !== key) throw new Error('TASK_TARGET_CHANGED');
-      const created = await this.options.dispatch(final, { retryOf: job.id }, options);
+      if (final.metadata?.repoWiki && !this.options.actKnowledgeTask) throw new Error('KNOWLEDGE_COORDINATOR_UNAVAILABLE');
+      if (final.metadata?.repoWiki && (!this.options.readKnowledgeSnapshot || !(await this.options.readKnowledgeSnapshot(final)).run?.capabilities.repair)) throw new Error('TASK_RETRY_UNAVAILABLE');
+      const created = final.metadata?.repoWiki
+        ? await this.options.actKnowledgeTask!(final, options)
+        : await this.options.dispatch(final, { retryOf: job.id }, options);
       const view = this.options.views.read({ source: 'user', id: created.id });
       if (!view) throw new Error('TASK_NOT_FOUND');
       return this.withCapabilities(view);
@@ -66,10 +84,16 @@ export class TaskViewService {
   }
 
   private retryable(job: Job): boolean {
+    if (job.metadata?.repoWiki) return ['failed','cancelled'].includes(job.state) && Boolean(job.workspace.trim());
     return retryKinds.has(job.kind) && ['failed', 'cancelled'].includes(job.state) && Boolean(job.workspace.trim());
   }
 
-  private targetKey(job: Job): string { return job.metadata?.target ? `${job.metadata.target.type}:${job.metadata.target.id}` : `project:${job.workspace}`; }
+  private targetKey(job: Job): string {
+    const target = job.metadata?.target ? `${job.metadata.target.type}:${job.metadata.target.id}` : `project:${job.workspace}`;
+    const payload = job.metadata?.payload;
+    return job.kind === 'repoWiki.generate' && payload && 'projectId' in payload
+      ? `${target}:${payload.projectId}:${payload.language}:${payload.target}` : target;
+  }
 
   private async assertTarget(job: Job): Promise<void> {
     const target = await this.options.readTarget(job);
@@ -77,14 +101,21 @@ export class TaskViewService {
     if (target.busy) throw new Error('TASK_TARGET_BUSY');
   }
 
-  private async preview(job: Job): Promise<TaskRetryPreview> {
+  private async preview(job: Job): Promise<TaskRetryPreview & { modelIdentity?: string; planToken?: string }> {
     const ref = { source: 'user' as const, id: job.id }; const view = this.options.views.read(ref)!;
-    return { ref, resource: view.resource, label: view.label, callsModel: false };
+    if (job.metadata?.repoWiki && this.options.previewKnowledgeRetry) return { ref, resource: view.resource, label: view.label, callsModel: true, ...await this.options.previewKnowledgeRetry(job) };
+    return { ref, resource: view.resource, label: view.label, callsModel: job.kind === 'repoWiki.generate',
+      ...(job.kind === 'repoWiki.generate' && this.options.describeModel ? { model: await this.options.describeModel() } : {}) };
   }
 
   private async withCapabilities<T extends TaskView>(view: T): Promise<T> {
     if (view.ref.source === 'system') return view;
     const job = this.options.jobs.get(view.ref.id); if (!job) return view;
+    if (job.metadata?.repoWiki) {
+      if (!this.options.readKnowledgeSnapshot) return { ...view, capabilities: { ...view.capabilities, cancel: false, retry: false } };
+      const knowledge = await this.options.readKnowledgeSnapshot(job);
+      return { ...view, knowledge, capabilities: { ...view.capabilities, cancel: knowledge.run?.capabilities.cancel === true, retry: knowledge.run?.capabilities.repair === true && Boolean(this.options.actKnowledgeTask) } };
+    }
     const cancel = retryKinds.has(job.kind) && ['pending', 'running'].includes(job.state) && !job.metadata?.cancellationRequested && this.options.canCancel?.(job) === true;
     let retry = false;
     if (this.retryable(job) && view.capabilities.remove && !this.pendingTargets.has(this.targetKey(job))) {

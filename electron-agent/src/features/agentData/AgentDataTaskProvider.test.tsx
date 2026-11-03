@@ -68,6 +68,16 @@ afterEach(() => {
 });
 
 describe('AgentDataTaskProvider', () => {
+  it('refreshes a dormant task snapshot when returning to the task centre after a reading-page action', async () => {
+    vi.mocked(agentDataApi.tasks.list).mockResolvedValue({ items: [{ ...asTask(job()), status: 'paused' }], activeCount: 1, pollingCount: 0 });
+    const view = render(tree('jobs')); await flush(); view.rerender(tree('repoWiki')); await flush(); const reads = vi.mocked(agentDataApi.tasks.list).mock.calls.length;
+    vi.mocked(agentDataApi.tasks.list).mockResolvedValue({ items: [asTask(job())], activeCount: 1, pollingCount: 1 }); view.rerender(tree('jobs')); await flush(); expect(vi.mocked(agentDataApi.tasks.list).mock.calls.length).toBeGreaterThan(reads); expect(monitor.tasks[0].status).toBe('running');
+  });
+  it('retains paused/blocked attention counts while pollingCount zero stops recurring reads', async () => {
+    vi.mocked(agentDataApi.tasks.list).mockResolvedValue({ items: [{ ...asTask(job()), status: 'paused' }], activeCount: 1, pollingCount: 0 });
+    render(tree('jobs')); await flush(); await act(async () => { monitor.track('task-1'); }); await flush(); const reads = vi.mocked(agentDataApi.tasks.list).mock.calls.length; await tick(6000);
+    expect(agentDataApi.tasks.list).toHaveBeenCalledTimes(reads); expect(monitor.activeCount).toBe(1); expect(monitor.pollingCount).toBe(0); expect(monitor.jobs[0].state).toBe('paused');
+  });
   it('exposes the server active count including background tasks', async () => {
     vi.mocked(agentDataApi.tasks.list).mockResolvedValue({ items: [asTask(job())], activeCount: 3 });
     render(tree('overview'));
@@ -362,7 +372,7 @@ describe('AgentDataTaskProvider', () => {
     expect(agentDataApi.jobs.list).toHaveBeenCalledTimes(2);
   });
 
-  it.each(['memory', 'wiki', 'code', 'audit'] as const)('does not poll untracked global jobs in %s', async (view) => {
+  it.each(['wiki', 'code', 'audit'] as const)('does not poll untracked global jobs in %s', async (view) => {
     render(tree(view));
     await flush();
     await tick(8000);

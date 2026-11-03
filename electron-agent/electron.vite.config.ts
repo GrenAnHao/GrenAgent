@@ -5,6 +5,7 @@ import { CODEMODE_WORKER_ENTRY, CODEMODE_WORKER_SOURCE, codemodeWorkerMismatch }
 import { ignoreNonFrontendWatch, isFrontendHmrPath } from "./electron/dev/frontendWatch";
 import { removeMainCjsPackageJson, writeMainCjsPackageJson } from "./electron/agent/writeMainCjsPackageJson";
 import { installDevElectronHeapArg } from "./electron/mainHeap";
+import { buildRepoWikiHost } from "./electron/agent/repoWikiHostBuild";
 
 installDevElectronHeapArg();
 
@@ -79,6 +80,12 @@ export default defineConfig(({ command, mode }) => {
         },
       },
       plugins: [
+        {
+          name: "build-repo-wiki-host",
+          async closeBundle() {
+            await buildRepoWikiHost(__dirname, mainOutDir);
+          },
+        },
         {
           name: "check-codemode-worker",
           generateBundle(_options, bundle) {

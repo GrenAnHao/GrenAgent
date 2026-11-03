@@ -1,9 +1,10 @@
-// agent-mode: 统一的模式系统（Agent / Ask / Debug / Plan / Brainstorm，互斥）。
+// agent-mode: 统一的模式系统（Agent / Ask / Debug / Plan / Ultra，互斥）。
 //
 //   - Agent ：默认，完整工具集，无额外约束。
 //   - Ask   ：只读问答。只读检索 + bash（写由只读 OS 沙箱执行，升权经用户批准）；禁 写/编辑/MCP。
 //   - Debug ：完整工具集 + 调试方法论 prompt。
 //   - Plan  ：只读调研 + upsert_plan 写结构化 Plan；侧栏审阅 / 修改后「确认执行」自动切 Agent 开跑。
+//   - Ultra ：完整工具集 + 内置调度规则（按需派工、自己完成简单任务、模型先发现再选）。
 //
 // 工具 gate 走两道：setActiveTools 限制 LLM 可见工具（主） + tool_call hook 兜底拦截
 // （防止动态注册的工具绕过）。当前模式经 ctx.ui.setStatus("agent-mode", <mode>) 推到前端，
@@ -21,6 +22,7 @@ import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
+import { readSessionPreferences, SESSION_PREFERENCES_ENTRY } from "../_shared/session-preferences.js";
 import { currentSessionId } from "../_shared/workspace-context.js";
 import {
   type AgentMode,
@@ -32,9 +34,8 @@ import {
   getAgentMode,
   getDefaultAgentMode,
   hasAgentMode,
-  isAgentMode,
   modeLabel,
-  parseModeArg,
+  restoreAgentMode,
   setAgentMode,
   toolWhitelist,
   withoutPlanOnlyTools,
@@ -70,6 +71,7 @@ import {
   truncationNotice,
   type RawAskUserParams,
 } from "./questions.js";
+import { applyUltraRules, isSubagentSession, subagentProbeOf } from "./ultra-rules.js";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
   return m.role === "assistant" && Array.isArray(m.content);
@@ -127,7 +129,9 @@ export function persistedMode(entries: Array<{ type: string; customType?: string
     const e = entries[i];
     if (e.type !== "custom") continue;
     const data = e.data as { mode?: unknown } | undefined;
-    if ((e.customType === "agent-mode" || e.customType === "session-controls") && isAgentMode(data?.mode)) return data.mode;
+    if (e.customType !== "agent-mode" && e.customType !== "session-controls") continue;
+    const mode = restoreAgentMode(data?.mode);
+    if (mode) return mode;
   }
   return undefined;
 }
@@ -156,6 +160,18 @@ export default function (pi: ExtensionAPI) {
       savedTools,
       ...(plan ? { plan, planSeenRev } : {}),
     } satisfies PersistedState);
+
+  /**
+   * 缺模式字段的会话首次继承时把初值写进 canonical 条目，冷恢复不再跟着那时的项目默认改。
+   * 写失败只记日志：内存里已钉住，本轮继续按会话运行，不能把整次 session_start 打挂。
+   */
+  const solidifyInitialMode = (mode: AgentMode) => {
+    try {
+      pi.appendEntry(SESSION_PREFERENCES_ENTRY, { mode, revision: 1 });
+    } catch (err) {
+      console.error("[agent-mode] 固化初始模式失败（仅内存生效）：", err);
+    }
+  };
 
   const pushPlan = (ctx: ExtensionContext, reason: PlanStatusPayload["reason"]) => {
     ctx.ui.setStatus("agent-plan", JSON.stringify({ plan: plan ?? null, reason } satisfies PlanStatusPayload));
@@ -226,7 +242,7 @@ export default function (pi: ExtensionAPI) {
   // 每个会话（含子代理）各订一份，会话结束退订。
   const unwatch = watchConfig((next) => {
     if (!sessionCtx) return;
-    const parsed = parseModeArg(next[agentModeConfigKey(projectCwd(sessionCtx))] ?? "");
+    const parsed = restoreAgentMode((next[agentModeConfigKey(projectCwd(sessionCtx))] ?? "").trim().toLowerCase());
     if (!sessionId) {
       // 无会话身份时只有项目级模式可用：沿用旧行为，直接切。
       if (parsed && parsed !== getAgentMode(projectCwd(sessionCtx))) applyMode(parsed, sessionCtx);
@@ -238,25 +254,6 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     unwatch();
     setSessionPlan(sessionId, undefined);
-  });
-
-  // brainstorm-deliver：从头脑风暴模式进入交付阶段，自动切回 Agent 模式并触发执行。
-  // AI 在确认设计、准备开始实施时调用，省去用户手动切换模式的操作。
-  pi.registerCommand("brainstorm-deliver", {
-    description: "从头脑风暴切换到 Agent 模式并开始实施（由 AI 在交付阶段调用）",
-    handler: async (args, ctx) => {
-      if (liveMode(projectCwd(ctx)) !== "brainstorm") {
-        ctx.ui.notify("当前不在头脑风暴模式，无需切换。", "info");
-        return;
-      }
-      applyMode("agent", ctx, { silent: true });
-      ctx.ui.notify("已自动切换到 Agent 模式，开始实施。", "info");
-      const deliverMessage = args.trim() || "设计已确认，现在开始实施。请按已讨论的方案动手。";
-      pi.sendMessage(
-        { customType: "brainstorm-deliver", content: deliverMessage, display: true },
-        { triggerTurn: true },
-      );
-    },
   });
 
   // ── Plan：侧栏回写的命令（前端 runCommand 调用，不进模型上下文） ──
@@ -524,10 +521,10 @@ export default function (pi: ExtensionAPI) {
     gateToolCall(liveMode(ctx?.cwd), event.toolName, event.input),
   );
 
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (event, ctx) => {
     upsertedThisRun = false;
+    let live = liveMode();
     if (sessionCtx) {
-      let live = liveMode();
       // 兜底：未确认的计划不允许经任何路径进入能动手的模式（宿主切换已先拦一道）。
       if (isExecutingMode(live) && isUnconfirmed(plan)) {
         setAgentMode("plan", projectCwd(sessionCtx), sessionId);
@@ -536,7 +533,17 @@ export default function (pi: ExtensionAPI) {
       }
       if (live !== currentMode) applyMode(live, sessionCtx, { silent: true });
     }
-    // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，此处不再注入。
+    // Ultra 内置调度规则：按当轮真实模式增删 systemPromptOptions.contextFiles。
+    // 子代理会话（含模式继承成 ultra 的）不注入，避免子代理变成递归编排主代理。
+    // 放在 plan 上下文 / custom 回合的分支之前，保证每条返回路径都带上它；
+    // 也先按固定 path 移除旧条目，切出 ultra 后复用的同一 options 对象不残留。
+    const options = (event as { systemPromptOptions?: { contextFiles?: Array<{ path: string; content: string }> } })
+      .systemPromptOptions;
+    if (options) {
+      applyUltraRules(options, { mode: live, subagent: isSubagentSession(subagentProbeOf(ctx)) });
+    }
+    // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，此处不再注入；
+    // Ultra 的调度规则走 contextFiles（ultra-rules.ts），因此关掉 Fable 也仍然生效。
     if (plan?.status === "executing") {
       if (skipNextExecutionContext) {
         skipNextExecutionContext = false;
@@ -595,7 +602,7 @@ export default function (pi: ExtensionAPI) {
     const entries = ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>;
     const entry = entries.filter((e) => e.type === "custom" && e.customType === "agent-mode").pop();
     const data = entry?.data as PersistedState | undefined;
-    currentMode = data && isAgentMode(data.mode) ? data.mode : DEFAULT_MODE;
+    currentMode = restoreAgentMode(data?.mode) ?? DEFAULT_MODE;
     savedTools = data?.savedTools;
     plan = restorePlan(data?.plan);
     planSeenRev = typeof data?.planSeenRev === "number" ? data.planSeenRev : plan?.rev ?? 0;
@@ -607,23 +614,28 @@ export default function (pi: ExtensionAPI) {
     if (!sessionId) {
       // 无会话身份（旧 worker / 测试桩）：沿用项目级行为，已写入的 live 优先，其次盘上，再会话条目。
       if (!hasAgentMode(projectCwd(ctx))) {
-        const fromFile = parseModeArg(getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "");
+        const fromFile = restoreAgentMode((getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "").trim().toLowerCase());
         const next = fromFile ?? persistedMode(entries) ?? DEFAULT_MODE;
         applyMode(next, ctx, { silent: true, persist: false });
         return;
       }
     } else if (!hasAgentMode(projectCwd(ctx))) {
-      setAgentMode(parseModeArg(getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "") ?? DEFAULT_MODE, projectCwd(ctx));
+      setAgentMode(restoreAgentMode((getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "").trim().toLowerCase()) ?? DEFAULT_MODE, projectCwd(ctx));
     }
     if (sessionId && !hasAgentMode(projectCwd(ctx), sessionId)) {
-      // 会话自己记的模式优先（宿主切换写的 session-controls 与本扩展的 agent-mode 取最近一条）；
+      // 会话自己记的模式优先（宿主切换写的 session-controls、本扩展的 agent-mode 条目，
+      // 以及冷恢复时的 canonical session-preferences 条目，都按文件顺序取最近一条）；
       // 没有时继承 ALS 里的父会话（子代理），再退项目默认。
-      const own = persistedMode(entries);
+      const own = readSessionPreferences(entries).mode;
       const parent = currentSessionId();
       const inherited = parent && parent !== sessionId && hasAgentMode(projectCwd(ctx), parent)
         ? getAgentMode(projectCwd(ctx), parent)
         : undefined;
-      applyMode(own ?? inherited ?? getDefaultAgentMode(projectCwd(ctx)), ctx, { silent: true, persist: false });
+      const initial = own ?? inherited ?? getDefaultAgentMode(projectCwd(ctx));
+      applyMode(initial, ctx, { silent: true, persist: false });
+      // 缺模式字段的历史会话首次继承要把初值固化：否则冷恢复会按那时的项目默认重新继承。
+      // 会话自己有旧条目时不动（那条条目本身就是它的记录）。
+      if (!own) solidifyInitialMode(initial);
       return;
     }
 

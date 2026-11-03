@@ -192,6 +192,14 @@ describe('dockTodos', () => {
     result: { details: { todos: [{ id: 1, text: '注册', status: 'completed' }], nextId: 2 } },
   });
 
+  it('已收尾的进行中尾项在无新 todo 的续跑中保持完成', () => {
+    const tail = tool({ status: 'done', result: { details: { todos: [{ id: 1, text: '已收尾', status: 'in_progress' }], nextId: 2 } } });
+    expect(dockTodos([tail], true)?.[0]?.status).toBe('completed');
+    expect(dockTodos([tail], false)?.[0]?.status).toBe('in_progress');
+    const running = tool({ id: 'new-write', status: 'running', args: { todos: [{ id: 2, text: '新的任务', status: 'in_progress' }] }, result: undefined });
+    expect(dockTodos([tail, running], true)?.[0]?.status).toBe('in_progress');
+  });
+
   it('keeps a finished list until the next user message', () => {
     expect(dockTodos([done], true)?.map((todo) => todo.text)).toEqual(['注册']);
   });

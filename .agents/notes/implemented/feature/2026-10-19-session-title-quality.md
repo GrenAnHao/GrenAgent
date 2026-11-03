@@ -55,12 +55,15 @@ Status: implemented
 
 ### 不变量
 
+- 顶部聊天标签复用侧栏的磁盘与乐观标题合并，不另调模型或从消息重算；明确的会话/草稿 Provider 身份优先于全局选择。切换、重命名和自动标题写入后同步，空草稿或尚无记录时显示「新对话」。长标题仅在显示层省略，完整值保留在悬停标题中，不能挤掉右侧操作区。
+
 - 首条消息的新包装（新的块格式、新的图片说明）要加进 `parseFirstMessage`，否则兜底标题又会显示原文。
 - 标题请求必须只有一条用户消息、系统提示为空。往 system 里加东西之前，先在本地网关上实测 glm / deepseek。
 - 自动标题不覆盖已有名字（手动的或以前生成的）。只有「重新生成标题」会覆盖，而且是用户点的。
 
 ## Alternatives considered
 
+- **顶部从当前消息自行重算标题**：能在侧栏记录尚未到达时更早显示正文；但会产生第二套命名规则，并覆盖用户手动重命名的显示，因此顶部复用侧栏的合并记录，缺记录时显示「新对话」，不增加模型请求。
 - **兜底标题在渲染层按 `parseMessageTags` 现算**：气泡已经这么拆技能和命令，复用最省事，这是它最强的理由。不用它，是因为兜底标题在主进程列会话时就定了（`SessionInfo.name`），侧栏、归档弹窗、删除确认都直接用这个字段。只在一处现算，其他地方还是原文。共用纯函数，主进程和渲染层算的是同一个结果。
 - **把助手第一轮的回复也给标题模型**：「这里用tag」「你看看这个气泡如何」这类很短的首条消息，有回复做背景能起得更准。不用它，一是第一条回复后就起名时，手里通常只有「我先看看代码」；二是 2026-10-04 的决定记过，带上回复和工具结果后，模型会去处理路径和代码，而不是起名。实测这类消息新链路给出的是「气泡样式评估」「截图问题排查」，够用；不满意可以重新生成或重命名。
 - **规则留在系统提示里（行业常规写法）**：语义最清楚，provider 也会给 system 更高的权重。实测本地 newapi 网关：glm 带任何 system 都报错，deepseek 在 5 次里有 2~3 次把较长的 system 丢了、去回答问题。规则放进用户消息后，四家都稳定，所以不用 system。
@@ -86,6 +89,16 @@ Status: implemented
 ## Verification
 
 结果：通过。
+
+### 顶部会话标题（2026-10-30）
+
+`WorkspaceTabs.test.tsx` 与 `MainColumnHeader.test.tsx`：17 项通过；先验证固定「对话」造成 8 项失败，再实现。覆盖切换、改名、乐观占位、草稿、显式 Provider 隔离、Windows 路径与完整长标题。
+
+`npm run ui:check -- workbench-layout`：97 项通过，只运行当前需求的 1/41 个场景。真实 Sidebar / MainChatColumn 验证 A/B 选择、同路径改名、草稿默认、浅色、760px 窄屏省略号、完整悬停标题及右侧操作的几何与命中；场景未执行真实宿主切会话，不将前端标题同步等同后端会话路由验证。`--changed --dry-run` 还包含工作区既有的 ThemeBridge 等公共改动；本次仅调整顶部标题与其伸缩约束，未运行其他定档场景。
+
+证据：`.agents/evidence/2026-10-30-header-session-title/`。
+
+### 原标题链路验证（2026-10-19）
 
 - 单测：`cd extensions && npx vitest run auto-title _shared/session-title.test.ts`，4 个文件、59 条用例通过。覆盖拆包装、兜底标题、模型输入；清洗：用 8 条历史坏标题当正例，7 条拒绝例，加上「图片无法生成问题排查」「子代理没有可用模型」不误杀；取会话第一条而不是「继续吧」；第一条回复后就起名且只调一次；最多试两次；只有图片时不起名。`auto-title-live.real.test.ts` 用真实 AgentSession 加 faux 模型：标题在第一条回复后落进 `session_info`，经过清洗（`**输入框内容被转义**` → `输入框内容被转义`），请求里只有首条消息；模型回拒绝句时不写。
 - 单测：`cd electron-agent && npx vitest run src/features/sessions src/features/chat/ChatView.test.tsx src/lib electron/app/sessionTitle.test.ts electron/app/workspaceService.test.ts`，40 个文件、284 条用例通过。新增：主进程列会话时粘贴块、技能块、带图会话的兜底标题；`generateSessionTitle` 的模型顺序、报错和空结果；菜单项位置。

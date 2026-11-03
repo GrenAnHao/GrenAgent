@@ -1,0 +1,333 @@
+diff --git a/electron-agent/src/features/extensions/RulesPanel.test.tsx b/electron-agent/src/features/extensions/RulesPanel.test.tsx
+index 11a4e805..97af2785 100644
+--- a/electron-agent/src/features/extensions/RulesPanel.test.tsx
++++ b/electron-agent/src/features/extensions/RulesPanel.test.tsx
+@@ -183,3 +183,73 @@ describe('RulesPanel', () => {
+     expect(screen.queryByTestId('rule-item-global-zh')).not.toBeInTheDocument();
+   });
+ });
++
++describe('RulesPanel 模式范围', () => {
++  const scoped = [
++    { id: 'ultra', scope: 'global', path: '/g/u.md', title: 'Ultra 调度', enabled: true, body: '- 派工', modes: ['ultra'] },
++    { id: 'zh', scope: 'global', path: '/g/zh.md', title: '中文回答', enabled: true, body: '- 中文' },
++  ];
++
++  it('列表标出模式范围，旧规则标全部模式', async () => {
++    io.listContextRules.mockResolvedValue(scoped);
++    renderPanel();
++    await waitFor(() => expect(screen.getByTestId('rule-item-global-ultra')).toBeInTheDocument());
++    expect(screen.getByTestId('rule-modes-global-ultra')).toHaveTextContent('Ultra');
++    expect(screen.getByTestId('rule-modes-global-zh')).toHaveTextContent('全部模式');
++  });
++
++  it('编辑区回显已保存的模式范围，保存时完整带回', async () => {
++    io.listContextRules.mockResolvedValue(scoped);
++    io.saveContextRule.mockResolvedValue(scoped[0]);
++    renderPanel();
++    await waitFor(() => expect(screen.getByTestId('rule-open-global-ultra')).toBeInTheDocument());
++    fireEvent.click(screen.getByTestId('rule-open-global-ultra'));
++    expect(screen.getByTestId('rule-mode-ultra')).toHaveAttribute('aria-pressed', 'true');
++    expect(screen.getByTestId('rule-mode-agent')).toHaveAttribute('aria-pressed', 'false');
++    fireEvent.click(screen.getByTestId('rule-save'));
++    await waitFor(() => expect(io.saveContextRule).toHaveBeenCalledWith(expect.objectContaining({
++      original: { scope: 'global', id: 'ultra' },
++      modes: ['ultra'],
++    })));
++  });
++
++  it('新建默认适用全部模式，选中模式后保存带上范围', async () => {
++    io.listContextRules.mockResolvedValue([]);
++    io.saveContextRule.mockResolvedValue(scoped[0]);
++    renderPanel();
++    await waitFor(() => expect(screen.getByTestId('rule-new')).toBeInTheDocument());
++    fireEvent.click(screen.getByTestId('rule-new'));
++    fireEvent.change(screen.getByTestId('rule-title-input'), { target: { value: 'Ultra 调度' } });
++    fireEvent.change(screen.getByTestId('rule-body-input'), { target: { value: '- 派工' } });
++    fireEvent.click(screen.getByTestId('rule-mode-ultra'));
++    expect(screen.getByTestId('rule-mode-ultra')).toHaveAttribute('aria-pressed', 'true');
++    fireEvent.click(screen.getByTestId('rule-save'));
++    await waitFor(() => expect(io.saveContextRule).toHaveBeenCalledWith(expect.objectContaining({ modes: ['ultra'] })));
++  });
++
++  it('取消全部模式选择等于全部模式，保存不带 modes', async () => {
++    io.listContextRules.mockResolvedValue(scoped);
++    io.saveContextRule.mockResolvedValue(scoped[1]);
++    renderPanel();
++    await waitFor(() => expect(screen.getByTestId('rule-open-global-ultra')).toBeInTheDocument());
++    fireEvent.click(screen.getByTestId('rule-open-global-ultra'));
++    fireEvent.click(screen.getByTestId('rule-mode-ultra'));
++    fireEvent.click(screen.getByTestId('rule-save'));
++    await waitFor(() => expect(io.saveContextRule).toHaveBeenCalledWith(expect.objectContaining({ modes: undefined })));
++  });
++
++  it('可以同时选择多个模式', async () => {
++    io.listContextRules.mockResolvedValue([]);
++    io.saveContextRule.mockResolvedValue(scoped[0]);
++    renderPanel();
++    await waitFor(() => expect(screen.getByTestId('rule-new')).toBeInTheDocument());
++    fireEvent.click(screen.getByTestId('rule-new'));
++    fireEvent.change(screen.getByTestId('rule-title-input'), { target: { value: 'X' } });
++    fireEvent.change(screen.getByTestId('rule-body-input'), { target: { value: 'y' } });
++    fireEvent.click(screen.getByTestId('rule-mode-ultra'));
++    fireEvent.click(screen.getByTestId('rule-mode-plan'));
++    fireEvent.click(screen.getByTestId('rule-save'));
++    // 保存顺序按模式枚举排：plan 在 ultra 之前
++    await waitFor(() => expect(io.saveContextRule).toHaveBeenCalledWith(expect.objectContaining({ modes: ['plan', 'ultra'] })));
++  });
++});
+diff --git a/electron-agent/src/features/extensions/RulesPanel.tsx b/electron-agent/src/features/extensions/RulesPanel.tsx
+index 6fd4cacb..6be16440 100644
+--- a/electron-agent/src/features/extensions/RulesPanel.tsx
++++ b/electron-agent/src/features/extensions/RulesPanel.tsx
+@@ -11,6 +11,7 @@ import {
+   type RuleRef,
+   type RuleScope,
+ } from '../../lib/promptLibraryIo';
++import { AGENT_MODES, MODE_LABELS, type AgentMode } from '../../stores/modeStore';
+ import { errorText } from './errorText';
+ import { libraryStyles as styles } from './libraryStyles';
+ 
+@@ -22,12 +23,36 @@ interface RuleDraft {
+   title: string;
+   enabled: boolean;
+   body: string;
++  /** 适用模式；undefined / 空 = 所有模式。 */
++  modes?: AgentMode[];
+ }
+ 
+ const SCOPE_LABEL: Record<RuleScope, string> = { global: '全局', project: '项目' };
+ 
+ function draftOf(rule: RuleInfo): RuleDraft {
+-  return { original: { scope: rule.scope, id: rule.id }, scope: rule.scope, title: rule.title, enabled: rule.enabled, body: rule.body };
++  return {
++    original: { scope: rule.scope, id: rule.id },
++    scope: rule.scope,
++    title: rule.title,
++    enabled: rule.enabled,
++    body: rule.body,
++    ...(rule.modes && rule.modes.length > 0 ? { modes: [...rule.modes] } : {}),
++  };
++}
++
++function modeSummary(modes: AgentMode[] | undefined): string {
++  if (!modes || modes.length === 0) return '全部模式';
++  return modes.map((mode) => MODE_LABELS[mode]).join('、');
++}
++
++/** 选中 / 取消一个模式；全取消就是「所有模式」（不存范围）。顺序按模式枚举走，写盘结果稳定。 */
++function toggleDraftMode(draft: RuleDraft, mode: AgentMode): RuleDraft {
++  const picked = new Set(draft.modes ?? []);
++  if (picked.has(mode)) picked.delete(mode);
++  else picked.add(mode);
++  const next = AGENT_MODES.filter((m) => picked.has(m));
++  const { modes: _drop, ...rest } = draft;
++  return next.length > 0 ? { ...rest, modes: next } : rest;
+ }
+ 
+ function sameRule(draft: RuleDraft | null, rule: RuleInfo): boolean {
+@@ -83,7 +108,11 @@ export function RulesPanel({ workspace }: { workspace: string }) {
+     const started = workspace;
+     setSaving(true);
+     try {
+-      const saved = await saveContextRule({ workspace, ...draft });
++      const saved = await saveContextRule({
++        workspace,
++        ...draft,
++        modes: draft.modes && draft.modes.length > 0 ? draft.modes : undefined,
++      });
+       if (workspaceRef.current !== started) return;
+       setDraft(draftOf(saved));
+       await reload();
+@@ -150,6 +179,7 @@ export function RulesPanel({ workspace }: { workspace: string }) {
+                       <TriangleAlert size={15} className={styles.warn} data-testid={`rule-warning-${key}`} />
+                     </Tooltip>
+                   ) : null}
++                  <span className={styles.modesBadge} data-testid={`rule-modes-${key}`}>{modeSummary(rule.modes)}</span>
+                   <span className={styles.badge}>{SCOPE_LABEL[rule.scope]}</span>
+                 </button>
+               </div>
+@@ -183,6 +213,27 @@ export function RulesPanel({ workspace }: { workspace: string }) {
+                   ]}
+                 />
+               </div>
++              <div>
++                <div className={styles.label}>适用模式（不选＝所有模式）</div>
++                <div className={styles.modePicker} role="group" aria-label="适用模式">
++                  {AGENT_MODES.map((mode) => {
++                    const active = Boolean(draft.modes?.includes(mode));
++                    return (
++                      <button
++                        key={mode}
++                        type="button"
++                        className={styles.modeChip}
++                        data-testid={`rule-mode-${mode}`}
++                        data-active={active}
++                        aria-pressed={active}
++                        onClick={() => setDraft((current) => (current ? toggleDraftMode(current, mode) : current))}
++                      >
++                        {MODE_LABELS[mode]}
++                      </button>
++                    );
++                  })}
++                </div>
++              </div>
+               <div className={styles.fillField}>
+                 <div className={styles.label}>规则内容（Markdown，启用时每轮注入上下文）</div>
+                 <Input.TextArea className={styles.fillArea} style={{ resize: 'none' }} data-testid="rule-body-input" value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
+diff --git a/electron-agent/src/features/extensions/libraryStyles.ts b/electron-agent/src/features/extensions/libraryStyles.ts
+index 62eff4d1..cfc21f29 100644
+--- a/electron-agent/src/features/extensions/libraryStyles.ts
++++ b/electron-agent/src/features/extensions/libraryStyles.ts
+@@ -144,6 +144,40 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
+     color: ${cssVar.colorTextTertiary};
+     background: ${cssVar.colorFillTertiary};
+   `,
++  /** 列表里的模式范围标记：排在范围（全局/项目）前面，超长省略。 */
++  modesBadge: css`
++    flex: none;
++    overflow: hidden;
++    max-width: 140px;
++    padding: 0 6px;
++    border-radius: 4px;
++    font-size: 12px;
++    white-space: nowrap;
++    text-overflow: ellipsis;
++    color: ${cssVar.colorTextSecondary};
++    background: ${cssVar.colorFillSecondary};
++  `,
++  /** 编辑区的模式多选：小胶囊，选中用主色。 */
++  modePicker: css`
++    display: flex;
++    flex-wrap: wrap;
++    gap: 6px;
++  `,
++  modeChip: css`
++    padding: 2px 10px;
++    border: 1px solid ${cssVar.colorBorderSecondary};
++    border-radius: 999px;
++    font-size: 12px;
++    color: ${cssVar.colorTextSecondary};
++    background: transparent;
++    cursor: pointer;
++
++    &[data-active='true'] {
++      border-color: ${cssVar.colorPrimaryBorder};
++      color: ${cssVar.colorPrimary};
++      background: ${cssVar.colorPrimaryBg};
++    }
++  `,
+   edit: css`
+     display: flex;
+     flex: 1;
+diff --git a/electron-agent/ui-harness/probes/prompt-library-panel.mjs b/electron-agent/ui-harness/probes/prompt-library-panel.mjs
+index 2dec83f5..8d2b8fd2 100644
+--- a/electron-agent/ui-harness/probes/prompt-library-panel.mjs
++++ b/electron-agent/ui-harness/probes/prompt-library-panel.mjs
+@@ -1,7 +1,7 @@
+ /**
+  * 命令页签：列表项是命令胶囊、带参数个数；选中后编辑区填好；改提示词时识别到的参数实时变；与保留名重名时就地报错、保存不可点；
+  * 长提示词滚动时背景高亮层跟着 textarea 滚、两层内容宽度一致。
+- * 规则页签：开关立即写盘；点规则打开编辑区；窄视口下范围标记不折行；没有工作区时项目范围置灰；浅色主题截图。
++ * 规则页签：开关立即写盘；点规则打开编辑区；模式范围回显、可多选、保存带回并刷新列表；窄视口下范围标记不折行；没有工作区时项目范围置灰；浅色主题截图。
+  */
+ 
+ const BODY = '[data-testid="prompt-body-input"]'
+@@ -79,6 +79,28 @@ export default async function (t) {
+   t.ok('点规则打开编辑区', await t.waitFor('[data-testid="rule-title-input"]'))
+   t.check('编辑区名称是「中文回答」', await t.js(`document.querySelector('[data-testid="rule-title-input"]').value`), '中文回答')
+ 
++  // —— 规则的适用模式范围 ——
++  t.check('旧规则标全部模式', await t.js(`document.querySelector('[data-testid="rule-modes-global-zh"]').textContent`), '全部模式')
++  t.check('Ultra 规则标出模式', await t.js(`document.querySelector('[data-testid="rule-modes-global-ultra"]').textContent`), 'Ultra')
++
++  await reveal(t, '[data-testid="rule-open-global-ultra"]')
++  await t.click('[data-testid="rule-open-global-ultra"]', 20)
++  t.check('编辑区回显已保存模式 Ultra', await t.js(`document.querySelector('[data-testid="rule-mode-ultra"]').getAttribute('aria-pressed')`), 'true')
++  t.check('编辑区未选 Agent', await t.js(`document.querySelector('[data-testid="rule-mode-agent"]').getAttribute('aria-pressed')`), 'false')
++  await reveal(t, '[data-testid="rule-mode-plan"]')
++  await t.click('[data-testid="rule-mode-plan"]', 20)
++  t.check('选中 Plan 后高亮', await t.js(`document.querySelector('[data-testid="rule-mode-plan"]').getAttribute('aria-pressed')`), 'true')
++  await reveal(t, '[data-testid="rule-save"]')
++  await t.click('[data-testid="rule-save"]', 20)
++  const saved = await t.act('lastSavedRule')
++  t.info('保存的规则', saved)
++  t.ok('保存带回模式范围 Plan + Ultra', Array.isArray(saved?.modes) && saved.modes.includes('plan') && saved.modes.includes('ultra'))
++  t.ok('保存保留原规则标识', saved?.id === 'ultra')
++
++  await reveal(t, '[data-testid="rule-item-global-ultra"]')
++  t.check('列表刷新后标出两个模式', await t.js(`document.querySelector('[data-testid="rule-modes-global-ultra"]').textContent`), 'Plan、Ultra')
++  await t.shot('rule-modes')
++
+   // —— 窄视口：范围标记不折行 ——
+   const wide = await t.js(badgeMetrics('global-zh'))
+   t.info('宽视口范围标记', wide)
+diff --git a/electron-agent/ui-harness/scenarios/prompt-library-panel.tsx b/electron-agent/ui-harness/scenarios/prompt-library-panel.tsx
+index d001f566..aa9b8635 100644
+--- a/electron-agent/ui-harness/scenarios/prompt-library-panel.tsx
++++ b/electron-agent/ui-harness/scenarios/prompt-library-panel.tsx
+@@ -2,11 +2,12 @@ import { useState, type ReactElement } from 'react'
+ import { App } from 'antd'
+ import { CommandsPanel } from '../../src/features/extensions/CommandsPanel'
+ import { RulesPanel } from '../../src/features/extensions/RulesPanel'
+-import { exposeActions, installBridge, track } from '../stubs'
++import { exposeActions, exposeData, installBridge, track } from '../stubs'
+ 
+ /**
+  * 命令 / 规则两个页签：真实组件，主进程命令用桩（数据在内存里改）。
+  * workspace 可以通过 probe 切成空串，看项目范围置灰。
++ * 规则带适用模式（modes）：保存走 save_context_rule 桩，内存里改完再 list 读回。
+  */
+ 
+ let commands = [
+@@ -14,9 +15,15 @@ let commands = [
+ ]
+ let rules = [
+   { id: 'zh', scope: 'global', path: '/a/rules/zh.md', title: '中文回答', enabled: true, body: '- 中文' },
++  { id: 'ultra', scope: 'global', path: '/a/rules/ultra.md', title: 'Ultra 调度', enabled: true, body: '- 派工', modes: ['ultra'] },
+   { id: 'pnpm', scope: 'project', path: '/w/.pi/rules/pnpm.md', title: '用 pnpm', enabled: false, body: '- pnpm' }
+ ]
+ 
++/** probe 断言用：最近一次写到「盘上」的规则 */
++let lastSavedRule: Record<string, unknown> | null = null
++
++exposeData({ ruleModesInitial: ['ultra'] })
++
+ installBridge({
+   invoke: async (command: string, args: Record<string, unknown>) => {
+     track(command)
+@@ -32,6 +39,25 @@ installBridge({
+       case 'set_context_rule_enabled':
+         rules = rules.map((r) => (r.scope === args.scope && r.id === args.id ? { ...r, enabled: Boolean(args.enabled) } : r))
+         return undefined
++      case 'save_context_rule': {
++        const original = args.original as { scope?: string; id?: string } | undefined
++        const modes = Array.isArray(args.modes) ? (args.modes as string[]) : undefined
++        const saved: Record<string, unknown> = {
++          scope: String(args.scope),
++          id: original?.id ?? String(args.title),
++          path: '/a/rules/saved.md',
++          title: String(args.title),
++          enabled: Boolean(args.enabled),
++          body: String(args.body),
++          ...(modes && modes.length > 0 ? { modes } : {}),
++        }
++        lastSavedRule = saved
++        rules = [
++          ...rules.filter((r) => !(r.scope === original?.scope && r.id === original?.id)),
++          saved as (typeof rules)[number],
++        ]
++        return saved
++      }
+       default: throw new Error(`unstubbed invoke: ${command}`)
+     }
+   }
+@@ -39,7 +65,7 @@ installBridge({
+ 
+ export default function PromptLibraryPanelScenario(): ReactElement {
+   const [workspace, setWorkspace] = useState('/w')
+-  exposeActions({ setWorkspace })
++  exposeActions({ setWorkspace, lastSavedRule: () => lastSavedRule })
+   return (
+     <App>
+       <div style={{ height: '100vh', boxSizing: 'border-box', padding: 24, overflow: 'auto', background: 'var(--gren-content-bg)' }}>

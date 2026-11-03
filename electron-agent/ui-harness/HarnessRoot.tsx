@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
-import { ConfigProvider, ThemeProvider } from '@lobehub/ui'
-import { m } from 'motion/react'
-import { ANTD_CSS_VAR_KEY, ThemeBridge } from '../src/components/ThemeBridge'
-import { schemePrimary, schemeTokens } from '../src/theme/colorSchemes'
+import { WorkbenchThemeProvider } from '../src/theme/WorkbenchThemeProvider'
 
 const isDark = (): boolean => document.documentElement.dataset.theme !== 'light'
 
@@ -19,7 +16,7 @@ function useHtmlDark(): boolean {
 }
 
 /**
- * 所有场景的根：和 src/App.tsx 同一套主题 Provider（github 方案、cssVar 固定 key、ThemeBridge 写 --gren-*），
+ * 所有场景的根：和 src/App.tsx 同一套工作台主题 Provider（cssVar 固定 key、ThemeBridge 写 --gren-*），
  * 首次 commit 后设 __uiReady。明暗看 <html data-theme>（index.html 默认 dark，和应用默认外观一致）。
  * AgentStoreContext 这类壳层上下文按场景需要在场景里包。
  */
@@ -31,16 +28,8 @@ export default function HarnessRoot({ children }: { children: ReactNode }): Reac
     ;(window as unknown as { __uiReady: boolean }).__uiReady = true
   }, [])
   return (
-    <ThemeProvider
-      themeMode={mode}
-      appearance={mode}
-      customTheme={{ primaryColor: schemePrimary('github', dark) }}
-      theme={{ cssVar: { key: ANTD_CSS_VAR_KEY }, hashed: false, token: schemeTokens('github', dark) }}
-    >
-      <ConfigProvider motion={m}>
-        <ThemeBridge />
-        {children}
-      </ConfigProvider>
-    </ThemeProvider>
+    <WorkbenchThemeProvider appearance={mode}>
+      {children}
+    </WorkbenchThemeProvider>
   )
 }

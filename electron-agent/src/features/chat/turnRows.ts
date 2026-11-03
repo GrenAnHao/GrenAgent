@@ -24,6 +24,8 @@ function mergeThinking(parts: ThinkingSegment[]): ThinkingSegment {
     // 累加各段耗时；全为 0/缺省时回退 undefined，让 ReasoningInline 只显示「已深度思考」不带秒数。
     durationMs: parts.reduce((sum, p) => sum + (p.durationMs ?? 0), 0) || undefined,
     startedAt: parts.find((p) => p.startedAt != null)?.startedAt,
+    // 展开状态按首段（合并后的身份）持久化。
+    ...(parts[0]!.timestamp != null ? { timestamp: parts[0]!.timestamp } : {}),
   };
 }
 

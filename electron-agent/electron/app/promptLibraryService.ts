@@ -3,9 +3,11 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import { join } from 'node:path';
 import { argumentHint, COMMAND_NAME_RE, parsePromptParams, type PromptParam } from '../../../extensions/prompt-commands/syntax.js';
 import { isSafeFileStem, parseTemplate, promptsDir } from '../../../extensions/prompt-commands/templates.js';
+import type { AgentMode } from '../../../extensions/agent-mode/modes.js';
 import {
   globalRulesDir,
   listRuleIds,
+  normalizeRuleModes,
   parseRule,
   projectRulesDir,
   type RuleFile,
@@ -42,6 +44,8 @@ export interface SaveRuleInput {
   title: string;
   enabled: boolean;
   body: string;
+  /** 原始模式名称；saveRule 在写盘前校验、归一化。空数组 / 省略适用全部模式。 */
+  modes?: readonly string[];
 }
 
 function errorText(error: unknown): string {
@@ -76,8 +80,12 @@ function commandMarkdown(description: string, body: string): string {
   return lines.join('\n');
 }
 
-function ruleMarkdown(title: string, enabled: boolean, body: string): string {
-  return ['---', `title: ${JSON.stringify(title)}`, `enabled: ${enabled}`, '---', body, ''].join('\n');
+function ruleMarkdown(title: string, enabled: boolean, body: string, modes?: readonly AgentMode[]): string {
+  const lines = ['---', `title: ${JSON.stringify(title)}`, `enabled: ${enabled}`];
+  // 没有模式范围时不写这一行：保持旧文件格式，旧版本客户端照常读。
+  if (modes && modes.length > 0) lines.push(`modes: [${modes.join(', ')}]`);
+  lines.push('---', body, '');
+  return lines.join('\n');
 }
 
 export function ruleIdFromTitle(title: string, taken: ReadonlySet<string>): string {
@@ -163,10 +171,11 @@ export class PromptLibraryService {
     const keepId = input.original !== undefined && input.original.scope === input.scope;
     const id = keepId ? input.original!.id : ruleIdFromTitle(title, new Set(listRuleIds(dir)));
     const path = join(dir, `${id}.md`);
+    const modes = normalizeRuleModes(input.modes ?? []);
     await mkdir(dir, { recursive: true });
-    await writeAtomic(path, ruleMarkdown(title, input.enabled, body));
+    await writeAtomic(path, ruleMarkdown(title, input.enabled, body, modes));
     if (originalPath && !keepId) await rm(originalPath, { force: true });
-    return { id, scope: input.scope, path, title, enabled: input.enabled, body };
+    return { id, scope: input.scope, path, title, enabled: input.enabled, body, modes };
   }
 
   async setRuleEnabled(ref: RuleRef, enabled: boolean, workspace?: string): Promise<void> {
@@ -180,7 +189,8 @@ export class PromptLibraryService {
     }
     const rule = parseRule(ref.id, ref.scope, path, content);
     if (rule.error) throw new Error(`规则文件解析失败：${rule.error}`);
-    await writeAtomic(path, ruleMarkdown(rule.title, enabled, normalizeBody(rule.body)));
+    // 开关只看 enabled，标题 / 正文 / 模式范围原样保留。
+    await writeAtomic(path, ruleMarkdown(rule.title, enabled, normalizeBody(rule.body), rule.modes));
   }
 
   async deleteRule(ref: RuleRef, workspace?: string): Promise<void> {

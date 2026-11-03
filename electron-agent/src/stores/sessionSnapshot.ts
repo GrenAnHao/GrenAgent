@@ -1,9 +1,9 @@
 import type { AgentMessage } from '../lib/pi';
 import { getThinkingDuration } from '../lib/thinkingDurations';
-import { expandSystemWorkerChat } from '../lib/systemWorkerChat';
 import { findPendingAskUser } from '../features/chat/pendingAskUser';
 import { messagesFromAgent, type ChatMessage } from './agentReducer';
 import { applyPendingAskUserOnLoad } from './pendingAskUserLoad';
+import { reconcileTodoResults } from './sessionMessageSync';
 
 /**
  * 后端快照 → 界面消息。UI 完整历史更长时用它（压缩后后端历史会变短），并补回未完成的 ask_user 行。
@@ -12,7 +12,8 @@ import { applyPendingAskUserOnLoad } from './pendingAskUserLoad';
  */
 export function snapshotMessages(msgs: AgentMessage[], uiHistory?: ChatMessage[]) {
   const backend = messagesFromAgent(msgs, getThinkingDuration);
-  const processed = expandSystemWorkerChat(uiHistory && uiHistory.length > backend.length ? uiHistory : backend);
+  const history = uiHistory && uiHistory.length > backend.length ? uiHistory : backend;
+  const processed = history === backend ? backend : reconcileTodoResults(history, backend);
   return {
     backend,
     processed,

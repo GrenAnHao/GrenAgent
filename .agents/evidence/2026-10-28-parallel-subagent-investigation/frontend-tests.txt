@@ -1,0 +1,13 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:66248) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13040) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  2 passed (2)
+      Tests  66 passed (66)
+   Start at  13:36:41
+   Duration  7.19s (transform 410ms, setup 8.85s, import 376ms, tests 22ms, environment 3.97s)
+

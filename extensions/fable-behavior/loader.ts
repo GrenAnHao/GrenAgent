@@ -1,19 +1,19 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { restoreAgentMode, type AgentMode } from "../agent-mode/modes.js";
 
-export type FableAgentMode = "agent" | "ask" | "debug" | "plan" | "brainstorm";
+export type FableAgentMode = AgentMode;
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "prompts");
 
-const KERNEL: ReadonlyArray<{ dir: "tier1" | "tier2"; name: string }> = [
+const KERNEL: ReadonlyArray<{ dir: "tier1"; name: string }> = [
   { dir: "tier1", name: "identity" },
   { dir: "tier1", name: "tone" },
   { dir: "tier1", name: "mistakes" },
   { dir: "tier1", name: "file-verify" },
   { dir: "tier1", name: "coding-harness" },
   { dir: "tier1", name: "autonomy" },
-  { dir: "tier2", name: "refusal" },
 ];
 
 const TIER2_P0 = [
@@ -94,7 +94,7 @@ export function buildFableBehaviorPrompt(opts: BuildPromptOptions = {}): string 
   const tier2 = opts.tier2 === true;
   const tier2P1 = opts.tier2P1 !== false;
   const tier3 = opts.tier3Guidelines === true;
-  const mode = opts.mode ?? "agent";
+  const mode = restoreAgentMode(opts.mode) ?? "agent";
   const parts: string[] = ["[Fable Behavior]"];
 
   for (const mod of KERNEL) parts.push(readModule(mod.dir, mod.name));
@@ -121,8 +121,14 @@ export function buildFableBehaviorPrompt(opts: BuildPromptOptions = {}): string 
 export function resolveAgentModeFromEntries(
   entries: Array<{ type?: string; customType?: string; data?: unknown }>,
 ): FableAgentMode {
-  const entry = entries.filter((e) => e.type === "custom" && e.customType === "agent-mode").pop();
-  const mode = (entry?.data as { mode?: string } | undefined)?.mode;
-  if (mode === "ask" || mode === "debug" || mode === "plan" || mode === "agent" || mode === "brainstorm") return mode;
+  // 和 agent-mode 的 persistedMode 保持同一套判据：本扩展写的 agent-mode 条目与宿主切换写的
+  // session-controls 条目都算，取最近一条能识别的模式（旧版只认 agent-mode，会漏掉宿主切换）。
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.type !== "custom") continue;
+    if (entry.customType !== "agent-mode" && entry.customType !== "session-controls") continue;
+    const mode = restoreAgentMode((entry.data as { mode?: unknown } | undefined)?.mode);
+    if (mode) return mode;
+  }
   return "agent";
 }

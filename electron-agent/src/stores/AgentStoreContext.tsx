@@ -9,6 +9,12 @@ interface AgentStoreContextValue {
   setWorkspaceReady: (ready: boolean) => void;
   /** 应用是否完成过首屏：仅冷启动显示全屏 loading，之后切换/新建对话走内容区骨架屏。 */
   appBooted: boolean;
+  /**
+   * 可选的输入栏作用域（多视图）：给了就只作用于这份会话，不再跟随全局 activeSessionPath。
+   * 都不给时输入栏沿用「当前草稿 → 当前会话 → workspace」的旧行为。
+   */
+  sessionPath?: string | null;
+  draftId?: string | null;
 }
 
 // 导出原始 context：供 preview 沙盒注入 mock 值，在不连后端、不创建真实 store 的前提下
@@ -18,6 +24,9 @@ export const AgentStoreContext = createContext<AgentStoreContextValue | null>(nu
 interface AgentStoreProviderProps {
   workspace: string;
   children: ReactNode;
+  /** 该视图自己的会话身份；省略则跟随全局当前会话（单视图旧行为）。 */
+  sessionPath?: string | null;
+  draftId?: string | null;
 }
 
 /**
@@ -25,7 +34,7 @@ interface AgentStoreProviderProps {
  * store 由 agentStoreRegistry 常驻管理：切换 workspace 不再 destroy（后台继续消费事件、保留流式态），
  * 仅切换 active 标志（active 用 rAF 实时刷新、后台用 setTimeout 兜底）。
  */
-export function AgentStoreProvider({ workspace, children }: AgentStoreProviderProps) {
+export function AgentStoreProvider({ workspace, children, sessionPath, draftId }: AgentStoreProviderProps) {
   // 该 workspace 的 store 是否已常驻：必须在 getOrCreate 之前判断（getOrCreate 会把它写进 registry）。
   // 用 ref 缓存「本次 workspace 变化」的判断结果，避免 StrictMode 双渲染在创建后把首开误判为已常驻。
   const residentRef = useRef<{ ws: string; resident: boolean } | null>(null);
@@ -59,8 +68,11 @@ export function AgentStoreProvider({ workspace, children }: AgentStoreProviderPr
   }, [workspace]);
 
   const value = useMemo(
-    () => ({ workspace, store, workspaceReady, setWorkspaceReady, appBooted }),
-    [workspace, store, workspaceReady, appBooted],
+    () =>
+      sessionPath === undefined && draftId === undefined
+        ? { workspace, store, workspaceReady, setWorkspaceReady, appBooted }
+        : { workspace, store, workspaceReady, setWorkspaceReady, appBooted, sessionPath, draftId },
+    [workspace, store, workspaceReady, appBooted, sessionPath, draftId],
   );
 
   return <AgentStoreContext.Provider value={value}>{children}</AgentStoreContext.Provider>;

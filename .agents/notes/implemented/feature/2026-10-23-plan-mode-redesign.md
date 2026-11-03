@@ -2,6 +2,8 @@
 
 Status: implemented
 
+执行模式守卫随 [Ultra 独立模式](2026-10-28-ultra-mode.md) 扩展到 Ultra；侧栏确认仍进入 Agent，计划工件、修订和确认契约不变。
+
 ## Problem
 
 旧 Plan 模式是 2026-06 前后的卡片化实现，产品侧几乎不用，体验落后于 Codex / Claude Code 的「先产出可审阅 plan → 确认后再执行」。
@@ -44,7 +46,7 @@ Plan 不是一等工件，而是「解析出来的卡片」：不可编辑、不
 
 ### 宿主守卫
 
-`extensions/agent-mode/planState.ts` 是按 sessionId 的内存表，扩展写、宿主读（agent-host 进程静态引入扩展，同一份模块）。`piRuntimeService.writeAgentMode` 在写内存 / 落条目 / 写盘之前调 `planBlocksModeSwitch`：会话有未确认 Plan 且目标是能动手的模式（agent / debug / brainstorm）时直接返回 `{ ok: false, blocked: 'PLAN_UNCONFIRMED', mode, message }`，什么都不改。扩展的 `before_agent_start` 再兜一道：live 模式被别的路径改成能动手的模式时拉回 plan 并提示。
+`extensions/agent-mode/planState.ts` 是按 sessionId 的内存表，扩展写、宿主读（agent-host 进程静态引入扩展，同一份模块）。`piRuntimeService.writeAgentMode` 在写内存 / 落条目 / 写盘之前调 `planBlocksModeSwitch`：会话有未确认 Plan 且目标是能动手的模式（agent / debug / ultra）时直接返回 `{ ok: false, blocked: 'PLAN_UNCONFIRMED', mode, message }`，什么都不改。扩展的 `before_agent_start` 再兜一道：live 模式被别的路径改成能动手的模式时拉回 plan 并提示。旧 Brainstorm 已按[模式收敛](../simplification/2026-10-30-remove-brainstorm-mode.md)恢复为 Agent，同样受此守卫约束。
 
 ### 线上契约
 

@@ -6,8 +6,8 @@ import { profileToModel } from "./capability.js";
 export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 export interface ModelSelectionPolicy {
-  /** 工厂加载时定下来：决定 spawn_agent 有没有 model 字段、是否注册发现工具。工具 schema 之后改不了，所以只对新会话生效。 */
-  enabled: boolean;
+  /** 调用时读取；schema 稳定，模式和授权开关不再在工厂阶段冻结。 */
+  readonly enabled: boolean;
   /** 每次访问都重读设置：白名单增删对已打开的会话立即生效；开关被关掉时视为空。 */
   readonly allowlist: ReadonlySet<string>;
 }
@@ -30,6 +30,7 @@ export interface RouteModel {
   id: string;
   name?: string;
   reasoning?: boolean;
+  contextWindow?: number;
   thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
 }
 
@@ -54,9 +55,8 @@ function liveAllowlist(): Set<string> {
 }
 
 export function readModelSelectionPolicy(): ModelSelectionPolicy {
-  const enabled = liveAllowlist().size > 0;
   return {
-    enabled,
+    get enabled() { return liveAllowlist().size > 0; },
     get allowlist() {
       return liveAllowlist();
     },
@@ -83,15 +83,51 @@ export function isThinkingLevel(v: unknown): v is ThinkingLevel {
 
 export function assertThinkingLevel(level: string, model: RouteModel): void {
   if (!isThinkingLevel(level)) throw new Error(`thinking_level 无效：${level}（可选 ${THINKING_LEVELS.join("/")}）`);
-  if (level === "off") return;
-  if (!model.reasoning) throw new Error(`模型 ${routeOf(model)} 不支持思考档`);
-  if (model.thinkingLevelMap && model.thinkingLevelMap[level] === null) {
-    throw new Error(`模型 ${routeOf(model)} 不支持思考档 ${level}`);
+  const available = supportedThinkingLevels(model);
+  if (!available.includes(level)) {
+    throw new Error(`模型 ${routeOf(model)} 不支持思考档 ${level}（可用 ${available.join("/")}）`);
   }
 }
 
-/** 一个模型可用的思考档：无 reasoning 只有 off；有则去掉 map 里标 null 的。 */
+/**
+ * 一个模型可用的思考档，与 SDK 的 getSupportedThinkingLevels 同一规则：
+ * 无 reasoning 只有 off；有则去掉 map 里标 null 的，且 xhigh / max 还要求 map 里显式写了值
+ * （没写 = 该协议没有这一档，不能拿来当默认展示）。
+ */
 export function supportedThinkingLevels(model: RouteModel): ThinkingLevel[] {
   if (!model.reasoning) return ["off"];
-  return THINKING_LEVELS.filter((l) => model.thinkingLevelMap?.[l] !== null);
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    return level === "xhigh" || level === "max" ? mapped !== undefined : true;
+  });
+}
+
+export interface ThinkingLevelResolution {
+  /** 实际会生效的档位。 */
+  level: ThinkingLevel;
+  /** 调用方请求的原始档位。 */
+  requested: ThinkingLevel;
+  /** 请求值不被模型支持、已就近收敛。 */
+  coerced: boolean;
+}
+
+/**
+ * 把请求的思考档落到模型真的支持的档上，规则与 SDK 的 clampThinkingLevel 一致：
+ * 命中则原样；否则先向上找最近的可用档，再向下找，最后退回该模型的最低档。
+ * 显式档位是调用方的选择，收敛要如实报告（coerced），不能悄悄改掉。
+ */
+export function resolveThinkingLevel(level: string, model: RouteModel): ThinkingLevelResolution {
+  if (!isThinkingLevel(level)) {
+    throw new Error(`thinking_level 无效：${level}（可选 ${THINKING_LEVELS.join("/")}）`);
+  }
+  const available = supportedThinkingLevels(model);
+  if (available.includes(level)) return { level, requested: level, coerced: false };
+  const index = THINKING_LEVELS.indexOf(level);
+  const nearest =
+    THINKING_LEVELS.slice(index).find((candidate) => available.includes(candidate)) ??
+    [...THINKING_LEVELS.slice(0, index)].reverse().find((candidate) => available.includes(candidate)) ??
+    available[0] ??
+    "off";
+  return { level: nearest, requested: level, coerced: true };
 }

@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { App } from 'antd';
 import { Icon, Popover } from '@lobehub/ui';
-import { Segmented } from 'antd';
+import { Segmented, Tooltip } from 'antd';
+import { FastModeToggle, FastModeError } from './FastModeToggle';
+import { useModelMessages } from '../../../../lib/modelMessages';
 import { createStaticStyles, cssVar, cx, useThemeMode } from 'antd-style';
-import { Check, Cpu, Search } from 'lucide-react';
+import { Brain, Check, Cpu, Image, Search, Zap } from 'lucide-react';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
-import { useThinkingMemoryStore } from '../../../../stores/thinkingMemoryStore';
-import { useSessionStore } from '../../../../store/session';
-import { pathsEquivalent } from '../../../../lib/pathUtils';
-import { pi } from '../../../../lib/pi';
 import { loadProviderList } from '../../../settings/providerListCache';
 import {
   useAvailableModelsState,
@@ -15,9 +14,13 @@ import {
   getCachedAvailableModels,
 } from '../../../settings/availableModelsCache';
 import { modelKey, parseModelKey, type ModelInfo } from '../modelUtils';
-import { pickFallbackModelKey, selectedModelLabel, sessionModelKey, settingsModelToKey } from '../sessionModel';
-import { coerceVisibleLevel, levelDisplayLabel, levelOptions, mergeModelCatalog, resolveLevelForModel, type RpcModel } from '../thinkingLevels';
+import { selectedModelLabel } from '../sessionModel';
+import { coerceVisibleLevel, levelDisplayLabel, levelOptions, mergeModelCatalog, type RpcModel } from '../thinkingLevels';
 import { useComposerCompact } from '../composerCompact';
+import { readComposerOwnerKey, useComposerOwnerKey, useComposerOwnerPreferences } from '../composerOwner';
+import { useSessionPreferencesStore } from '../../../../stores/sessionPreferencesStore';
+import { ensureComposerPreferences, saveProjectDefaults, writeComposerPreference } from './composerPreferences';
+import { emptyPreferences, type SessionPreferences } from '../../../../lib/sessionPreferences';
 
 /**
  * ModelThinkingAction —「模型 + 推理档位」合并控件（替代原先并列的 ModelAction + ThinkingAction）。
@@ -29,7 +32,12 @@ import { useComposerCompact } from '../composerCompact';
  *  - 底部档位分段：当前推理模型的档位，点选即切、面板不关；
  *  - 选模型也不关面板，可接着调档位，一次打开搞定（对齐 Cursor）。
  *
- * 底层行为：模型按会话记忆（草稿默认只写输入栏，不覆盖已有会话）、档位按模型记忆、切模型自动套用「记忆/默认」档位。
+ * 数据来源：会话/草稿的 `session-preferences` 快照（见 stores/sessionPreferencesStore）。
+ *   - 恢复只读：显示快照里的保存值，绝不调用 setter 写回；
+ *   - 换模型只改模型字段，不动思考/模式/审查的保存偏好；
+ *   - 保存值是用户请求的档位；有效档位按当前模型能力单独计算（非推理 → off），切回推理模型恢复原值；
+ *   - 草稿只写本地偏好，不动项目默认、不碰任何已落盘会话；
+ *   - 面板底部有明确的「设为项目默认」入口，只写 workspace 默认，失败可见。
  */
 
 const styles = createStaticStyles(({ css }) => ({
@@ -138,13 +146,30 @@ const styles = createStaticStyles(({ css }) => ({
     }
   `,
   itemName: css`
-    flex: 1;
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
+  capabilities: css`
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: ${cssVar.colorTextTertiary};
+    & > span { display: inline-flex; }
+  `,
+  levelRow: css`
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    & .ant-segmented { flex: 1; min-width: 0; width: 0; }
+    & .ant-segmented-item-label { min-width: 0; padding-inline: 3px; }
+  `,
   check: css`
     flex: none;
+    margin-inline-start: auto;
     color: ${cssVar.colorText};
   `,
   empty: css`
@@ -168,6 +193,26 @@ const styles = createStaticStyles(({ css }) => ({
     width: 100%;
     font-size: 12px;
   `,
+  defaults: css`
+    display: block;
+    width: 100%;
+    margin-block-start: 8px;
+    padding: 4px 6px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: ${cssVar.colorTextSecondary};
+    font-size: 11px;
+    text-align: start;
+    cursor: pointer;
+    &:hover:not(:disabled) {
+      background: ${cssVar.colorFillTertiary};
+    }
+    &:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+  `,
 }));
 
 interface RpcSessionState {
@@ -175,116 +220,42 @@ interface RpcSessionState {
   model?: RpcModel | null;
 }
 
-// 每个 workspace 缓存「模型 key + 档位 + 模型元数据 + 是否已读后端」：切对话时同步回显，消除「先显示上一个
-// 对话的值、再异步跳到新值」的闪动（合并自原 ModelAction.lastModelByWorkspace 与 ThinkingAction.thinkingByWorkspace）。
-interface WsCache {
-  modelKey: string;
-  level: string;
-  model: RpcModel | null;
-  loaded: boolean;
-  /** 用户在本轮草稿点过模型；发送中的 loadState 不得再用设置默认盖掉。 */
-  userPicked?: boolean;
-}
-const cacheByWorkspace = new Map<string, WsCache>();
-const memoryBySession = new Map<string, WsCache>();
-let lastGlobalModelKey = '';
-
 export function resetModelThinkingCacheForTests(): void {
-  cacheByWorkspace.clear();
-  memoryBySession.clear();
-  lastGlobalModelKey = '';
+  // 旧的 ws/session 缓存已移除；保留导出供现有 UI 场景的「重载」按钮调用（现在只清偏好缓存）。
+  useSessionPreferencesStore.setState({ byOwner: {}, defaultsByWorkspace: {} });
 }
 
-function readMapByPath(map: Map<string, WsCache>, path: string | null | undefined): WsCache | undefined {
-  if (!path) return undefined;
-  const direct = map.get(path);
-  if (direct) return direct;
-  for (const [key, value] of map) {
-    if (pathsEquivalent(key, path)) return value;
-  }
-  return undefined;
-}
-
-function readSessionMemory(path: string | null | undefined): WsCache | undefined {
-  return readMapByPath(memoryBySession, path);
-}
-
-function writeSessionMemory(path: string, patch: Partial<WsCache>): void {
-  if (!path) return;
-  const prev = readSessionMemory(path) ?? { modelKey: '', level: 'off', model: null, loaded: false };
-  memoryBySession.set(path, { ...prev, ...patch });
-}
-
-function readWorkspaceCache(workspace: string): WsCache | undefined {
-  return readMapByPath(cacheByWorkspace, workspace);
-}
-
+/** 当前输入栏 owner 的模型（草稿读本地偏好，会话读快照缓存）。 */
 export function peekComposerModel(workspace: string): { provider: string; id: string } | null {
-  const key = readWorkspaceCache(workspace)?.modelKey;
-  if (!key) return null;
-  const parsed = parseModelKey(key);
-  if (!parsed.provider || !parsed.id) return null;
-  return parsed;
+  const ownerKey = readComposerOwnerKey(workspace);
+  const model = useSessionPreferencesStore.getState().peek(ownerKey)?.model;
+  if (!model?.provider || !model.id) return null;
+  return { provider: model.provider, id: model.id };
 }
 
-/** 草稿首发前读输入栏推理档位。必须在 openWorkspace/newSession 之前读，避免 loadState 中途改缓存。 */
+/** 草稿首发前读输入栏推理档位（保存值）。 */
 export function peekComposerLevel(workspace: string): string | null {
-  const level = readWorkspaceCache(workspace)?.level;
-  return level ? level : null;
+  const ownerKey = readComposerOwnerKey(workspace);
+  return useSessionPreferencesStore.getState().peek(ownerKey)?.thinkingLevel ?? null;
 }
 
-/** 点「新建对话」时清掉上一轮草稿的点选，让新草稿重新套设置默认。 */
-export function clearComposerUserPick(workspace: string): void {
-  if (!workspace || !readWorkspaceCache(workspace)?.userPicked) return;
-  writeCache(workspace, { userPicked: false });
-}
-
-/** 草稿首发落盘前把输入栏选型钉进该会话，避免 getState 的设置默认盖掉点选。 */
+/** 首发送之后保留兼容导出：偏好过户由 sessionPreferencesStore.adopt 负责，这里不再改缓存。 */
 export function commitComposerModelToSession(
-  workspace: string,
-  sessionPath: string,
-  selected?: { provider: string; id: string } | null,
-  level?: string | null,
-): void {
-  if (!workspace || !sessionPath) return;
-  if (selected?.provider && selected.id) {
-    const prev = readWorkspaceCache(workspace);
-    const key = modelKey(selected.provider, selected.id);
-    const model =
-      prev?.model && prev.model.provider === selected.provider && prev.model.id === selected.id
-        ? prev.model
-        : { provider: selected.provider, id: selected.id };
-    writeCache(workspace, {
-      modelKey: key,
-      model,
-      loaded: true,
-      userPicked: true,
-      ...(level ? { level } : {}),
-    });
-  } else if (level) {
-    writeCache(workspace, { level });
-  }
-  const cached = readWorkspaceCache(workspace);
-  if (!cached?.modelKey) return;
-  writeSessionMemory(sessionPath, { ...cached, loaded: true });
-}
+  _workspace: string,
+  _sessionPath: string,
+  _selected?: { provider: string; id: string } | null,
+  _level?: string | null,
+): void {}
 
-function writeCache(workspace: string, patch: Partial<WsCache>): void {
-  const prev = readWorkspaceCache(workspace) ?? { modelKey: '', level: 'off', model: null, loaded: false };
-  const next = { ...prev, ...patch };
-  cacheByWorkspace.set(workspace, next);
-  for (const key of cacheByWorkspace.keys()) {
-    if (key !== workspace && pathsEquivalent(key, workspace)) cacheByWorkspace.set(key, next);
-  }
-}
+/** 点「新建对话」时无需清理：新草稿有独立 owner key，自带默认快照。 */
+export function clearComposerUserPick(_workspace: string): void {}
 
 export default function ModelThinkingAction() {
+  const messages = useModelMessages();
   const { workspace, workspaceReady } = useAgentStoreContext();
-  const draftConversationCwd = useSessionStore((s) => s.draftConversationCwd);
-  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
-  const isDraftConversation = Boolean(
-    draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace),
-  );
+  const ownerKey = useComposerOwnerKey(workspace);
+  const { preferences, loading: preferencesLoading, error: preferencesError } = useComposerOwnerPreferences(workspace);
+  const { message } = App.useApp();
   // isDarkMode 与 base-ui 同源（antd-style）：trigger 据此切 filled/outlined，和左侧 Mode/Approval 一致。
   const { isDarkMode } = useThemeMode();
   const compact = useComposerCompact();
@@ -298,247 +269,63 @@ export default function ModelThinkingAction() {
   const [models, setModels] = useState<ModelInfo[]>(() => getCachedAvailableModels(workspace) ?? []);
   const [providerNames, setProviderNames] = useState<Map<string, string>>(new Map());
 
-  const [value, setValue] = useState(() => cacheByWorkspace.get(workspace)?.modelKey ?? '');
-  const [level, setLevel] = useState(() => cacheByWorkspace.get(workspace)?.level ?? 'off');
-  const [model, setModel] = useState<RpcModel | null>(() => cacheByWorkspace.get(workspace)?.model ?? null);
-  const [ready, setReady] = useState(() => cacheByWorkspace.get(workspace)?.loaded ?? false);
-
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [savingDefaults, setSavingDefaults] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-
   const loadSeq = useRef(0);
-  // 会话档读回之前不要把缓存里的旧档写回后端，避免和 getState 抢档位。
-  const levelSettled = useRef(false);
-  const modelsRef = useRef(models);
-  modelsRef.current = models;
-  const canBindSession = useRef(true);
-  const wasDraftRef = useRef(false);
-  const prevModelsLenRef = useRef(0);
-  const switchSeq = useThinkingMemoryStore((s) => s.switchSeq[workspace] ?? 0);
-  const prevSwitchSeqRef = useRef(switchSeq);
+  const [localReady, setLocalReady] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
-  const applySelection = useCallback((key: string, nextModel: RpcModel | null, nextLevel?: string, userPicked?: boolean) => {
-    lastGlobalModelKey = key;
-    setValue(key);
-    setModel(nextModel);
-    if (nextLevel) setLevel(nextLevel);
-    setReady(true);
-    levelSettled.current = true;
-    const patch: Partial<WsCache> = {
-      modelKey: key,
-      model: nextModel,
-      loaded: true,
-      ...(nextLevel ? { level: nextLevel } : {}),
-      ...(userPicked !== undefined ? { userPicked } : {}),
-    };
-    writeCache(workspace, patch);
-    const st = useSessionStore.getState();
-    const isDraft = Boolean(st.draftConversationCwd && pathsEquivalent(st.draftConversationCwd, workspace));
-    if (!isDraft && st.activeSessionPath) writeSessionMemory(st.activeSessionPath, patch);
-  }, [workspace]);
+  const savedModel = preferences.model ?? null;
+  const value = savedModel ? modelKey(savedModel.provider, savedModel.id) : '';
+  // 列表里没有当前模型时，保留保存值（失效模型不能被静默清掉）。
+  const displayModel: RpcModel | null = useMemo(() => {
+    if (!savedModel) return null;
+    const info = models.find((item) => item.provider === savedModel.provider && item.id === savedModel.id);
+    return mergeModelCatalog(
+      {
+        provider: savedModel.provider,
+        id: savedModel.id,
+        name: info?.name,
+        api: info?.api,
+        reasoning: info?.reasoning,
+        thinkingLevelMap: info?.thinkingLevelMap,
+      },
+      models,
+    );
+  }, [models, savedModel?.provider, savedModel?.id]);
 
-  const applyFallback = useCallback((bind: boolean, preferred = lastGlobalModelKey, pickLevel = false): boolean => {
-    const fallback = pickFallbackModelKey(modelsRef.current, preferred);
-    if (!fallback) {
-      setReady(true);
-      return false;
-    }
-    const { provider, id } = parseModelKey(fallback);
-    const info = modelsRef.current.find((item) => item.provider === provider && item.id === id);
-    const nextModel = mergeModelCatalog({ provider, id, name: info?.name, api: info?.api, reasoning: info?.reasoning, thinkingLevelMap: info?.thinkingLevelMap }, modelsRef.current);
-    // 草稿没有会话档位可读。沿用上一个会话的 off 时，分段对不上这个模型的档，看起来像没选。
-    const nextLevel = pickLevel
-      ? resolveLevelForModel(nextModel, useThinkingMemoryStore.getState().byModel[fallback])
-      : undefined;
-    applySelection(fallback, nextModel, nextLevel);
-    if (bind) void pi.setModel(workspace, provider, id);
-    return true;
-  }, [applySelection, workspace]);
+  const [fastSaving, setFastSaving] = useState(false);
+  const [fastFailed, setFastFailed] = useState(false);
+  // 每次 Fast 写入一个 attempt；只有「仍属于当前 owner 且仍是最后一次点击」的回执能改本地态。
+  // A 写 pending → 切 B → B 写 pending 时，A 迟到的失败不能清掉 B 的 saving、也不能在 B 弹错。
+  const fastAttempt = useRef(0);
+  const fastOwner = useRef(ownerKey);
 
-  // 切换对话（workspace / 会话路径变化）时 render 期对齐 state：不闪上一个对话的值。
-  const prevWorkspaceRef = useRef(workspace);
-  const prevPathRef = useRef(activeSessionPath);
-    if (prevWorkspaceRef.current !== workspace) {
-    prevWorkspaceRef.current = workspace;
-    wasDraftRef.current = false;
-    levelSettled.current = false;
-    const mem = activeSessionPath ? readSessionMemory(activeSessionPath) : undefined;
-    const cached = mem ?? cacheByWorkspace.get(workspace);
-    setValue(cached?.modelKey ?? '');
-    setLevel(cached?.level ?? 'off');
-    setModel(cached?.model ?? null);
-    setReady(cached?.loaded ?? false);
-    const nextModels = getCachedAvailableModels(workspace) ?? [];
-    setModels(nextModels);
-    prevModelsLenRef.current = nextModels.length;
-    canBindSession.current = true;
-  }
-  if (prevPathRef.current !== activeSessionPath) {
-    prevPathRef.current = activeSessionPath;
-    levelSettled.current = false;
-    if (activeSessionPath) {
-      const mem = readSessionMemory(activeSessionPath);
-      if (mem?.modelKey) {
-        setValue(mem.modelKey);
-        setLevel(mem.level);
-        setModel(mem.model);
-        setReady(mem.loaded);
-        writeCache(workspace, mem);
-      } else {
-        // 没记过这份会话：不沿用上一个会话的模型 / 档位，等 loadState 读回它自己的。
-        setValue('');
-        setModel(null);
-        setReady(false);
+  // 进入 owner / 工作区就绪时加载快照。只读，不写会话。
+  useEffect(() => {
+    if (!workspaceReady) return;
+    let cancelled = false;
+    setLocalReady(false);
+    setLoadFailed(false);
+    void ensureComposerPreferences(workspace, ownerKey).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setLoadFailed(true);
+        message.error(result.message ? `无法读取会话偏好：${result.message}` : '无法读取会话偏好，请重试');
+        return;
       }
-    }
-  }
+      setLocalReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace, workspaceReady, ownerKey]);
 
   useEffect(() => {
     if (polledModels && polledModels.length > 0) setModels(polledModels);
   }, [polledModels]);
-
-  // 一次 getState 同时回读「当前模型 + 推理档位」。空会话常还没挂上默认模型：有列表就回退第一项并写回会话。
-  const loadState = useCallback(async (): Promise<'ok' | 'empty' | 'error'> => {
-    const seq = ++loadSeq.current;
-    const draft = useSessionStore.getState().draftConversationCwd;
-    const isDraft = Boolean(draft && pathsEquivalent(draft, workspace));
-    if (isDraft) {
-      canBindSession.current = false;
-      if (readWorkspaceCache(workspace)?.userPicked) return 'ok';
-      try {
-        const settings = await pi.getSettings();
-        if (seq !== loadSeq.current) return 'ok';
-        if (modelsRef.current.length === 0) {
-          setReady(false);
-          return 'empty';
-        }
-        const fromSettings = settingsModelToKey(settings.defaultSessionModel ?? '');
-        const inList = Boolean(
-          fromSettings && modelsRef.current.some((item) => modelKey(item.provider, item.id) === fromSettings),
-        );
-        const preferred = inList ? fromSettings : fromSettings ? '' : lastGlobalModelKey;
-        return applyFallback(false, preferred, true) ? 'ok' : 'empty';
-      } catch {
-        if (seq !== loadSeq.current) return 'ok';
-        if (modelsRef.current.length === 0) {
-          setReady(false);
-          return 'empty';
-        }
-        return applyFallback(false, lastGlobalModelKey, true) ? 'ok' : 'empty';
-      }
-    }
-    try {
-      const viewing = useSessionStore.getState().activeSessionPath || null;
-      const state = (await pi.getState(workspace, viewing)) as RpcSessionState;
-      if (seq !== loadSeq.current) return 'ok';
-      const nextModel = mergeModelCatalog(state?.model ?? null, modelsRef.current);
-      const key = sessionModelKey(nextModel);
-      const sessionFile = typeof (state as { sessionFile?: unknown })?.sessionFile === 'string'
-        ? (state as { sessionFile: string }).sessionFile
-        : '';
-      const viewingPath = useSessionStore.getState().activeSessionPath || '';
-      const mismatched = Boolean(sessionFile && viewingPath && !pathsEquivalent(sessionFile, viewingPath));
-      canBindSession.current = Boolean(sessionFile) && !mismatched;
-      const mem = readSessionMemory(viewingPath || sessionFile);
-      const bindRemembered = (remembered: WsCache) => {
-        const catalog = mergeModelCatalog(remembered.model, modelsRef.current);
-        const level = coerceVisibleLevel(catalog, remembered.level) ?? remembered.level;
-        applySelection(remembered.modelKey, remembered.model, level);
-        if (canBindSession.current && level && level !== remembered.level) {
-          void pi.setThinkingLevel(workspace, level);
-        }
-        if (!canBindSession.current || !remembered.modelKey) return;
-        const parsed = parseModelKey(remembered.modelKey);
-        if (parsed.provider && parsed.id) void pi.setModel(workspace, parsed.provider, parsed.id);
-      };
-      if (mismatched) {
-        // 后端还停在上一个会话（switchSession 未完成）：先显示记忆，再重试，不能把上一个会话的模型当成这份的。
-        if (mem?.modelKey) applySelection(mem.modelKey, mem.model, mem.level);
-        return 'error';
-      }
-      if (mem?.modelKey && mem.modelKey !== key) {
-        bindRemembered(mem);
-        return 'ok';
-      }
-      if (key) {
-        const visibleLevel = coerceVisibleLevel(nextModel, state?.thinkingLevel) ?? state?.thinkingLevel;
-        applySelection(key, nextModel, visibleLevel);
-        if (sessionFile) {
-          writeSessionMemory(sessionFile, {
-            modelKey: key,
-            level: visibleLevel ?? mem?.level ?? 'off',
-            model: nextModel,
-            loaded: true,
-          });
-        }
-        if (
-          canBindSession.current &&
-          visibleLevel &&
-          state?.thinkingLevel &&
-          visibleLevel !== state.thinkingLevel
-        ) {
-          void pi.setThinkingLevel(workspace, visibleLevel);
-        }
-        return 'ok';
-      }
-      if (mem?.modelKey) {
-        bindRemembered(mem);
-        return 'ok';
-      }
-      if (state?.thinkingLevel) setLevel(state.thinkingLevel);
-      return applyFallback(canBindSession.current, '') ? 'ok' : 'empty';
-    } catch (error) {
-      if (String(error).includes('SESSION_WORKSPACE_MISMATCH')) {
-        canBindSession.current = false;
-        return applyFallback(false) ? 'ok' : 'empty';
-      }
-      setReady(false);
-      return 'error';
-    }
-  }, [applyFallback, applySelection, workspace]);
-
-  useEffect(() => {
-    if (!workspaceReady) {
-      setReady(false);
-      return;
-    }
-    const isDraftNow = Boolean(
-      draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace),
-    );
-    const enteredDraft = !wasDraftRef.current && isDraftNow;
-    const leftDraft = wasDraftRef.current && !isDraftNow;
-    const switchSeqChanged = prevSwitchSeqRef.current !== switchSeq;
-    prevSwitchSeqRef.current = switchSeq;
-    const modelsJustArrived = prevModelsLenRef.current === 0 && models.length > 0;
-    wasDraftRef.current = isDraftNow;
-    prevModelsLenRef.current = models.length;
-    // 首发落盘清草稿时保留输入栏（即将 setModel）；点开已有会话会 bumpSwitch，必须重读该会话模型。
-    if (leftDraft && !switchSeqChanged) return;
-    if (isDraftNow && !enteredDraft && !modelsJustArrived && models.length > 0) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const attempt = (left: number) => {
-      void loadState().then((result) => {
-        if (cancelled) return;
-        if (result === 'error' && left > 0) {
-          timer = setTimeout(() => attempt(left - 1), 1000);
-        }
-      });
-    };
-    attempt(12);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [workspace, workspaceReady, loadState, switchSeq, draftConversationCwd, models.length]);
-
-  useEffect(() => {
-    if (!ready || models.length === 0) return;
-    const inList = Boolean(value) && models.some((item) => modelKey(item.provider, item.id) === value);
-    if (inList) return;
-    if (!applyFallback(canBindSession.current) && value) applySelection('', null);
-  }, [applyFallback, applySelection, models, ready, value]);
 
   // 供应商显示名：与模型列表/会话状态分开加载。
   useEffect(() => {
@@ -554,6 +341,18 @@ export default function ModelThinkingAction() {
     };
   }, [workspace, workspaceReady]);
 
+  // 换 owner：作废在途 attempt，旧的失败提示/loading 不能跟着显示在另一个会话上。
+  // 卸载同样作废：布局切换会整块卸下输入栏，迟到的失败不能 toast 到新页面。
+  useEffect(() => {
+    fastOwner.current = ownerKey;
+    fastAttempt.current++;
+    setFastFailed(false);
+    setFastSaving(false);
+    return () => {
+      fastAttempt.current++;
+    };
+  }, [ownerKey]);
+
   // 打开下拉时聚焦搜索框。
   useEffect(() => {
     if (!open) return;
@@ -561,53 +360,52 @@ export default function ModelThinkingAction() {
     return () => window.clearTimeout(t);
   }, [open]);
 
-  // 选模型：先用列表里的档位配置立刻刷新底部，再 setModel → 按「该模型记忆 / 模型默认」写推理档位。
+  const onWriteError = useCallback(
+    (result: { message?: string; error?: string }) => {
+      if (result.message) message.error(result.message);
+      else message.error('会话偏好保存失败，已保留原值');
+    },
+    [message],
+  );
+
+  // 选模型：只改模型字段；不改其它三项保存偏好，也不顺手改思考档位。
   const onChangeModel = (key: string) => {
     if (!key) return;
-    const { provider, id } = parseModelKey(key);
-    const info = models.find((item) => item.provider === provider && item.id === id);
-    const nextModel = mergeModelCatalog(
-      {
-        provider,
-        id,
-        name: info?.name,
-        api: info?.api,
-        reasoning: info?.reasoning,
-        thinkingLevelMap: info?.thinkingLevelMap,
-      },
-      models,
-    );
-    const remembered = useThinkingMemoryStore.getState().byModel[modelKey(provider, id)];
-    const target = resolveLevelForModel(nextModel, remembered);
     loadSeq.current++;
-    applySelection(key, nextModel, target, true);
-    if (isDraftConversation) return;
-    void (async () => {
-      try {
-        await pi.setModel(workspace, provider, id);
-        const state = (await pi.getState(workspace)) as RpcSessionState;
-        if (target !== state.thinkingLevel) await pi.setThinkingLevel(workspace, target);
-      } catch {
-        /* 保持后端现状 */
-      }
-      useThinkingMemoryStore.getState().bumpSwitch(workspace);
-    })();
+    const { provider, id } = parseModelKey(key);
+    if (!provider || !id) return;
+    void writeComposerPreference(workspace, ownerKey, 'model', { provider, id }).then((result) => {
+      if (result.ok) return;
+      if (result.error === 'unavailable') onWriteError({ message: '该模型当前不可用，请选择其它模型' });
+      else if (result.error !== 'loading') onWriteError(result);
+    });
   };
 
-  // 选档位：setThinkingLevel + 按模型记忆。不关面板。
+  // 会话 Fast：只改本 owner 的 fastMode。保存失败可见回滚，不动其它四项。
+  const onToggleFast = (next: boolean) => {
+    if (fastSaving) return;
+    const attempt = ++fastAttempt.current;
+    const owner = ownerKey;
+    setFastSaving(true);
+    setFastFailed(false);
+    void writeComposerPreference(workspace, ownerKey, 'fastMode', next).then((result) => {
+      // 已切走（含 A→B→A 的旧 attempt）或已有更新点击：这次结果只留在数据层。
+      if (fastOwner.current !== owner || fastAttempt.current !== attempt) return;
+      setFastSaving(false);
+      if (result.ok) return;
+      setFastFailed(true);
+      if (result.error !== 'loading') onWriteError(result);
+    });
+  };
+
+  // 选档位：只改思考偏好（保存值）。不关面板。
   const onPickLevel = (next: string) => {
     if (!next) return;
     loadSeq.current++;
-    setLevel(next);
-    writeCache(workspace, { level: next });
-    // 档位跟会话走：记到当前会话，切走再切回来还是它自己的档。
-    const st = useSessionStore.getState();
-    const isDraft = Boolean(st.draftConversationCwd && pathsEquivalent(st.draftConversationCwd, workspace));
-    if (!isDraft && st.activeSessionPath) writeSessionMemory(st.activeSessionPath, { level: next });
-    void pi.setThinkingLevel(workspace, next);
-    if (model?.provider && model?.id) {
-      useThinkingMemoryStore.getState().remember(modelKey(model.provider, model.id), next);
-    }
+    void writeComposerPreference(workspace, ownerKey, 'thinkingLevel', next).then((result) => {
+      if (!result.ok && result.error !== 'loading') onWriteError(result);
+      // effectiveOnly：模型钳制了有效档位，保存值不变，不弹错。
+    });
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -620,7 +418,19 @@ export default function ModelThinkingAction() {
     void loadProviderList(true)
       .then((list) => setProviderNames(new Map(list.map((p) => [p.id, p.name]))))
       .catch(() => {});
-    if (!isDraftConversation) void loadState();
+  };
+
+  const onSaveDefaults = () => {
+    if (savingDefaults) return;
+    setSavingDefaults(true);
+    void saveProjectDefaults(workspace, preferences).then((result) => {
+      setSavingDefaults(false);
+      if (result.ok) {
+        message.success('已设为项目默认（只影响新对话）');
+        return;
+      }
+      message.error(result.message ? `保存项目默认失败：${result.message}` : '保存项目默认失败，请重试');
+    });
   };
 
   // 搜索过滤：按 模型名 / id / 供应商名 匹配（输入只筛列表，不动当前选中）。
@@ -647,28 +457,35 @@ export default function ModelThinkingAction() {
     return groups;
   }, [models, providerNames, query]);
 
-  // 档位跟当前模型列表走，不跟会话里那份选中时的快照。保存「关闭 / 显示」后列表一刷新，分段立刻带上。
-  // 只露出一档也要显示并锁在这一档；「多于一档才算推理」会把这一档整段藏掉。
-  const catalogModel = mergeModelCatalog(model, models);
+  // 档位跟当前模型列表走，不跟会话里那份选中时的快照。
+  const catalogModel = mergeModelCatalog(displayModel, models);
   const currentLevels = levelOptions(catalogModel);
-  const showsThinking = currentLevels.some((o) => o.value !== 'off');
-  const activeLevel = coerceVisibleLevel(catalogModel, level) ?? level;
-  const currentLevelLabel = levelDisplayLabel(activeLevel);
-  const selectedModelName = selectedModelLabel(value, models);
-  const loading = !value && (!ready || (modelsLoading && models.length === 0));
-  const disabled = !workspaceReady || models.length === 0;
+  // 保存值是用户请求的档位；有效档位按当前模型能力算（非推理模型 → off），但不覆盖保存值。
+  const savedLevel = preferences.thinkingLevel;
+  const effectiveLevel = coerceVisibleLevel(catalogModel, savedLevel) ?? savedLevel ?? 'off';
+  // 模型失效（目录里没有）时避免把有效档位算成 off 而误导用户。
+  const modelMissing = Boolean(savedModel) && models.length > 0 && !models.some(
+    (item) => item.provider === savedModel?.provider && item.id === savedModel?.id,
+  );
+  const activeLevel = modelMissing ? savedLevel ?? effectiveLevel : effectiveLevel;
+  const showsThinking = !modelMissing && currentLevels.some((o) => o.value !== 'off');
+  const selectedInfo = models.find((item) => modelKey(item.provider, item.id) === value);
+  const showsFast = selectedInfo?.fast === true;
+  // Fast 是第五项会话偏好：绑定当前 owner 的保存值，不再看按模型共享的全局 store。
+  const fastSaved = preferences.fastMode === true;
+  const activeFast = showsFast && fastSaved;
 
-  const visibleLevelKey = currentLevels.map((o) => String(o.value)).join('\0');
-  // 列表把档收窄后，会话里留下的档可能已经不可见。锁到仍露出的默认档，分段才不会空着。
-  useEffect(() => {
-    if (!levelSettled.current || !ready || !model || !level || activeLevel === level) return;
-    setLevel(activeLevel);
-    writeCache(workspace, { level: activeLevel });
-    const st = useSessionStore.getState();
-    const isDraft = Boolean(st.draftConversationCwd && pathsEquivalent(st.draftConversationCwd, workspace));
-    if (!isDraft && st.activeSessionPath) writeSessionMemory(st.activeSessionPath, { level: activeLevel });
-    if (!isDraft && canBindSession.current) void pi.setThinkingLevel(workspace, activeLevel);
-  }, [activeLevel, level, model, ready, visibleLevelKey, workspace]);
+  const currentLevelLabel = levelDisplayLabel(String(activeLevel));
+  // 保存值与有效值分开：模型不支持 / 映射隐藏时，档位控件会显示回退值（或整段隐藏）。
+  // 这里只派生一句说明，不调用 setter、不改保存值。
+  const levelFallback = Boolean(savedLevel) && !modelMissing && String(savedLevel) !== String(activeLevel);
+  const levelFallbackText = levelFallback
+    ? `已保存「${levelDisplayLabel(String(savedLevel))}」；当前模型仅生效「${levelDisplayLabel(String(activeLevel))}」，切回支持的模型会恢复`
+    : '';
+  const selectedModelName = value ? selectedModelLabel(value, models) || parseModelKey(value).id : '';
+  const triggerTitle = selectedModelName + (activeFast ? ` · ${messages.fastActive}` : '');
+  const loading = !localReady || preferencesLoading || (!value && modelsLoading && models.length === 0);
+  const disabled = !workspaceReady || loadFailed || loading || models.length === 0;
 
   const panel = (
     <div className={styles.panel}>
@@ -701,10 +518,23 @@ export default function ModelThinkingAction() {
                     key={key}
                     type="button"
                     className={styles.item}
+                    data-model-id={m.id}
+                    data-provider={m.provider}
                     style={isCurrent ? { color: selFg, fontWeight: 600 } : undefined}
                     onClick={() => onChangeModel(key)}
                   >
                     <span className={styles.itemName}>{m.name ?? m.id}</span>
+                    {m.input?.includes('image') || m.reasoning === true || m.fast === true ? <span className={styles.capabilities} data-testid="model-capabilities">
+                      {([
+                        { capability: 'image', show: m.input?.includes('image') === true, icon: Image, label: messages.image },
+                        { capability: 'reasoning', show: m.reasoning === true, icon: Brain, label: messages.reasoning },
+                        { capability: 'fast', show: m.fast === true, icon: Zap, label: messages.fastCapability },
+                      ] as const).filter((item) => item.show).map((item) => (
+                        <Tooltip key={item.capability} title={item.label}>
+                          <span aria-label={item.label} data-capability={item.capability}><Icon icon={item.icon} size={14} /></span>
+                        </Tooltip>
+                      ))}
+                    </span> : null}
                     {isCurrent ? <Icon className={styles.check} icon={Check} size={14} /> : null}
                   </button>
                 );
@@ -713,28 +543,67 @@ export default function ModelThinkingAction() {
           ))
         )}
       </div>
-      {showsThinking ? (
-        <div className={styles.footer}>
-          <span className={styles.footerLabel}>推理档位</span>
-          <Segmented
-            block
-            size="small"
-            className={styles.levelSeg}
-            disabled={!ready}
-            value={activeLevel}
-            options={currentLevels.map((o) => {
-              const value = String(o.value);
-              const display = levelDisplayLabel(value);
-              const vendor = o.label && o.label !== value && o.label !== display ? o.label : '';
-              return {
-                label: <span title={vendor ? `${display} · ${vendor}` : display}>{display}</span>,
-                value,
-              };
-            })}
-            onChange={(v) => onPickLevel(String(v))}
-          />
-        </div>
-      ) : null}
+      <div className={styles.footer}>
+        {modelMissing ? (
+          <span className={styles.footerLabel} data-testid="model-unavailable-hint">
+            已保存的模型当前不可用，请选择其它模型
+          </span>
+        ) : null}
+        {preferencesError === 'unavailable' ? (
+          <span className={styles.footerLabel} data-testid="model-unavailable-error">
+            模型保存后不可用，请重新选择
+          </span>
+        ) : null}
+        {showsThinking || showsFast ? (
+          <>
+            <span className={styles.footerLabel}>{showsThinking ? '推理档位' : messages.fast}</span>
+            <div className={showsFast ? styles.levelRow : undefined} data-testid="model-level-row">
+              {showsThinking ? <Segmented
+                block
+                size="small"
+                className={styles.levelSeg}
+                data-testid="model-level-segmented"
+                disabled={!localReady}
+                value={String(activeLevel)}
+                options={currentLevels.map((o) => {
+                  const optionValue = String(o.value);
+                  const display = levelDisplayLabel(optionValue);
+                  const vendor = o.label && o.label !== optionValue && o.label !== display ? o.label : '';
+                  return {
+                    // data-level 给 UI 场景/自动化一个稳定的档位选择器（显示文案是本地化的）。
+                    label: <span data-level={optionValue} title={vendor ? `${display} · ${vendor}` : display}>{display}</span>,
+                    value: optionValue,
+                  };
+                })}
+                onChange={(v) => onPickLevel(String(v))}
+              /> : null}
+              {showsFast ? (
+                <FastModeToggle
+                  enabled={fastSaved}
+                  disabled={!localReady || preferencesLoading || loadFailed || fastSaving}
+                  onToggle={onToggleFast}
+                />
+              ) : null}
+            </div>
+            {showsFast && fastFailed ? <FastModeError /> : null}
+          </>
+        ) : null}
+        {levelFallback ? (
+          <span className={styles.footerLabel} data-testid="thinking-effective-hint">
+            {levelFallbackText}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className={styles.defaults}
+          data-testid="save-project-defaults"
+          // 加载失败或模型不可用时不能把当前四项当成有效默认写出去。
+          disabled={savingDefaults || !localReady || preferencesError === 'load' || preferencesError === 'unavailable'}
+          onClick={onSaveDefaults}
+        >
+          设为项目默认（只影响新对话）
+        </button>
+      </div>
     </div>
   );
 
@@ -754,7 +623,7 @@ export default function ModelThinkingAction() {
         className={cx(styles.trigger, isDarkMode ? styles.triggerFilled : styles.triggerOutlined)}
         data-testid="model-trigger"
         disabled={disabled}
-        title={compact ? (loading ? '加载模型…' : selectedModelName || '模型') : selectedModelName || undefined}
+        title={compact ? (loading ? '加载模型…' : triggerTitle || '模型') : triggerTitle || undefined}
       >
         {compact ? <Icon icon={Cpu} size={14} /> : (
           <>
@@ -764,7 +633,13 @@ export default function ModelThinkingAction() {
             ) : null}
           </>
         )}
+        {activeFast ? <span className={styles.triggerLevel} data-testid="model-trigger-fast">· {messages.fastActive}</span> : null}
       </button>
     </Popover>
   );
+}
+
+/** 已保存的四项偏好（供显式默认入口与测试读取）。 */
+export function readComposerPreferences(workspace: string): SessionPreferences {
+  return useSessionPreferencesStore.getState().peek(readComposerOwnerKey(workspace)) ?? emptyPreferences();
 }

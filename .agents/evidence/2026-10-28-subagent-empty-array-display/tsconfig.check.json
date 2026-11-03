@@ -1,0 +1,13 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "include": [
+    "../../../electron-agent/src/test/setup.ts",
+    "../../../electron-agent/src/features/panels/subagentUtils.ts",
+    "../../../electron-agent/src/features/chat/messagePrecompute.ts",
+    "../../../electron-agent/src/features/chat/ChatMessageItems.tsx",
+    "../../../electron-agent/src/features/chat/SubAgentGroupInline.tsx",
+    "../../../electron-agent/src/features/chat/messagePrecompute.test.ts",
+    "../../../electron-agent/src/features/chat/SubAgentGroupInline.test.tsx",
+    "../../../electron-agent/ui-harness/scenarios/subagent-history.tsx"
+  ]
+}

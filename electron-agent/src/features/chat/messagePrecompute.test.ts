@@ -14,6 +14,38 @@ describe('computeSubAgentUnits', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ['启动成功', 'done', { details: { agentId: 'sa-empty', status: 'running', sessionPath: '/empty.jsonl' } }],
+    ['启动前拒绝', 'error', { isError: true, content: [{ type: 'text', text: '子代理已被禁用' }] }],
+  ] as const)('空数组不丢失单任务：%s', (_label, status, result) => {
+    const message = { ...tool('empty', 'spawn_agent'), args: { action: 'spawn', title: '检查空数组', task: '审查接口', tasks: [], chain: [] }, status, result } as DisplayMessage;
+    const units = computeSubAgentUnits([message]).unitsByMessage.get('empty');
+    expect(units).toHaveLength(1);
+    expect(units?.[0]).toMatchObject({ no: 1, unit: { task: '审查接口', title: '检查空数组', subIndex: null, status } });
+    if (status === 'done') expect(units?.[0].unit.agentId).toBe('sa-empty');
+  });
+
+  it('空 tasks 不覆盖 chain，单步链式保留逐项结果身份', () => {
+    const message = { ...tool('chain', 'spawn_agent'), args: { tasks: [], chain: [{ task: '链式步骤' }] }, result: { details: { mode: 'chain', results: [{ task: '链式步骤', agentId: 'sa-step', ok: true }] } } } as DisplayMessage;
+    expect(computeSubAgentUnits([message]).unitsByMessage.get('chain')).toEqual([
+      { no: 1, unit: { key: 'chain#0', subIndex: 0, task: '链式步骤', agentId: 'sa-step', status: 'done' } },
+    ]);
+  });
+
+  it('混合 task/tasks 不遗漏顶层任务，编号、模型及详情索引对应后端顺序', () => {
+    const message = { ...tool('mixed', 'spawn_agent'), args: { title: '任务 A', task: 'A', model: 'p/a', tasks: [{ title: '任务 B', task: 'B', model: 'p/b' }] }, result: {} } as DisplayMessage;
+    const units = computeSubAgentUnits([message]).unitsByMessage.get('mixed');
+    expect(units?.map(({ no, unit }) => ({ no, task: unit.task, title: unit.title, model: unit.model, subIndex: unit.subIndex }))).toEqual([
+      { no: 1, task: 'A', title: '任务 A', model: 'p/a', subIndex: 0 },
+      { no: 2, task: 'B', title: '任务 B', model: 'p/b', subIndex: 1 },
+    ]);
+  });
+
+  it('单元素 tasks 与顶层 task 一样保留单代理结果身份', () => {
+    const message = { ...tool('one', 'spawn_agent'), args: { tasks: [{ task: '唯一任务', title: '唯一标题' }] }, result: { details: { agentId: 'sa-one' } } } as DisplayMessage;
+    expect(computeSubAgentUnits([message]).unitsByMessage.get('one')?.[0].unit).toMatchObject({ subIndex: null, agentId: 'sa-one', title: '唯一标题' });
+  });
+
   it('assigns continuous #N across multiple spawn_agent messages, skips non-spawn', () => {
     // 用 spy 控制每个 spawn 展开的子代理条数，验证连号跨调用累加。
     vi.spyOn(subagentUtils, 'expandSubAgents')
@@ -32,7 +64,7 @@ describe('computeSubAgentUnits', () => {
       id: 'm1',
       toolCallId: 'c1',
       toolName: 'spawn_agent',
-      args: { action: 'spawn', task },
+      args: { action: 'spawn', task, tasks: [], chain: [] },
       result: {
         content: [{ type: 'text', text: 'Background sub-agent started. agentId: sa-298b8d4d' }],
         details: { agentId: 'sa-298b8d4d', status: 'running', sessionPath: '/tmp/sa.jsonl' },

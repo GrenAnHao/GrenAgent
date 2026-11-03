@@ -6,8 +6,11 @@ import { randomUUID } from 'node:crypto';
 import type { MethodHandler } from '../agentProcess/rpcPeer';
 import { RpcPeer } from '../agentProcess/rpcPeer';
 import type { CodeGraphHostClient } from '../app/codeGraph/codeGraphHostClient';
+import type { CodeGraphSyncEvent } from '../app/codeGraph/hostContract';
+import type { KnowledgeCompletionInput } from '../agentData/runtime';
 import { PluginStateStore } from '../app/plugin/pluginStateStore';
-import { assembleAgentData, type AgentDataModelPort, type AssembledAgentData } from './assemble';
+import { assembleAgentData, type AssembledAgentData } from './assemble';
+import type { AgentDataModelPort } from './modelPort';
 import {
   AGENTDATA_MODEL_USAGE_CHANNEL,
   type AgentDataHostConfig,
@@ -18,7 +21,7 @@ import {
 export interface AgentDataHostDeps {
   config: AgentDataHostConfig;
   peer: RpcPeer;
-  createCodeGraph: (listWorkspaces: () => string[]) => Pick<CodeGraphHostClient, 'projects' | 'status' | 'search' | 'call' | 'runSync' | 'cancelSync' | 'close'>;
+  createCodeGraph: (listWorkspaces: () => string[], hooks?: { onBreaker?: (event: CodeGraphSyncEvent) => void }) => Pick<CodeGraphHostClient, 'projects' | 'status' | 'search' | 'call' | 'runSync' | 'cancelSync' | 'close'>;
 }
 
 export interface AgentDataHost {
@@ -50,7 +53,8 @@ export function createAgentDataHost({ config, peer, createCodeGraph }: AgentData
       const onAbort = () => { void peer.request('main.model.abort', { requestId }).catch(() => undefined); };
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
-        return await peer.request<string>('main.model.complete', { requestId, input: rest, withUsage: Boolean(onUsage) });
+        return await peer.request<string>('main.model.complete', { requestId, input: rest, withUsage: Boolean(onUsage),
+          ...(config.knowledgeKernelVersion === 1 ? { controllerEpoch: assembled.runtime.knowledgeControllerEpoch() } : {}) });
       } finally {
         signal?.removeEventListener('abort', onAbort);
         usage.delete(requestId);
@@ -59,22 +63,34 @@ export function createAgentDataHost({ config, peer, createCodeGraph }: AgentData
   };
   const mainMethod = (name: string) => (params: Record<string, unknown>) => peer.request('main.method', { name, params });
 
+  let reportBreaker: (event: CodeGraphSyncEvent) => void = () => {};
   const assembled = assembleAgentData({
     dataPath: config.dataPath,
-    worksDir: config.worksDir,
     model,
-    codeGraph: createCodeGraph(() => [...known]),
+    codeGraph: createCodeGraph(() => [...known], { onBreaker: (event) => reportBreaker(event) }),
     resolveSession: (workspace, sessionId) => peer.request<boolean>('main.resolveSession', { workspace, sessionId }),
     methods: {
       'turn.start': mainMethod('turn.start'),
       'permission.authorize': mainMethod('permission.authorize'),
       'mcp.state.publish': mainMethod('mcp.state.publish'),
+      'repoWiki.run': mainMethod('repoWiki.run'),
+      'repoWiki.cancel': mainMethod('repoWiki.cancel'),
+      'knowledge.bindEpoch': mainMethod('knowledge.bindEpoch'),
+      'knowledge.activateEpoch': mainMethod('knowledge.activateEpoch'),
+      'knowledge.bindModel': mainMethod('knowledge.bindModel'),
+      'knowledge.message': mainMethod('knowledge.message'),
+      'knowledge.abort': mainMethod('knowledge.abort'),
+      'knowledge.ackUsage': mainMethod('knowledge.ackUsage'),
+      'knowledge.worker': mainMethod('knowledge.worker'),
+      'knowledge.changed': mainMethod('knowledge.changed'),
     },
     listenPath: config.listenPath,
     hostToken: config.hostToken,
     workspaceTokens: config.workspaceTokens,
+    knowledgeKernelVersion: config.knowledgeKernelVersion,
   });
   const { runtime } = assembled;
+  reportBreaker = (event) => runtime.recordCodegraphBreaker(event);
   let plugins: PluginStateStore | undefined;
   const pluginStore = () => (plugins ??= runtime.pluginStateStore());
 
@@ -85,6 +101,9 @@ export function createAgentDataHost({ config, peer, createCodeGraph }: AgentData
     'agentdata.resolveDiagnosticPath': (p) => runtime.resolveDiagnosticPath(str(p, 'id')),
     'agentdata.plugins.load': () => pluginStore().load(),
     'agentdata.plugins.save': (p) => { pluginStore().save(p.record as never); return null; },
+    'agentdata.knowledge.describe': () => runtime.describeKnowledgeModel(),
+    'agentdata.knowledge.complete': (p) => runtime.completeKnowledge(readKnowledgeInput(p.input), { requestId: str(p, 'requestId') }),
+    'agentdata.knowledge.cancel': (p) => { runtime.cancelKnowledge(str(p, 'requestId')); return null; },
     // hostEntry 会覆盖它（还要退出进程）；这里的版本给测试和进程内调用用。
     'host.shutdown': async () => { await assembled.close(); return null; },
   };
@@ -108,4 +127,22 @@ function str(params: Record<string, unknown>, key: string): string {
 }
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readKnowledgeInput(value: unknown): KnowledgeCompletionInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('knowledge input must be an object');
+  const input = value as Record<string, unknown>;
+  if (typeof input.user !== 'string' || input.user.length > 600_000) throw new Error('invalid knowledge user prompt');
+  if (input.systemPrompt !== undefined && (typeof input.systemPrompt !== 'string' || input.systemPrompt.length > 20_000)) throw new Error('invalid knowledge system prompt');
+  if (input.maxTokens !== undefined && (!Number.isSafeInteger(input.maxTokens) || Number(input.maxTokens) < 1)) throw new Error('invalid knowledge max tokens');
+  for (const key of ['expectedModel', 'sourceProjectId']) if (input[key] !== undefined && (typeof input[key] !== 'string' || String(input[key]).length > 4096)) throw new Error(`invalid knowledge ${key}`);
+  if (input.expectedConfiguration !== undefined && (typeof input.expectedConfiguration !== 'string' || !/^[0-9a-f]{64}$/i.test(input.expectedConfiguration))) throw new Error('invalid knowledge configuration identity');
+  return {
+    user: input.user,
+    ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt as string }),
+    ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens as number }),
+    ...(input.expectedModel === undefined ? {} : { expectedModel: input.expectedModel as string }),
+    ...(input.expectedConfiguration === undefined ? {} : { expectedConfiguration: input.expectedConfiguration as string }),
+    ...(input.sourceProjectId === undefined ? {} : { sourceProjectId: input.sourceProjectId as string }),
+  };
 }

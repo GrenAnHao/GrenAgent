@@ -1,0 +1,9 @@
+electron-agent @earendil-works/pi-agent-core 1.3.0
+electron-agent @earendil-works/pi-ai 1.3.0
+electron-agent @earendil-works/pi-coding-agent 1.3.0
+cli @earendil-works/pi-agent-core 1.1.0
+cli @earendil-works/pi-ai 1.3.0
+cli @earendil-works/pi-coding-agent 1.3.0
+extensions @earendil-works/pi-agent-core 1.3.0
+extensions @earendil-works/pi-ai 1.3.0
+extensions @earendil-works/pi-coding-agent 1.3.0

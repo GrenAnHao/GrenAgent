@@ -1,0 +1,10 @@
+{
+  "mode": "in-memory host boundary; synthetic seven-root fixture; no renderer, disk or child",
+  "activationMs": 14.15020000000004,
+  "projectsMs": 0.17830000000003565,
+  "status": "bound",
+  "projectCount": 7,
+  "registryReads": 0,
+  "modelDescriptions": 0,
+  "childPid": null
+}

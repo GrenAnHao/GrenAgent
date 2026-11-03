@@ -24,6 +24,24 @@ describe('SkillService', () => {
     await expect(readFile(join(home, '.agents', 'skills', 'same', 'SKILL.md'), 'utf8')).resolves.toContain('description: "first description"');
   });
 
+  it('reads folded and literal YAML descriptions instead of the block marker', async () => {
+    const { home, service } = await fixture();
+    for (const [name, header] of [
+      ['folded', 'description: >-\n  第一行\n  第二行'],
+      ['literal', 'description: |\n  line one\n  line two'],
+      ['quoted', "description: 'has: colon'"],
+      ['broken', 'description: plain text\n  : not yaml ['],
+    ]) {
+      await mkdir(join(home, '.agents', 'skills', name), { recursive: true });
+      await writeFile(join(home, '.agents', 'skills', name, 'SKILL.md'), `---\nname: ${name}\n${header}\n---\n`);
+    }
+    const byName = Object.fromEntries((await service.list()).map((skill) => [skill.name, skill.description]));
+    expect(byName.folded).toBe('第一行 第二行');
+    expect(byName.literal).toBe('line one line two');
+    expect(byName.quoted).toBe('has: colon');
+    expect(byName.broken).toBe('plain text');
+  });
+
   it('imports valid skill directories and Markdown files', async () => {
     const { home, service } = await fixture();
     const source = await mkdtemp(join(tmpdir(), 'electron-agent-skill-source-'));

@@ -179,3 +179,57 @@ describe("approval per session", () => {
     expect(getApprovalPolicy("D:/p", "new")).toBe("full");
   });
 });
+
+describe("approval 初值固化", () => {
+  it("缺档位的旧会话首次继承项目默认时写回 canonical 条目", async () => {
+    const cache = new Map<string, string>();
+    vi.mocked(getConfig).mockImplementation((key: string) => cache.get(key));
+    cache.set(approvalPolicyConfigKey("D:/p"), "workspace");
+    const appended: Array<{ type: string; data: unknown }> = [];
+    const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+    approval({
+      registerCommand: () => {},
+      on: (ev: string, h: (event: unknown, ctx: unknown) => unknown) => { handlers[ev] = h; },
+      appendEntry: (type: string, data: unknown) => { appended.push({ type, data }); },
+    } as never);
+    const session = ctx([], "D:/p", "sa");
+    await handlers.session_start?.({}, session);
+    expect(getApprovalPolicy("D:/p", "sa")).toBe("workspace");
+    expect(appended).toEqual([
+      { type: "session-preferences", data: expect.objectContaining({ approval: "workspace" }) },
+    ]);
+  });
+
+  it("会话已有档位条目不重复固化", async () => {
+    vi.mocked(getConfig).mockReturnValue(undefined);
+    const appended: Array<{ type: string; data: unknown }> = [];
+    const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+    approval({
+      registerCommand: () => {},
+      on: (ev: string, h: (event: unknown, ctx: unknown) => unknown) => { handlers[ev] = h; },
+      appendEntry: (type: string, data: unknown) => { appended.push({ type, data }); },
+    } as never);
+    await handlers.session_start?.({}, ctx(
+      [{ type: "custom", customType: "session-controls", data: { approval: "readonly" } }],
+      "D:/p",
+      "sa",
+    ));
+    expect(getApprovalPolicy("D:/p", "sa")).toBe("readonly");
+    expect(appended).toEqual([]);
+  });
+
+  it("固化写盘失败不抹掉钉住的档位，也不抛错", async () => {
+    vi.mocked(getConfig).mockReturnValue(undefined);
+    const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+    let attempted: unknown;
+    approval({
+      registerCommand: () => {},
+      on: (ev: string, h: (event: unknown, ctx: unknown) => unknown) => { handlers[ev] = h; },
+      appendEntry: (type: string, data: unknown) => { attempted = { type, data }; throw new Error("disk full"); },
+    } as never);
+    const session = ctx([], "D:/p", "sa");
+    await expect(handlers.session_start?.({}, session)).resolves.toBeUndefined();
+    expect(getApprovalPolicy("D:/p", "sa")).toBe("auto");
+    expect(attempted).toMatchObject({ type: "session-preferences" });
+  });
+});

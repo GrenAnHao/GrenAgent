@@ -4,6 +4,7 @@
  * 本进程是 agent-data.db 的唯一持有者：同步 sqlite、记忆 / Wiki 的后台任务和定时器都在这里跑，不占主进程。
  * 见 .agents/notes/implemented/architecture/2026-10-16-agentdata-host-process.md。
  */
+import { dirname, join } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { getHeapStatistics } from 'node:v8';
 import { agentDataTiming } from '../agentData/methodTiming';
@@ -77,7 +78,13 @@ async function main(): Promise<void> {
   host = createAgentDataHost({
     config,
     peer,
-    createCodeGraph: (listWorkspaces) => createCodeGraphClient({ ...config.codeGraph, listWorkspaces, diag }),
+    createCodeGraph: (listWorkspaces, hooks) => createCodeGraphClient({
+      ...config.codeGraph,
+      listWorkspaces,
+      diag,
+      statePath: join(dirname(config.dataPath), 'codegraph-state.json'),
+      onBreaker: hooks?.onBreaker,
+    }),
   });
   const { 'host.shutdown': _ownShutdown, ...methods } = host.methods;
   peer.handleAll(methods);

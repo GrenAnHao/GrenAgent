@@ -1,0 +1,114 @@
+.repo-wiki-root .plan-mode-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0;
+  border-bottom: 1px solid var(--rw-border, #34383d);
+  padding-bottom: 8px;
+}
+.repo-wiki-root .plan-mode-tabs button {
+  padding: 7px 11px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--rw-muted, #a4adb6);
+}
+.repo-wiki-root .plan-mode-tabs button[aria-pressed="true"] {
+  color: var(--rw-text, #e1e5e9);
+  background: var(--rw-hover, #32373c);
+}
+.repo-wiki-root .plan-form {
+  max-height: 53vh;
+  overflow: auto;
+  padding: 2px 5px 12px 0;
+  font-size: 12px;
+}
+.repo-wiki-root .plan-form h3 {
+  font-size: 13px;
+  margin: 0 0 7px;
+  font-weight: 600;
+}
+.repo-wiki-root .plan-form p {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--rw-muted, #a4adb6);
+  margin: 0 0 14px;
+}
+.repo-wiki-root .plan-scope > div,
+.repo-wiki-root .plan-page-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.repo-wiki-root .plan-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--rw-muted, #a4adb6);
+}
+.repo-wiki-root .plan-form input,
+.repo-wiki-root .plan-form textarea {
+  width: 100%;
+  border: 1px solid var(--rw-border, #34383d);
+  background: var(--rw-bg, #1b1e21);
+  border-radius: 4px;
+  color: var(--rw-text, #e1e5e9);
+  padding: 8px 10px;
+  font:
+    12px/1.6 Consolas,
+    monospace;
+  resize: vertical;
+}
+.repo-wiki-root .plan-form textarea {
+  min-height: 64px;
+}
+.repo-wiki-root .plan-pages {
+  margin-top: 22px;
+}
+.repo-wiki-root .plan-pages > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+.repo-wiki-root .plan-pages h3 span {
+  color: var(--rw-muted, #a4adb6);
+  margin-left: 5px;
+}
+.repo-wiki-root .plan-page {
+  border: 1px solid var(--rw-border, #34383d);
+  border-radius: 5px;
+  margin: 10px 0 18px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.repo-wiki-root .plan-page legend {
+  font-size: 11px;
+  color: var(--rw-muted, #a4adb6);
+  padding: 0 6px;
+}
+.repo-wiki-root .plan-page-head {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 12px;
+  align-items: end;
+}
+.repo-wiki-root .plan-remove {
+  padding: 9px 4px;
+  color: var(--rw-muted, #a4adb6);
+  font-size: 11px;
+}
+.repo-wiki-root .plan-remove:hover {
+  color: #e5a18c;
+}
+@media (max-width: 650px) {
+  .repo-wiki-root .plan-scope > div,
+  .repo-wiki-root .plan-page-details,
+  .repo-wiki-root .plan-page-head {
+    grid-template-columns: 1fr;
+  }
+  .repo-wiki-root .plan-form {
+    max-height: 50vh;
+  }
+}

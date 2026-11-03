@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
 import type { IndexProgress } from '@colbymchenry/codegraph';
@@ -6,8 +7,12 @@ import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import { fromWireError } from '../../agentProcess/rpcPeer';
 import { CODEGRAPH_SDK_VERSION, type CodeGraphStatusView, type SyncOutcome, type SyncPlan } from './codeGraphEngine';
 import type { CodeSearchView } from './codeGraphService';
+import { headAction, readGitHead } from './gitHead';
+import type { CodeGraphStateEvent } from './hostContract';
 import { isIndexed as probeIndexed } from './indexProbe';
-import { SyncScheduler, type SyncEvent, type SyncExecutor, type SyncSchedulerOptions } from './syncScheduler';
+import { ReadAdmission, readFlightKey, readTimeoutError, type ReadAdmissionOptions } from './readAdmission';
+import { SyncScheduler, type SyncEvent, type SyncExecutor, type SyncSchedulerOptions, type SyncTrigger } from './syncScheduler';
+import { createWorkspaceRegistry, type WorkspaceRegistry } from './workspaceRegistry';
 import type { WorkerCall, WorkerMessage, WorkerRequest, WorkerRole } from './workerProtocol';
 
 /** worker_threads.Worker 用到的那一小部分；测试换成假线程。 */
@@ -36,7 +41,27 @@ export interface CodeGraphThreadsOptions {
   /** 测试替换退避、时钟、定时器。 */
   scheduler?: Partial<Omit<SyncSchedulerOptions, 'executor'>>;
   onSyncEvent?: (event: SyncEvent) => void;
+  /** 调度阶段变化。宿主把它推给父进程；面板仍保留状态轮询。 */
+  onState?: (event: CodeGraphStateEvent) => void;
+  /** 写任务停滞时调用。宿主用来退出进程，父进程按崩溃预算重拉。 */
+  onStall?: (workspace: string) => void;
   isIndexed?: (workspace: string) => boolean;
+  /** 读队列上限。默认 32。 */
+  maxQueuedReads?: number;
+  /** 读超时（含排队）。默认 30 秒。 */
+  readTimeoutMs?: number;
+  /** 写停滞超时。默认 120 秒；0 关掉。 */
+  writeStallTimeoutMs?: number;
+  /** 登记过的工作区。设置了才做启动补同步和轮询；测试不设，避免留下定时器。 */
+  statePath?: string;
+  startupDelayMs?: number;
+  pollIntervalMs?: number;
+  degradedPollIntervalMs?: number;
+  branchSwitchSettleMs?: number;
+  /** 测试替换 git HEAD 读取。 */
+  readHead?: (workspace: string) => string | undefined;
+  setTimer?: ReadAdmissionOptions['setTimer'];
+  clearTimer?: ReadAdmissionOptions['clearTimer'];
 }
 
 const BUSY = 'CodeGraph workspace is busy indexing';
@@ -67,6 +92,7 @@ class WorkerThread {
   private crashes: number[] = [];
   private blockedUntil = 0;
   private exited?: Promise<void>;
+  private suppressCrash = false;
   inFlight = 0;
 
   constructor(
@@ -105,6 +131,19 @@ class WorkerThread {
     if (!done) await this.worker?.terminate();
   }
 
+  /** 读超时：停掉这条线程上所有在途请求并丢掉它。不算崩溃，避免三次超时就把读池冷却掉。 */
+  kill(): void {
+    const worker = this.worker;
+    if (!worker) return;
+    this.suppressCrash = true;
+    this.worker = undefined;
+    this.ready = undefined;
+    const error = readTimeoutError();
+    for (const waiter of this.pending.values()) waiter.reject(error);
+    this.pending.clear();
+    void Promise.resolve(worker.terminate()).catch(() => undefined);
+  }
+
   private start(): Promise<void> {
     if (this.ready) return this.ready;
     const now = this.now();
@@ -137,7 +176,8 @@ class WorkerThread {
       failReady(error);
       for (const waiter of this.pending.values()) waiter.reject(error);
       this.pending.clear();
-      if (!expected) this.recordCrash();
+      if (!expected && !this.suppressCrash) this.recordCrash();
+      this.suppressCrash = false;
       this.onExit();
       markExited();
     });
@@ -161,22 +201,30 @@ interface WatchState { workspace: string; active: boolean; starting: boolean; de
  * - 全量重建期间同工作区的读返回 busy，写开始前先等在途的读结束、让读线程交出连接（与原来一样）；
  * - 自动同步：被查询的已索引工作区挂上 SDK FileWatcher（最多 maxWatched 个），改动交给调度器合并成增量同步；
  *   第一次访问、或监听没挂上 / 失效时距上次检查超过 staleAfterMs，补一次整树比对。不替用户建索引。
+ * 设置了 statePath 时，重启后延迟补同步，并按轮询兜底；HEAD 变了等结算窗口再整树比对。
  */
 export class CodeGraphThreads {
   private readonly writer: WorkerThread;
   private readonly readers: WorkerThread[];
   private readonly scheduler: SyncScheduler;
+  private readonly admission: ReadAdmission;
+  private readonly registry: WorkspaceRegistry;
   private readonly reads = new Map<string, Set<Promise<unknown>>>();
+  private readonly flights = new Map<string, Promise<unknown>>();
   private readonly lastStatus = new Map<string, CodeGraphStatusView>();
   /** 挂着监听的工作区，Map 的插入顺序即最近使用顺序。 */
   private readonly watched = new Map<string, WatchState>();
   private readonly checkedAt = new Map<string, number>();
+  private readonly branchTimers = new Map<string, unknown>();
   /** 已经交给写线程的同步；还在等读排空的全量重建取消时不必惊动写线程。 */
   private readonly dispatched = new Set<string>();
   private readonly active = new Set<Promise<unknown>>();
   private readonly now: () => number;
   private readonly autoSync: boolean;
   private readonly isIndexed: (workspace: string) => boolean;
+  private readonly readHead: (workspace: string) => string | undefined;
+  private startupTimer?: unknown;
+  private pollTimer?: unknown;
   private closed = false;
   private closing?: Promise<void>;
 
@@ -184,10 +232,29 @@ export class CodeGraphThreads {
     this.now = options.now ?? Date.now;
     this.autoSync = options.autoSync ?? autoSyncEnabled();
     this.isIndexed = options.isIndexed ?? probeIndexed;
+    this.readHead = options.readHead ?? defaultReadHead;
+    this.registry = createWorkspaceRegistry(options.statePath, keyOf);
     this.writer = new WorkerThread('write', options.createWorker, this.now, (message) => this.onWriterEvent(message), () => this.onWriterExit());
     const count = Math.max(1, options.readers ?? defaultReaderCount());
     this.readers = Array.from({ length: count }, () => new WorkerThread('read', options.createWorker, this.now));
-    this.scheduler = new SyncScheduler({ now: this.now, ...options.scheduler, executor: this.executor(), onEvent: (event) => options.onSyncEvent?.(event) });
+    this.admission = new ReadAdmission({
+      readers: count,
+      maxQueued: options.maxQueuedReads,
+      timeoutMs: options.readTimeoutMs,
+      now: this.now,
+      setTimer: (callback, ms) => this.arm(callback, ms),
+      clearTimer: (handle) => this.disarm(handle),
+    });
+    this.scheduler = new SyncScheduler({
+      now: this.now,
+      ...options.scheduler,
+      writeStallTimeoutMs: options.scheduler?.writeStallTimeoutMs ?? options.writeStallTimeoutMs ?? 120_000,
+      onStall: options.scheduler?.onStall ?? options.onStall,
+      executor: this.executor(),
+      onEvent: (event) => options.onSyncEvent?.(event),
+      onChange: (workspace) => this.emitState(workspace),
+    });
+    if (this.autoSync && options.statePath) this.startBackgroundSync();
   }
 
   get syncing(): number { return this.scheduler.running; }
@@ -216,7 +283,7 @@ export class CodeGraphThreads {
     const validated = validateCodeRetrievalArgs(workspace, name, args);
     const key = keyOf(workspace);
     this.touch(workspace, key);
-    const result = await this.read<CodeRetrievalResult>(key, { op: 'call', workspace, tool: name, args: validated });
+    const result = await this.read<CodeRetrievalResult>(key, { op: 'call', workspace, tool: name, args: validated }, true);
     return this.annotate(key, result);
   }
 
@@ -225,7 +292,7 @@ export class CodeGraphThreads {
       if (this.closed) throw new Error(CLOSED);
       const key = keyOf(workspace);
       this.touch(workspace, key);
-      return await this.read<CodeSearchView>(key, { op: 'search', workspace, query, limit });
+      return await this.read<CodeSearchView>(key, { op: 'search', workspace, query, limit }, true);
     } catch (error) {
       return { workspace, available: false, results: [], message: errorText(error) };
     }
@@ -242,10 +309,16 @@ export class CodeGraphThreads {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
+    this.admission.close();
+    this.disarm(this.startupTimer);
+    this.disarm(this.pollTimer);
+    for (const timer of this.branchTimers.values()) this.disarm(timer);
+    this.branchTimers.clear();
     this.closing = (async () => {
       await this.scheduler.close();
       await Promise.allSettled([...this.active]);
       await Promise.allSettled([this.writer.close(), ...this.readers.map((reader) => reader.close())]);
+      try { this.registry.save(); } catch { /* 登记写失败不挡住关停 */ }
     })();
     return this.closing;
   }
@@ -279,13 +352,16 @@ export class CodeGraphThreads {
   /** 工作区被访问（查询、搜索）：已索引的挂上监听，第一次访问或监听不可用且久未检查时补一次整树同步。 */
   private touch(workspace: string, key: string): void {
     if (!this.autoSync || this.closed || !this.isIndexed(workspace)) return;
+    this.registry.touch(workspace, this.now());
     const watch = this.watched.get(key);
     if (watch) { this.watched.delete(key); this.watched.set(key, watch); }
     else this.startWatch(workspace, key);
+    const switched = this.armBranchIfNeeded(workspace, key);
     const current = this.watched.get(key);
     const healthy = Boolean(current?.active && !current.degraded);
     const checked = this.checkedAt.get(key);
     const now = this.now();
+    if (switched) { this.checkedAt.set(key, now); return; }
     if (checked === undefined || (!healthy && now - checked >= (this.options.staleAfterMs ?? 5 * 60_000))) {
       this.checkedAt.set(key, now);
       this.scheduler.request(key, workspace, { trigger: 'activate' });
@@ -325,6 +401,7 @@ export class CodeGraphThreads {
     const state = this.watched.get(key);
     if (!state || this.closed) return;
     if (message.type === 'changed') {
+      if (this.armBranchIfNeeded(state.workspace, key)) { this.checkedAt.set(key, this.now()); return; }
       this.scheduler.request(key, state.workspace, { trigger: 'watch', paths: message.paths });
       return;
     }
@@ -358,7 +435,10 @@ export class CodeGraphThreads {
     const files = this.scheduler.pendingFiles(key, META_FILES);
     const annotated: CodeRetrievalResult = {
       ...result,
-      structuredContent: { ...result.structuredContent, meta: { servingStale: true, generation: view.generation, phase: view.phase, pendingFiles: view.pendingChanges, files } },
+      structuredContent: {
+        ...result.structuredContent,
+        meta: { ...(result.structuredContent.meta ?? {}), servingStale: true, generation: view.generation, phase: view.phase, pendingFiles: view.pendingChanges, files },
+      },
     };
     if (!files.length || result.isError) return annotated;
     const shown = files.slice(0, NOTICE_FILES).join(', ');
@@ -367,16 +447,59 @@ export class CodeGraphThreads {
     return { ...annotated, content: [...result.content, { type: 'text', text }] };
   }
 
-  private read<T>(key: string, call: WorkerCall): Promise<T> {
+  private read<T>(key: string, call: WorkerCall, admit = false): Promise<T> {
     if (this.scheduler.isRebuilding(key)) return Promise.reject(new Error(BUSY));
+    if (!admit) return this.track(this.dispatch<T>(key, call));
+    const flight = readFlightKey(key, call, this.scheduler.view(key).generation);
+    const existing = flight ? this.flights.get(flight) : undefined;
+    if (existing) return existing as Promise<T>;
+    const task = this.track(this.guarded<T>(key, call));
+    if (flight) {
+      this.flights.set(flight, task);
+      const drop = () => { if (this.flights.get(flight) === task) this.flights.delete(flight); };
+      task.then(drop, drop);
+    }
+    return task;
+  }
+
+  /** 排队、超时、同一调用单飞。超时从入队起算，到点停掉正在跑的那条读线程。 */
+  private async guarded<T>(key: string, call: WorkerCall): Promise<T> {
+    const lease = await this.admission.acquire(key);
+    if (this.closed) { lease.release(); throw new Error(CLOSED); }
+    if (this.scheduler.isRebuilding(key)) { lease.release(); throw new Error(BUSY); }
     const reader = this.pickReader();
+    const request = this.dispatch<T>(key, call, reader);
+    let timedOut = false;
+    let settled = false;
+    try {
+      const wait = Math.max(0, lease.deadline - this.now());
+      return await new Promise<T>((resolve, reject) => {
+        const finish = (error?: Error, value?: T) => {
+          if (settled) return;
+          settled = true;
+          if (error) reject(error);
+          else resolve(value as T);
+        };
+        const timer = this.arm(() => { timedOut = true; reader.kill(); finish(readTimeoutError()); }, wait);
+        request.then(
+          (value) => { this.disarm(timer); if (!timedOut) finish(undefined, value); },
+          (error: Error) => { this.disarm(timer); if (!timedOut) finish(error); },
+        );
+      });
+    } finally {
+      request.catch(() => undefined);
+      lease.release();
+    }
+  }
+
+  private dispatch<T>(key: string, call: WorkerCall, reader = this.pickReader()): Promise<T> {
     const task = reader.request<T>(call);
     const set = this.reads.get(key) ?? new Set<Promise<unknown>>();
     this.reads.set(key, set);
     set.add(task);
     const settle = () => { set.delete(task); if (!set.size && this.reads.get(key) === set) this.reads.delete(key); };
     task.then(settle, settle);
-    return this.track(task);
+    return task;
   }
 
   /** 在途最少的读线程；已经起来的优先，减少冷启动。 */
@@ -395,6 +518,102 @@ export class CodeGraphThreads {
     const drop = () => { this.active.delete(task); };
     task.then(drop, drop);
     return task;
+  }
+
+  /** 有登记文件才做。启动补一次，之后按轮询兜底；监听失效时把间隔缩短。 */
+  private startBackgroundSync(): void {
+    this.startupTimer = this.arm(() => { this.startupTimer = undefined; this.catchUp('startup'); }, this.options.startupDelayMs ?? 10_000);
+    const interval = this.options.pollIntervalMs ?? 300_000;
+    if (interval > 0) this.pollTimer = this.arm(() => this.poll(), interval);
+  }
+
+  private poll(): void {
+    if (this.closed) return;
+    this.catchUp('poll');
+    const delay = this.pollDelay();
+    if (delay > 0) this.pollTimer = this.arm(() => this.poll(), delay);
+  }
+
+  private pollDelay(): number {
+    const normal = this.options.pollIntervalMs ?? 300_000;
+    if (!(normal > 0)) return 0;
+    const degraded = this.options.degradedPollIntervalMs ?? 60_000;
+    const anyDegraded = [...this.watched.values()].some((watch) => watch.degraded);
+    return anyDegraded && degraded > 0 ? degraded : normal;
+  }
+
+  private catchUp(trigger: Extract<SyncTrigger, 'startup' | 'poll'>): void {
+    if (this.closed || !this.autoSync) return;
+    for (const record of this.registry.list()) {
+      if (!this.isIndexed(record.workspace)) continue;
+      const key = keyOf(record.workspace);
+      this.checkedAt.set(key, this.now());
+      if (this.armBranchIfNeeded(record.workspace, key)) continue;
+      this.scheduler.request(key, record.workspace, { trigger });
+    }
+  }
+
+  /** HEAD 变了就等结算窗口，这段时间里的路径同步让给整树比对。第一次看见只记下。 */
+  private armBranchIfNeeded(workspace: string, key: string): boolean {
+    const next = this.currentHead(workspace);
+    const action = headAction(this.registry.head(key), next);
+    if (action === 'record' && next) this.registry.setHead(key, next);
+    if (action === 'same') { this.clearBranch(key); return false; }
+    if (action !== 'changed' || !next) return false;
+    this.clearBranch(key);
+    const timer = this.arm(() => {
+      this.branchTimers.delete(key);
+      this.registry.setHead(key, next);
+      this.checkedAt.set(key, this.now());
+      if (!this.closed) this.scheduler.request(key, workspace, { trigger: 'branch_switch' });
+    }, this.options.branchSwitchSettleMs ?? 3_000);
+    this.branchTimers.set(key, timer);
+    return true;
+  }
+
+  private clearBranch(key: string): void {
+    const timer = this.branchTimers.get(key);
+    if (timer === undefined) return;
+    this.disarm(timer);
+    this.branchTimers.delete(key);
+  }
+
+  private currentHead(workspace: string): string | undefined {
+    try { return this.readHead(workspace); } catch { return undefined; }
+  }
+
+  private emitState(workspace: string): void {
+    if (!this.options.onState) return;
+    const fields = this.syncFields(keyOf(workspace));
+    try {
+      this.options.onState({
+        workspace,
+        phase: fields.phase ?? 'idle',
+        servingStale: Boolean(fields.servingStale),
+        autoSync: this.autoSync,
+        generation: fields.generation ?? 0,
+        consecutiveFailures: fields.consecutiveFailures ?? 0,
+        pendingChanges: fields.pendingChanges ?? 0,
+        ...(fields.mode ? { mode: fields.mode } : {}),
+        ...(fields.trigger ? { trigger: fields.trigger } : {}),
+        ...(fields.nextRetryAt !== undefined ? { nextRetryAt: fields.nextRetryAt } : {}),
+        ...(fields.lastError ? { lastError: fields.lastError } : {}),
+        watcher: fields.watcher ?? { active: false, degraded: false },
+      });
+    } catch { /* 父进程已经断开时不再抛 */ }
+  }
+
+  private arm(callback: () => void, ms: number): unknown {
+    if (this.options.setTimer) return this.options.setTimer(callback, ms);
+    const timer = setTimeout(callback, ms);
+    timer.unref?.();
+    return timer;
+  }
+
+  private disarm(handle: unknown): void {
+    if (handle === undefined) return;
+    if (this.options.clearTimer) { this.options.clearTimer(handle); return; }
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
   }
 }
 
@@ -416,3 +635,10 @@ function cancelledError(): Error {
 }
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+function defaultReadHead(workspace: string): string | undefined {
+  return readGitHead(workspace, {
+    read: (path) => { try { return readFileSync(path, 'utf8'); } catch { return undefined; } },
+    isDirectory: (path) => { try { return statSync(path).isDirectory(); } catch { return false; } },
+  });
+}

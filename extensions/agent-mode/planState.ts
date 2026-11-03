@@ -15,9 +15,12 @@ export function setSessionPlan(sessionId: string | undefined, plan: Plan | undef
   else bySession.delete(sessionId);
 }
 
-/** 拥有完整工具集、能直接动手的模式。未确认计划时不能手切进去，只能经侧栏确认执行。 */
+/**
+ * 拥有完整工具集、能直接动手的模式。未确认计划时不能手切进去，只能经侧栏确认执行。
+ * ultra 与 agent 工具能力相同，因此同样必须等 Plan 确认；确认执行仍进入 agent。
+ */
 export function isExecutingMode(mode: AgentMode): boolean {
-  return mode === "agent" || mode === "debug" || mode === "brainstorm";
+  return mode === "agent" || mode === "debug" || mode === "ultra";
 }
 
 export const PLAN_UNCONFIRMED_MESSAGE =

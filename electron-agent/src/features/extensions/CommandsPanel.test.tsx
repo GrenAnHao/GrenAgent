@@ -25,6 +25,8 @@ vi.mock('../chat/input/editor/commandLoader', () => ({
   ]),
 }));
 vi.mock('../chat/input/editor/promptCommandCache', () => ({ invalidatePromptCommands: vi.fn() }));
+const ask = vi.hoisted(() => vi.fn(() => Promise.resolve(true)));
+vi.mock('../../components/askConfirm', () => ({ useAskConfirm: () => ask }));
 
 import { CommandsPanel } from './CommandsPanel';
 
@@ -49,6 +51,71 @@ afterEach(() => {
 });
 
 describe('CommandsPanel', () => {
+  it('返回目录后重新打开当前命令保留草稿，宽窄切换不替换编辑器', async () => {
+    io.listPromptCommands.mockResolvedValue([refactor]);
+    const view = (width: number) => (
+      <ThemeProvider><App><div style={{ width, containerType: 'inline-size', containerName: 'extension-content' }}>
+        <CommandsPanel workspace="/ws" onResourcesChanged={vi.fn()} />
+      </div></App></ThemeProvider>
+    );
+    const { rerender } = render(view(900));
+    await waitFor(() => expect(screen.getByTestId('command-item-refactor')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('command-item-refactor'));
+    const editor = screen.getByTestId('prompt-body-input');
+    fireEvent.change(editor, { target: { value: '未保存 {file}' } });
+    rerender(view(600));
+    expect(screen.getByTestId('command-workbench')).toHaveAttribute('data-mobile-detail', 'true');
+    expect(screen.getByTestId('prompt-body-input')).toBe(editor);
+    fireEvent.click(screen.getByTestId('command-back'));
+    expect(screen.getByTestId('command-workbench')).toHaveAttribute('data-mobile-detail', 'false');
+    fireEvent.click(screen.getByTestId('command-item-refactor'));
+    expect(screen.getByTestId('prompt-body-input')).toBe(editor);
+    expect(editor).toHaveValue('未保存 {file}');
+    rerender(view(900));
+    expect(screen.getByTestId('prompt-body-input')).toBe(editor);
+    expect(editor).toHaveValue('未保存 {file}');
+  });
+
+  it('有未保存的修改时换命令或新建先确认，取消就保留草稿', async () => {
+    const review = { name: 'review', description: '审查', body: '审查 {target}', params: [{ name: 'target' }], path: '/p/review.md' };
+    io.listPromptCommands.mockResolvedValue([refactor, review]);
+    ask.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('command-item-refactor')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('command-item-refactor'));
+    expect(screen.queryByTestId('command-dirty')).toBeNull();
+    expect(screen.getByTestId('command-save')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('command-description-input'), { target: { value: '改过的描述' } });
+    expect(screen.getByTestId('command-dirty')).toHaveTextContent('未保存');
+    expect(screen.getByTestId('command-save')).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId('command-new'));
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('command-description-input')).toHaveValue('改过的描述');
+    fireEvent.click(screen.getByTestId('command-item-review'));
+    await waitFor(() => expect(screen.getByTestId('command-name-input')).toHaveValue('review'));
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it('不重复写范围和用法说明，删除按钮文字不加空格', async () => {
+    io.listPromptCommands.mockResolvedValue([refactor]);
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('command-item-refactor')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('command-item-refactor'));
+    const workbench = screen.getByTestId('command-workbench');
+    expect(workbench).not.toHaveTextContent('全局可用');
+    expect(workbench).not.toHaveTextContent('全部命令');
+    expect(workbench).not.toHaveTextContent('参数会在调用命令时填写');
+    expect(screen.getByTestId('command-delete')).toHaveTextContent(/^删除$/);
+  });
+
+  it('新建直接进入详情', async () => {
+    io.listPromptCommands.mockResolvedValue([]);
+    renderPanel();
+    fireEvent.click(screen.getByTestId('command-new'));
+    expect(screen.getByTestId('command-workbench')).toHaveAttribute('data-mobile-detail', 'true');
+    expect(screen.getByTestId('command-name-input')).toHaveValue('');
+  });
+
   it('列出命令并显示参数个数，选中后编辑区填好', async () => {
     io.listPromptCommands.mockResolvedValue([refactor]);
     renderPanel();

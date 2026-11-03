@@ -1,4 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { disk } = vi.hoisted(() => ({ disk: new Map<string, string>() }));
+vi.mock('../../../lib/idbStorage', () => ({
+  createIdbStorage: () => ({
+    getItem: async (key: string) => disk.get(key) ?? null,
+    setItem: async (key: string, value: string) => { disk.set(key, value); },
+    removeItem: async (key: string) => { disk.delete(key); },
+    getKeys: async () => [...disk.keys()],
+    setItemIfAbsent: async (key: string, value: string) => { if (!disk.has(key)) disk.set(key, value); },
+  }),
+}));
 import type { ImageAttachment } from './ChatInputContext';
 import type { PastedText } from './editor/types';
 import {
@@ -71,6 +82,62 @@ describe('composerFiles store', () => {
     expect(store().byKey.a?.pastedTexts).toHaveLength(1);
     store().restore('b', { attachments: [], pastedTexts: [] });
     expect(store().byKey.b).toBeUndefined();
+  });
+
+  it('adopts only the sending draft and routes late attachments to its created session', () => {
+    store().addAttachments('draft:source', [image('source')]);
+    store().addPastedText('draft:other', chip('other'));
+    store().adopt('draft:source', '/proj/a.jsonl');
+    expect(store().byKey['draft:source']).toBeUndefined();
+    expect(store().byKey['/proj/a.jsonl']?.attachments[0].data).toBe('source');
+    store().addPastedText('draft:source', chip('late'));
+    expect(store().byKey['/proj/a.jsonl']?.pastedTexts[0].id).toBe('late');
+    expect(store().byKey['draft:other']?.pastedTexts[0].id).toBe('other');
+  });
+
+  it('removed session attachments cannot be resurrected by a delayed failure rollback', () => {
+    store().addAttachments('draft:gone', [image('old')]);
+    store().adopt('draft:gone', '/proj/gone.jsonl');
+    store().remove('/proj/gone.jsonl');
+    store().restore('draft:gone', { attachments: [image('late')], pastedTexts: [] });
+    store().addAttachments('/proj/gone.jsonl', [image('late')]);
+    expect(store().byKey['/proj/gone.jsonl']).toBeUndefined();
+    expect(store().byKey['draft:gone']).toBeUndefined();
+  });
+
+  it('a stale window cannot erase attachments saved by another window under a different draft', async () => {
+    disk.clear();
+    vi.resetModules();
+    const windowA = (await import('./composerFiles')).useComposerFilesStore;
+    await windowA.persist.rehydrate();
+    windowA.getState().addAttachments('draft:window-a', [image('A')]);
+    vi.resetModules();
+    const windowB = (await import('./composerFiles')).useComposerFilesStore;
+    await windowB.persist.rehydrate();
+    windowB.getState().addAttachments('draft:window-b', [image('B')]);
+    windowA.getState().addPastedText('draft:window-a', chip('A edited'));
+    vi.resetModules();
+    const reopened = (await import('./composerFiles')).useComposerFilesStore;
+    await reopened.persist.rehydrate();
+    expect(reopened.getState().byKey['draft:window-a']?.attachments[0].data).toBe('A');
+    expect(reopened.getState().byKey['draft:window-b']?.attachments[0].data).toBe('B');
+  });
+
+  it('只在旧整表中的附件迁成独立桶，其他窗口更新镜像后仍可恢复', async () => {
+    disk.clear();
+    disk.set('pi-composer-files', JSON.stringify({ state: { byKey: {
+      'draft:legacy-only': { attachments: [image('legacy')], pastedTexts: [] },
+    } }, version: 0 }));
+    vi.resetModules();
+    const upgraded = (await import('./composerFiles')).useComposerFilesStore;
+    await upgraded.persist.rehydrate();
+    expect(upgraded.getState().byKey['draft:legacy-only']?.attachments[0].data).toBe('legacy');
+    // 另一个窗口重写旧诊断镜像；它不拥有尚未编辑的 legacy-only 桶。
+    disk.set('pi-composer-files', JSON.stringify({ state: { byKey: {} }, version: 0 }));
+    vi.resetModules();
+    const reopened = (await import('./composerFiles')).useComposerFilesStore;
+    await reopened.persist.rehydrate();
+    expect(reopened.getState().byKey['draft:legacy-only']?.attachments[0].data).toBe('legacy');
   });
 
   it('exposes one frozen empty value so selectors keep a stable reference', () => {

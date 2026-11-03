@@ -32,6 +32,34 @@ function childLines(id: string, cwd: string, parentSession: string | null): stri
 }
 
 describe('WorkspaceService', () => {
+  it('keeps both authoritative registrations during concurrent project activation', async () => {
+    const { service, agentDir } = await createService();
+    const a = join(agentDir, 'project-a'), b = join(agentDir, 'project-b');
+    await mkdir(a); await mkdir(b);
+    await Promise.all(Array.from({ length: 4 }, (_, i) => service.ensureWorkspace(i % 2 ? a : b)));
+    const restarted = new WorkspaceService(agentDir);
+    expect(new Set(await restarted.listProjects())).toEqual(new Set([await realpath(a), await realpath(b)]));
+  });
+
+  it('notifies only after a changed project registry is persisted and supports unsubscribe', async () => {
+    const { service, agentDir } = await createService();
+    const project = await mkdtemp(join(tmpdir(), 'electron-agent-project-change-'));
+    directories.push(project);
+    const snapshots: Promise<unknown>[] = [];
+    const off = service.subscribeProjectsChanged(() => {
+      snapshots.push(readFile(join(agentDir, 'opened-projects.json'), 'utf8').then(JSON.parse));
+    });
+    await service.ensureWorkspace(project);
+    await service.ensureWorkspace(project);
+    expect(await Promise.all(snapshots)).toEqual([{ projects: [await realpath(project)] }]);
+    await rm(project, { recursive: true, force: true });
+    await service.listProjects();
+    expect(await snapshots[1]).toEqual({ projects: [] });
+    off();
+    await mkdir(project); await service.ensureWorkspace(project);
+    expect(snapshots).toHaveLength(2);
+  });
+
   it('remembers a project directory that has no session file across restart', async () => {
     const { service, agentDir } = await createService();
     const project = await mkdtemp(join(tmpdir(), 'electron-agent-project-'));
@@ -68,13 +96,13 @@ describe('WorkspaceService', () => {
     await expect(service.getWorksDir()).resolves.toBe(worksDir);
   });
 
-  it('hides memory_extract system-worker sessions from the sidebar', async () => {
+  it('hides content_classify system-worker sessions from the sidebar', async () => {
     const { service, agentDir } = await createService();
     const sessionsDir = join(agentDir, 'sessions', 'hash');
     await mkdir(sessionsDir, { recursive: true });
     const prompt = [
       'Extract durable memory as strict JSON. Return JSON only.',
-      'Task kind: memory_extract',
+      'Task kind: content_classify',
       'Input: {"delta":"user: 你是什么模型?"}',
     ].join('\n');
     await writeFile(
@@ -203,7 +231,7 @@ describe('WorkspaceService', () => {
     const quoted = [
       JSON.stringify({ type: 'custom', customType: 'subagent_meta', data: { agentId: 'x' } }),
       JSON.stringify({ type: 'session_info', name: '工具里的标题' }),
-      'role user\nTask kind: memory_extract\nInput: {}',
+      'role user\nTask kind: content_classify\nInput: {}',
     ].join('\n');
     await writeFile(path, [
       JSON.stringify({ type: 'session', id: 'tooling', cwd: 'C:/work', timestamp: '2026-10-04T00:00:00Z' }),
@@ -223,7 +251,7 @@ describe('WorkspaceService', () => {
     await writeFile(join(sessionsDir, 'late.jsonl'), [
       JSON.stringify({ type: 'session', id: 'late', cwd: 'C:/work', timestamp: '2026-10-04T00:00:00Z' }),
       JSON.stringify({ type: 'message', message: { role: 'user', content: '先问一句' } }),
-      JSON.stringify({ type: 'message', message: { role: 'user', content: 'Do it.\nTask kind: memory_extract\nInput: {}' } }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: 'Do it.\nTask kind: content_classify\nInput: {}' } }),
     ].join('\n'));
 
     await expect(service.listAllSessions()).resolves.toEqual([]);
@@ -397,7 +425,7 @@ describe('WorkspaceService', () => {
     ].join('\n') + '\n');
     await writeFile(worker, [
       JSON.stringify({ type: 'session', id: 'worker', cwd: conversation.cwd }),
-      JSON.stringify({ type: 'message', message: { role: 'user', content: 'Extract memory.\nTask kind: memory_extract\nInput: {}' } }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: 'Classify content.\nTask kind: content_classify\nInput: {}' } }),
     ].join('\n') + '\n');
     await writeFile(foreignChild, [
       JSON.stringify({ type: 'session', id: 'sa-2', cwd: 'C:/project' }),

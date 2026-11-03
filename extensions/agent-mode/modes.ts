@@ -3,14 +3,23 @@
 import { currentCwd, currentSessionId } from "../_shared/workspace-context.js";
 import { isSafeCommand } from "./utils.js";
 
-export type AgentMode = "agent" | "ask" | "debug" | "plan" | "brainstorm";
+// ultra：与 agent 并列的独立执行模式，工具能力同 agent（不限制白名单）。
+// 区别在：它有自己的子代理模型分组（ULTRA_SUBAGENT_MODEL*）和 Ultra 调度规则，
+// 模型域、规则域都不与普通 Agent 混用；模式本身仍是互斥单选，没有额外开关。
+export type AgentMode = "agent" | "ask" | "debug" | "plan" | "ultra";
 
-export const AGENT_MODES: readonly AgentMode[] = ["agent", "ask", "debug", "plan", "brainstorm"] as const;
+export const AGENT_MODES: readonly AgentMode[] = ["agent", "ask", "debug", "plan", "ultra"] as const;
 
 export const DEFAULT_MODE: AgentMode = "agent";
 
 export function isAgentMode(v: unknown): v is AgentMode {
   return typeof v === "string" && (AGENT_MODES as readonly string[]).includes(v);
+}
+
+/** 只用于恢复旧持久化值；新设置仍须通过 isAgentMode 校验。 */
+export function restoreAgentMode(v: unknown): AgentMode | undefined {
+  if (v === "brainstorm") return DEFAULT_MODE;
+  return isAgentMode(v) ? v : undefined;
 }
 
 function normalizeCwd(workspace: string): string {
@@ -63,7 +72,7 @@ export function __resetAgentModeForTest(): void {
 //   - 联网只读：fetch_url（web-fetch，format 选 markdown / text / html / json / llms）、
 //     web_search / anysearch_search / anysearch_sub_domains（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、
-//     memory_search / conversation_search、git_diff（code-review）、
+//     git_diff（code-review）、
 //     code_explore（code-retrieval，只读 CodeGraph 检索；与上游 MCP 一样只列这一个）
 //   - 交互/只读视图（不改文件）：ask_user（agent-mode 提问卡）、hl_read（hashline 带 #TAG 的只读视图）
 // 写类(write/edit/review_note/todo/generate_image/speak)、
@@ -81,8 +90,6 @@ export const ASK_TOOLS: readonly string[] = [
   "anysearch_search",
   "anysearch_sub_domains",
   "search",
-  "memory_search",
-  "conversation_search",
   "git_diff",
   "code_explore",
   "lsp_definition",
@@ -108,21 +115,11 @@ export function withoutPlanOnlyTools(tools: readonly string[]): string[] {
   return tools.filter((t) => !PLAN_ONLY_TOOLS.includes(t));
 }
 
-// brainstorm：使用完整工具集（与 agent 相同），不限制写文件/执行命令。
-// 头脑风暴模式下 AI 仍需要能写文件、生成原型、执行代码——限制工具集是错误设计。
-// 区别在于 fable-behavior 注入的 brainstorm.md 行为提示，而非工具白名单。
-// BRAINSTORM_TOOLS 保留供引用，但 toolWhitelist 不再使用它（返回 undefined = 不限制）。
-export const BRAINSTORM_TOOLS: readonly string[] = [
-  ...ASK_TOOLS,
-  "show_visual",
-  "read_visual_choice",
-];
-
-// 受限模式返回白名单；agent/debug/brainstorm 用完整工具集（返回 undefined 表示不限制）。
+// 受限模式返回白名单；agent/debug/ultra 用完整工具集（返回 undefined 表示不限制）。
 export function toolWhitelist(mode: AgentMode): readonly string[] | undefined {
   if (mode === "ask") return ASK_TOOLS;
   if (mode === "plan") return PLAN_TOOLS;
-  return undefined; // agent / debug / brainstorm: 不限制
+  return undefined; // agent / debug / ultra: 不限制
 }
 
 // 取白名单与当前全量工具的交集，避免 setActiveTools 激活不存在的工具名。
@@ -142,7 +139,7 @@ export interface ToolGateResult {
 // tool_call 兜底拦截（setActiveTools 之外的第二道防线，防止动态注册的工具绕过白名单）：
 //   ask        : 白名单之外一律拦（含 write/edit/MCP/写类扩展工具；bash 放行，写由只读沙箱拦）
 //   plan       : 白名单（只读检索 + bash）之外一律拦；bash 再经 isSafeCommand 限定只读命令
-//   agent/debug/brainstorm: 不拦（brainstorm 有完整工具集，由 fable-behavior 引导行为）
+//   agent/debug/ultra: 不拦（都有完整工具集；ultra 由内置调度规则引导，不靠白名单收权）
 export function gateToolCall(mode: AgentMode, toolName: string, input: unknown): ToolGateResult | undefined {
   if (mode === "ask") {
     if (ASK_TOOLS.includes(toolName)) return undefined;
@@ -195,8 +192,8 @@ export function modeBadge(mode: AgentMode): string | undefined {
       return "Debug";
     case "plan":
       return "Plan";
-    case "brainstorm":
-      return "Brainstorm";
+    case "ultra":
+      return "Ultra";
     default:
       return undefined;
   }
@@ -211,8 +208,8 @@ export function modeLabel(mode: AgentMode): string {
       return "调试";
     case "plan":
       return "规划";
-    case "brainstorm":
-      return "头脑风暴";
+    case "ultra":
+      return "Ultra（多代理）";
     default:
       return "Agent";
   }

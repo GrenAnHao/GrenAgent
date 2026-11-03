@@ -29,15 +29,22 @@ describe('browserWindowOptions', () => {
 describe('resolveAppIcon', () => {
   it('resolves the repo build ico while unpackaged', () => {
     const mainDir = join('C:', 'proj', 'out', 'main')
-    expect(resolveAppIcon(false, join('C:', 'app.asar'), mainDir)).toBe(
+    expect(resolveAppIcon(false, join('C:', 'app.asar'), mainDir, 'win32')).toBe(
       join('C:', 'proj', 'build', 'icon.ico'),
     )
   })
 
   it('resolves the asar build ico when packaged and ignores mainDir', () => {
     const appPath = join('C:', 'app.asar')
-    expect(resolveAppIcon(true, appPath, join('C:', 'proj', 'out', 'main'))).toBe(
+    expect(resolveAppIcon(true, appPath, join('C:', 'proj', 'out', 'main'), 'win32')).toBe(
       join(appPath, 'build', 'icon.ico'),
     )
+  })
+
+  it.each(['linux', 'darwin'] as const)('uses the PNG runtime icon on %s in dev and packaged builds', (platform) => {
+    const appPath = join('C:', 'app.asar')
+    const mainDir = join('C:', 'proj', 'out', 'main')
+    expect(resolveAppIcon(false, appPath, mainDir, platform)).toBe(join('C:', 'proj', 'build', 'icon.png'))
+    expect(resolveAppIcon(true, appPath, mainDir, platform)).toBe(join(appPath, 'build', 'icon.png'))
   })
 })

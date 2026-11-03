@@ -9,23 +9,32 @@ export class UiHistoryService {
 
   async read(workspace: string, sessionKey: string): Promise<string> {
     const path = await this.historyPath(workspace, sessionKey);
-    try {
-      return await readFile(path, 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
-      throw error;
-    }
+    return this.enqueue(path, async () => {
+      try {
+        return await readFile(path, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+        throw error;
+      }
+    });
   }
 
   async write(workspace: string, sessionKey: string, content: string): Promise<void> {
     const path = await this.historyPath(workspace, sessionKey);
+    await this.enqueue(path, () => this.writeAtomically(path, content));
+  }
+
+  /** 读取和删除也遵守同一路径的提交顺序，不能越过尚未完成的旧写入。 */
+  private async enqueue<T>(path: string, action: () => Promise<T>): Promise<T> {
     const previous = this.pendingWrites.get(path) ?? Promise.resolve();
-    const write = previous.catch(() => undefined).then(() => this.writeAtomically(path, content));
-    this.pendingWrites.set(path, write);
+    const operation = previous.catch(() => undefined).then(action);
+    // 队列屏障本身不拒绝；原操作的错误仍交给调用方，失败不能堵住后续恢复。
+    const settled = operation.then(() => undefined, () => undefined);
+    this.pendingWrites.set(path, settled);
     try {
-      await write;
+      return await operation;
     } finally {
-      if (this.pendingWrites.get(path) === write) this.pendingWrites.delete(path);
+      if (this.pendingWrites.get(path) === settled) this.pendingWrites.delete(path);
     }
   }
 
@@ -39,7 +48,7 @@ export class UiHistoryService {
 
   async delete(workspace: string, sessionKey: string): Promise<void> {
     const path = await this.historyPath(workspace, sessionKey);
-    await rm(path, { force: true });
+    await this.enqueue(path, () => rm(path, { force: true }));
   }
 
   private async historyPath(workspace: string, sessionKey: string): Promise<string> {

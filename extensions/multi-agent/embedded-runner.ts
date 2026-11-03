@@ -17,6 +17,12 @@ import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
 import { sharedModelRuntime } from "../_shared/shared-model-runtime.js";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext, runInWorkspace } from "../_shared/workspace-context.js";
+import {
+  isUltraRouting,
+  routingContextEnv,
+  routingModeFromConfig,
+  type RoutingMode,
+} from "../_shared/ultra-context.js";
 import { attachSessionCwd, sameDirectory, WORKING_DIRECTORY_ENTRY } from "../_shared/session-cwd.js";
 import { registerChildApprovalRoute } from "../_shared/approval-route.js";
 import { continuableReturnGuidance } from "./adjacent-tools.js";
@@ -250,6 +256,8 @@ function streamingDeltaFromEvent(event: AgentSessionEvent, prev: string): string
 
 export type PreparedEmbedded = {
   childConfig: Record<string, string>;
+  /** 这个子会话固定归属的路由域（ordinary / ultra）；写进 subagent_meta，冷恢复时据此重建。 */
+  routingMode: RoutingMode;
   parentPath: string | undefined;
   workspace: string;
   ctx: {
@@ -265,9 +273,14 @@ export type PreparedEmbedded = {
 function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
   const rc = buildSubagentRuntimeConfig(opts.mcp, opts.env ?? {});
   const als = currentWorkspaceContext()?.config ?? {};
+  // 域在 spawn 时定死：调用方（spawn_agent）算好放进 env；没有时看发起方自己属于哪个域
+  // （子代理上下文沿用已固定的域，根会话按自己的模式判定）。定下来之后写进配置与 subagent_meta，
+  // 父会话后来切模式不再影响它。
+  const routingMode: RoutingMode = routingModeFromConfig(opts.env) ?? (isUltraRouting() ? "ultra" : "ordinary");
   const childConfig = withoutSensitiveProcessConfig({
     ...als,
     ...rc.env,
+    ...routingContextEnv(routingMode === "ultra"),
     ...(rc.path ? { PI_RUNTIME_CONFIG: rc.path } : {}),
   });
   const parentPath = opts.parentSessionPath?.trim() || undefined;
@@ -276,6 +289,7 @@ function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
   const parentSessionId = currentWorkspaceContext()?.sessionId;
   return {
     childConfig,
+    routingMode,
     parentPath,
     workspace,
     ctx: {
@@ -340,6 +354,8 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
       inheritedEventCount,
       depth: opts.depth ?? 0,
       backend: opts.backend ?? "in-process",
+      // 只记选模来源的域标记：不写全量配置、凭据，也不在这里改模式或权限。
+      routingMode: prepared.routingMode,
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
     // 父会话切过工作目录：子会话头仍是原始目录，当前目录记成一条 working_directory，冷恢复时据此切回。

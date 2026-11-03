@@ -43,8 +43,14 @@ vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));
 vi.mock('../../store', () => ({ useSessionStore: (sel: (s: typeof sessionState) => unknown) => sel(sessionState) }));
+vi.mock('./input/composerOwner', () => ({
+  useComposerOwnerKey: (workspace: string) => sessionState.activeSessionPath || workspace,
+}));
 vi.mock('../../stores/chatDraftStore', () => ({
-  useChatDraftStore: { getState: () => ({ setDraft: vi.fn(), clearDraft: vi.fn(), getDraft: () => '' }) },
+  useChatDraftStore: { getState: () => ({
+    setDraft: vi.fn(), clearDraft: vi.fn(), getDraft: () => '',
+    resolveKey: (key: string) => key, adopt: vi.fn(),
+  }) },
 }));
 vi.mock('./input/editor/MessageEditor', async () => {
   const { useChatInput } = await import('./input/ChatInputContext');
@@ -214,6 +220,20 @@ describe('ChatInput send overlay cancel', () => {
       cancelPendingOverlay.mock.invocationCallOrder[0],
     );
     expect(onSend).toHaveBeenCalledWith('hello', undefined, undefined);
+  });
+
+  it('A 发送失败的迟到回执只恢复 A 的草稿，不覆盖当前 B 的编辑器', async () => {
+    let finish!: (value: string) => void;
+    onSend.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve; }));
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    const view = render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
+    sessionState.activeSessionPath = '/ws/b.jsonl';
+    view.rerender(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    setDocument.mockClear();
+    await act(async () => { finish('failed'); });
+    expect(setDocument).not.toHaveBeenCalledWith('text', 'hello');
   });
 
   it('puts the draft back when send fails', async () => {

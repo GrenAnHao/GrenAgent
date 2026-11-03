@@ -1,4 +1,5 @@
 import { allowedCompatKeys, showsThinkingFormat } from './modelCompatCatalog';
+import { fastApiSupported } from '../../../../extensions/_shared/fast-mode';
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
@@ -26,6 +27,8 @@ export interface ModelCost extends ModelCostRates {
 
 export interface UiModel {
   id: string;
+  /** Fast access capability, separate from the per-model active preference. */
+  fast?: boolean;
   name?: string;
   reasoning?: boolean;
   thinkingLevelMap?: ThinkingLevelMap;
@@ -156,6 +159,7 @@ function serializeCompat(m: UiModel, api: string | undefined): ModelCompat | und
   }
 
   const out: ModelCompat = {};
+  if (fastApiSupported(api) && m.fast !== undefined) out.supportsFastMode = m.fast === true;
   for (const [key, value] of Object.entries(merged)) {
     if (!allowed.has(key) || value === undefined || value === '') continue;
     if (key === 'openRouterRouting' || key === 'vercelGatewayRouting' || key === 'chatTemplateKwargs') {
@@ -178,6 +182,7 @@ function toUiModel(m: ModelEntry, api: string | undefined): UiModel {
   if (uiCompat.chatTemplateKwargs !== undefined) uiCompat.chatTemplateKwargs = stringifyRoutingObject(uiCompat.chatTemplateKwargs);
   const model: UiModel = {
     ...rest,
+    ...(fastApiSupported(api) && typeof compat?.supportsFastMode === 'boolean' ? { fast: compat.supportsFastMode } : {}),
     ...(thinkingFormat ? { thinkingFormat } : {}),
     ...(Object.keys(uiCompat).length ? { compat: uiCompat } : {}),
   };
@@ -239,7 +244,8 @@ function completeCost(cost: ModelCost | undefined): ModelCost | undefined {
 }
 
 function serializeModel(m: UiModel, api: string | undefined): ModelEntry {
-  const { forceAdaptiveThinking, thinkingFormat, compat, cost, ...rest } = m;
+  const { forceAdaptiveThinking, thinkingFormat, compat, cost, fast, ...rest } = m;
+  void fast;
   void forceAdaptiveThinking;
   void thinkingFormat;
   void compat;

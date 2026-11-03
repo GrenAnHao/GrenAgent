@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, MonitorSmartphone, MoreHorizontal, MousePointerClick, RefreshCw } from 'lucide-react';
-import { PiBrandLogo } from '../../../components/PiBrandLogo';
+import { GrenAgentIcon } from '../../../components/GrenAgentLogo';
 import { getBrowser, openUrl } from '../../../platform/runtime';
 import { useDockStore, type BrowserPayload } from '../../../stores/dockStore';
 import type { DockBodyProps } from '../TabBodyRenderer';
@@ -513,7 +513,7 @@ export function BrowserBody({ tab }: DockBodyProps) {
           {showNewTab ? (
             <div className="gren-browser-ntp" data-testid="gren-browser-ntp">
               <span className="gren-browser-ntp-logo" aria-hidden="true">
-                <PiBrandLogo size={64} tight />
+                <GrenAgentIcon size={64} aria-hidden="true" />
               </span>
               <button
                 type="button"

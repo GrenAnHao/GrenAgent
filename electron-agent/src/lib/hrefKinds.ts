@@ -47,9 +47,10 @@ export function classifyHref(raw: string): HrefKind {
   const hash = hashAt >= 0 ? safeDecode(href.slice(hashAt + 1)) : '';
   const queryAt = beforeHash.indexOf('?');
   const pathPart = queryAt >= 0 ? beforeHash.slice(0, queryAt) : beforeHash;
-  const path = safeDecode(pathPart).replace(/\\/g, '/');
+  // Markdown 绝对链接可能写成 /D:/...；恢复主机盘符路径，不能把它当 POSIX 根或新工作区。
+  const path = safeDecode(pathPart).replace(/\\/g, '/').replace(/^\/([a-zA-Z]:\/)/, '$1');
   if (!path) return { kind: 'unsupported', reason: '链接没有指向任何文件' };
-  return { kind: 'path', path, hash, rooted: driveLetter || path.startsWith('/') };
+  return { kind: 'path', path, hash, rooted: driveLetter || /^[a-zA-Z]:\//.test(path) || path.startsWith('/') };
 }
 
 function externalOrUnsupported(url: string): HrefKind {

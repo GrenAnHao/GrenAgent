@@ -32,7 +32,7 @@ describe('operations management integration', () => {
     try {
       const job = await host.request<{ id: string }>('admin.jobs.create', { kind: 'unknown', workspace: '/repo' });
       const seed = new AgentDataStorage(join(root, 'data.db'));
-      seed.db.prepare('INSERT INTO service_tasks(id,kind,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(job.id, 'memory_extract', 'queued', JSON.stringify({ transcript: 'private capture' }), 0, 1, 1); seed.close();
+      seed.db.prepare('INSERT INTO service_tasks(id,kind,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(job.id, 'content_classify', 'queued', JSON.stringify({ transcript: 'private capture' }), 0, 1, 1); seed.close();
       const tasks = await runtime.requestAdmin<TaskPage>('admin.tasks.list', {});
       expect(tasks.items.map((task) => task.key).sort()).toEqual([`system:${job.id}`, `user:${job.id}`]);
       const system = await runtime.requestAdmin<TaskView>('admin.tasks.read', { source: 'system', id: job.id });

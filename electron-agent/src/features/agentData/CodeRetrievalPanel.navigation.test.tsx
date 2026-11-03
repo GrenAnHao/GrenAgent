@@ -10,7 +10,7 @@ vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
 import { agentDataApi } from '../../lib/agentData';
 import { files } from '../../lib/files';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
-import { deferred } from './memoryTestData';
+import { deferred } from './operationsTestData';
 import { task } from './operationsTestData';
 import { expectSelectDisplay, pickSelectOption } from './antdSelectTestUtils';
 

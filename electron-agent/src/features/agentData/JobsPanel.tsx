@@ -12,6 +12,7 @@ import { PageHeader } from './workbench/PageHeader';
 import { PageBanner } from './workbench/PageBanner';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
 import { useAskConfirm } from '../../components/askConfirm';
+import type { RepoWikiKnowledgeSnapshot } from '../../../shared/knowledgeKernelContracts';
 
 interface JobsPanelProps {
   jobs?: AgentJob[]; tasks?: TaskView[];
@@ -161,7 +162,7 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
 
   const columns: TableColumnsType<TaskView> = [
     { title: '任务', key: 'label', width: '28%', render: (_, task) => (
-      <div>{task.label}{task.error ? <div><Typography.Text type="secondary">{String(redact(task.error))}</Typography.Text></div> : null}</div>
+      <div>{task.label}{task.message ? <div><Typography.Text type="secondary">{String(redact(task.message))}</Typography.Text></div> : null}{task.currentPage ? <div><Typography.Text type="secondary">当前文档：{task.currentPage}</Typography.Text></div> : null}{task.error ? <div><Typography.Text type="secondary">{String(redact(task.error))}</Typography.Text></div> : null}</div>
     ) },
     { title: '工作区 / 资源', key: 'workspace', width: '22%', render: (_, task) => (
       <>
@@ -175,7 +176,9 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
         {task.stage ? <div><Typography.Text type="secondary">{task.stage}</Typography.Text></div> : null}
       </>
     ) },
-    { title: '进度', key: 'progress', width: 160, render: (_, task) => (
+    { title: '进度', key: 'progress', width: 160, render: (_, task) => {
+      const knowledge = (task as TaskView & { knowledge?: RepoWikiKnowledgeSnapshot }).knowledge;
+      return knowledge ? <div data-testid="task-knowledge-counts"><div>已准备 {knowledge.content.preparedCount} / {knowledge.content.expectedCount || '待计划'}</div><div>正式发布 {knowledge.content.publishedCount}</div></div> : (
       <>
         {task.progress === undefined || !Number.isFinite(task.progress)
           ? <Typography.Text type="secondary">未提供百分比</Typography.Text>
@@ -183,16 +186,17 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
         {task.processed !== undefined || task.total !== undefined
           ? <div><Typography.Text type="secondary">{task.processed ?? '—'} / {task.total ?? '—'}</Typography.Text></div> : null}
       </>
-    ) },
+    ); } },
     { title: '时间', key: 'updatedAt', width: 96, render: (_, task) => (
       <span title={new Date(task.updatedAt).toLocaleString()}>{formatRelative(task.updatedAt)}</span>
     ) },
     { title: '操作', key: 'actions', width: 190, render: (_, task) => (
-      <span className={ops.rowActions} onClick={(event) => event.stopPropagation()}>
+      <span className={ops.rowActions} data-task-actions={task.ref.id} style={task.kind === 'repoWiki.generate' ? { opacity: 1 } : undefined} onClick={(event) => event.stopPropagation()}>
         {task.ref.source === 'system' ? <Typography.Text type="secondary">系统只读</Typography.Text> : <Space size={4} wrap>
           {modern || task.capabilities.cancel ? <Button size="small" icon={<X size={12} aria-hidden="true" />} disabled={busy || !task.capabilities.cancel} onClick={() => void mutate(task, 'cancel')}>取消</Button> : null}
           {modern ? <Button size="small" autoInsertSpace={autoInsertSpace} disabled={busy || !task.capabilities.retry} onClick={(event) => openTask(task, event.currentTarget, true)}>重试</Button> : null}
-          {modern || task.capabilities.remove ? <Button size="small" danger icon={<Trash2 size={12} aria-hidden="true" />} disabled={busy || !task.capabilities.remove || task.cancellationRequested} onClick={() => void mutate(task, 'remove')}>删除</Button> : null}
+          {modern || task.capabilities.remove || task.capabilities.removeReason ? <Button size="small" danger icon={<Trash2 size={12} aria-hidden="true" />} disabled={busy || !task.capabilities.remove || task.cancellationRequested} onClick={() => void mutate(task, 'remove')}>删除</Button> : null}
+        {task.capabilities.removeReason === 'native_referenced' ? <Typography.Text type="secondary">Native Wiki 发布或恢复仍引用此任务</Typography.Text> : null}
         </Space>}
       </span>
     ) },

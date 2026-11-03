@@ -1,0 +1,12 @@
+{
+  "clickedAt": 836.7999999523163,
+  "visibleAt": 1155.5999999046326,
+  "elapsedMs": 318.7999999523163,
+  "unit": "ms",
+  "start": "captured real click event on ModuleRail Repo Wiki entry",
+  "end": "MutationObserver first DOM commit containing current host project shell and 7 HostProjectSummary buttons",
+  "environment": "production React in isolated offscreen Electron ui-harness; host activate and host snapshot responses blocked until after assertions and screenshot; no real backend/model/fs",
+  "cold_scope": "new renderer module mount; Vite production build ran separately (5.9 seconds), excluded from measurement",
+  "baseline": "33.48 seconds is the earlier real local 7-project activate sample; different environment and timing boundary; this fixture measurement is not a real end-to-end speedup ratio",
+  "previous_ui_sample_ms": 319.6
+}

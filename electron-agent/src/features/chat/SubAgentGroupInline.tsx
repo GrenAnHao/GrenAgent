@@ -14,7 +14,7 @@ import {
 import { memo, useEffect, useState, type MouseEvent } from 'react';
 import { cardStyles } from '../tools/cardStyles';
 import { ModelNameTag } from './ModelNameTag';
-import { isModelAlias, modelWithThinking, subAgentCardTitle, type SubAgentMode, type SubAgentUnit, type SubAgentUnitStatus } from '../panels/subagentUtils';
+import { isModelAlias, modelWithThinking, subAgentCardTitle, subAgentFinalText, type SubAgentMode, type SubAgentUnit, type SubAgentUnitStatus } from '../panels/subagentUtils';
 import { PendingResponseStatus } from './PendingResponseStatus';
 import { useProviderNames } from '../settings/providerListCache';
 import { dockOwnerFromStore, useDockStore } from '../../stores/dockStore';
@@ -56,6 +56,17 @@ const styles = createStaticStyles(({ css }) => ({
   fail: css`
     font-weight: 600;
     color: ${cssVar.colorWarning};
+  `,
+  error: css`
+    max-height: 160px;
+    overflow: auto;
+    padding: 8px 12px;
+    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
+    background: ${cssVar.colorErrorBg};
+    color: ${cssVar.colorError};
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   `,
   rows: css`
     display: flex;
@@ -201,13 +212,15 @@ interface SubAgentGroupInlineProps {
   mode: SubAgentMode;
   status: 'running' | 'done' | 'error';
   units: NumberedUnit[];
+  /** 调用级错误在逐项结果产生前也必须可见；正常批次仍只按逐项状态展示。 */
+  result?: unknown;
 }
 
 /**
  * 并行/链式子代理组：把「一次 spawn_agent 调用」展开成每个子代理一行，序号显式（#N）。
  * 每行点击在右坞打开该子代理的会话；运行中可在组头一键停止整组。
  */
-function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }: SubAgentGroupInlineProps) {
+function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units, result }: SubAgentGroupInlineProps) {
   const card = cardStyles;
   const { workspace, store } = useAgentStoreContext();
   const running = status === 'running';
@@ -281,6 +294,10 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
   const groupIcon = mode === 'chain' ? GitBranch : Rows3;
   const groupLabel = mode === 'chain' ? '链式子代理' : '并行子代理';
   const unit = mode === 'chain' ? '步' : '个';
+  const detailError = (result as { details?: { error?: unknown } } | null)?.details?.error;
+  const callError = status === 'error'
+    ? subAgentFinalText(result) || (typeof detailError === 'string' ? detailError : '')
+    : '';
 
   return (
     <div className={styles.group} data-testid="subagent-group">
@@ -305,6 +322,7 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
         </span>
         {running ? <ActionIcon icon={CircleStop} size="small" title="停止整组子代理" onClick={stop} /> : null}
       </div>
+      {callError ? <div className={styles.error} role="alert" data-testid="subagent-group-error">{callError}</div> : null}
       <div className={styles.rows}>
         {(() => {
           return shownRows.map(({ u, live: liveRow }) => {

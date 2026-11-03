@@ -10,11 +10,11 @@ vi.mock('../settings/SettingsPanel', () => ({ SettingsPanel: () => <div>SET_PANE
 vi.mock('../connections/ConnectionsPanel', () => ({ ConnectionsPanel: () => <div>CONN_PANEL</div> }));
 vi.mock('../extensions/ExtensionsPanel', () => ({ ExtensionsPanel: () => <div>EXT_PANEL</div> }));
 vi.mock('../usage/UsagePanel', () => ({ UsagePanel: () => <div>USAGE_PANEL</div> }));
+vi.mock('../repoWiki/RepoWikiWorkspace', () => ({ RepoWikiWorkspace: () => <div data-testid="repo-wiki-content">REPO_WIKI</div> }));
 vi.mock('../agentData/AgentDataCenter', () => ({
-  AgentDataCenter: ({ userId, initialProject, visible = true, onOpenSession }: { userId?: string; initialProject?: string; visible?: boolean; onOpenSession?: (cwd: string, path: string) => void }) => <div data-testid="agent-data-content" data-visible={visible}>
+  AgentDataCenter: ({ userId, initialProject, visible = true, requestedTab }: { userId?: string; initialProject?: string; visible?: boolean; requestedTab?: string }) => <div data-testid="agent-data-content" data-visible={visible} data-tab={requestedTab}>
     <span>AGENT_DATA:{userId}:{initialProject}</span>
     <input aria-label="Agent 数据搜索" defaultValue="" />
-    <button onClick={() => onOpenSession?.('/source-project', '/actual/sessions/source.jsonl')}>打开来源会话</button>
   </div>,
 }));
 // 未打桩的话会渲染真实工作台（依赖 window.gren、zustand store 等），在 jsdom 下会炸。
@@ -30,14 +30,6 @@ afterEach(() => {
 });
 
 describe('ModuleContainer', () => {
-  it('forwards an existing source session without substituting the current chat project', async () => {
-    useModuleStore.setState({ activeModule: 'agentData' });
-    const onOpenSession = vi.fn();
-    render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} onOpenSession={onOpenSession} />);
-    fireEvent.click(await screen.findByRole('button', { name: '打开来源会话' }));
-    expect(onOpenSession).toHaveBeenCalledExactlyOnceWith('/source-project', '/actual/sessions/source.jsonl');
-  });
-
   it('renders chat content when chat module is active', () => {
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
     expect(screen.getByText('CHAT_CONTENT')).toBeTruthy();
@@ -70,6 +62,19 @@ describe('ModuleContainer', () => {
     act(() => useModuleStore.setState({ activeModule: 'settings' }));
     await screen.findByText('SET_PANEL');
     expect(screen.queryByTestId('agent-data-content')).toBeNull();
+  });
+
+  it('redirects the former Repo Wiki module into the retained Agent Data center', async () => {
+    render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
+    const chat = screen.getByText('CHAT_CONTENT');
+    act(() => useModuleStore.getState().setActiveModule('repoWiki'));
+    const first = await screen.findByTestId('agent-data-content');
+    expect(first.dataset.tab).toBe('repoWiki');
+    act(() => useModuleStore.getState().setActiveModule('chat'));
+    expect(first.parentElement?.hidden).toBe(true);
+    expect(screen.getByText('CHAT_CONTENT')).toBe(chat);
+    act(() => useModuleStore.getState().setActiveModule('repoWiki'));
+    expect(await screen.findByTestId('agent-data-content')).toBe(first);
   });
 
   it('retains Agent Data input, scroll and nodes across module switches', async () => {

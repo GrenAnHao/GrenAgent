@@ -64,6 +64,10 @@ export class WorkspaceService {
   private readonly sessionsDir: string;
   private readonly drafts = new Set<string>();
   private readonly records = new Map<string, CachedRecord>();
+  private readonly projectsChanged = new Set<() => void>();
+  /** Host authority records already read from disk; reading this snapshot never visits project directories. */
+  private projectSnapshot?: string[];
+  private projectQueue: Promise<unknown> = Promise.resolve();
   private closeWorkspace?: (workspace: string) => Promise<void>;
   private releaseSessions?: (sessionPaths: string[]) => Promise<void>;
   private subagentControl: SubagentControlPort = inProcessSubagentControl;
@@ -74,6 +78,45 @@ export class WorkspaceService {
     this.agentDir = agentDir;
     this.worksDir = join(agentDir, 'works');
     this.sessionsDir = join(agentDir, 'sessions');
+  }
+
+  subscribeProjectsChanged(handler: () => void): () => void {
+    this.projectsChanged.add(handler);
+    return () => { this.projectsChanged.delete(handler); };
+  }
+
+  getProjectSnapshot(): string[] | undefined {
+    return this.projectSnapshot ? [...this.projectSnapshot] : undefined;
+  }
+
+  /** Registry metadata only. Target existence/canonicalization belongs to the requested operation. */
+  async readProjectSnapshot(): Promise<string[]> {
+    return this.withProjectRegistry(async () => {
+      try {
+        const parsed = JSON.parse(await readFile(this.projectsPath(), 'utf8')) as { projects?: unknown };
+        if (!Array.isArray(parsed.projects) || !parsed.projects.every((project) => typeof project === 'string' && project.trim().length > 0))
+          throw new Error('Host project registry is invalid');
+        this.projectSnapshot = [...parsed.projects];
+        return [...this.projectSnapshot];
+      } catch (error) {
+        // A stale fast snapshot must not retain repository authority after a failed refresh.
+        this.projectSnapshot = [];
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
+    });
+  }
+
+  /** A fast classification for the renderer handshake; it grants no filesystem access. */
+  isConversationWorkspaceSnapshot(workspace: string): boolean {
+    return isUnderPath(this.worksDir, workspace);
+  }
+
+  /** Classification only: scratch conversations never grant project authority. */
+  async isConversationWorkspace(workspace: string): Promise<boolean> {
+    const worksDir = await this.getWorksDir();
+    const resolved = await realpath(workspace).catch(() => undefined);
+    return resolved !== undefined && isUnderPath(worksDir, resolved);
   }
 
   setSubagentControl(port: SubagentControlPort): void {
@@ -123,24 +166,27 @@ export class WorkspaceService {
 
   /** 已打开、但可能还没有任何会话文件的项目目录。重启后侧栏靠这份登记恢复。 */
   async listProjects(): Promise<string[]> {
-    const saved = await this.readProjectRegistry();
-    const existing: string[] = [];
-    let dropped = false;
-    for (const project of saved) {
-      try {
-        const info = await stat(project);
-        if (!info.isDirectory()) {
-          dropped = true;
-          continue;
+    return this.withProjectRegistry(async () => {
+      const saved = await this.readProjectRegistry();
+      const existing: string[] = [];
+      let dropped = false;
+      for (const project of saved) {
+        try {
+          const info = await stat(project);
+          if (!info.isDirectory()) {
+            dropped = true;
+            continue;
+          }
+          existing.push(displayPath(await realpath(project)));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') dropped = true;
+          else existing.push(project);
         }
-        existing.push(displayPath(await realpath(project)));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') dropped = true;
-        else existing.push(project);
       }
-    }
-    if (dropped) await this.writeProjectRegistry(existing);
-    return existing;
+      if (dropped) await this.writeProjectRegistry(existing);
+      this.projectSnapshot = [...existing];
+      return existing;
+    });
   }
 
   async listAllSessions(): Promise<SessionInfo[]> {
@@ -331,31 +377,47 @@ export class WorkspaceService {
   private async rememberProject(workspace: string): Promise<void> {
     const worksDir = await this.getWorksDir();
     if (isUnderPath(worksDir, workspace)) return;
-    const projects = await this.readProjectRegistry();
-    if (projects.some((project) => pathsEquivalent(project, workspace))) return;
-    await this.writeProjectRegistry([...projects, workspace]);
+    await this.withProjectRegistry(async () => {
+      const projects = await this.readProjectRegistry();
+      if (projects.some((project) => pathsEquivalent(project, workspace))) return;
+      await this.writeProjectRegistry([...projects, workspace]);
+    });
   }
 
   private async forgetProject(workspace: string): Promise<void> {
-    const projects = await this.readProjectRegistry();
-    const next = projects.filter((project) => !pathsEquivalent(project, workspace));
-    if (next.length === projects.length) return;
-    await this.writeProjectRegistry(next);
+    await this.withProjectRegistry(async () => {
+      const projects = await this.readProjectRegistry();
+      const next = projects.filter((project) => !pathsEquivalent(project, workspace));
+      if (next.length === projects.length) return;
+      await this.writeProjectRegistry(next);
+    });
+  }
+
+  private withProjectRegistry<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.projectQueue.then(operation);
+    this.projectQueue = next.catch(() => {});
+    return next;
   }
 
   private async readProjectRegistry(): Promise<string[]> {
     try {
       const parsed = JSON.parse(await readFile(this.projectsPath(), 'utf8')) as { projects?: unknown };
-      if (!Array.isArray(parsed.projects)) return [];
-      return parsed.projects.filter((project): project is string => typeof project === 'string' && project.trim().length > 0);
+      if (!Array.isArray(parsed.projects)) return this.projectSnapshot = [];
+      const projects = parsed.projects.filter((project): project is string => typeof project === 'string' && project.trim().length > 0);
+      this.projectSnapshot = [...projects];
+      return projects;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      this.projectSnapshot = [];
       return [];
     }
   }
 
   private async writeProjectRegistry(projects: string[]): Promise<void> {
     await writeFile(this.projectsPath(), JSON.stringify({ projects }), 'utf8');
+    this.projectSnapshot = [...projects];
+    for (const handler of this.projectsChanged) {
+      try { handler(); } catch { /* A subscriber cannot undo persisted authority. */ }
+    }
   }
 
   private archivePath(): string {

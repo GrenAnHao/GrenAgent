@@ -2,11 +2,11 @@
 
 本仓库自身的许可见根目录 [LICENSE](../LICENSE)（PolyForm Noncommercial 1.0.0，商业用途需另行授权）。本文件说明随安装包分发的第三方组件及其许可义务，**不改变、也不限制**这些组件各自的许可。
 
-安装包（`app.asar` 之外的 `resources/licenses/`）随附了每个生产依赖的许可原文与本仓库的许可文本，索引在该目录的 `INDEX.md`。该目录由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 `electron-agent/package-lock.json` 生成，逐包条目见 [third-party-dependencies.md](./third-party-dependencies.md)。
+安装包（`app.asar` 之外的 `resources/licenses/`）随附了每个生产依赖的许可原文与本仓库的许可文本，索引在该目录的 `INDEX.md`。该目录由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 pnpm 安装的生产依赖图及 `vendor/repo-wiki` 生成，逐包条目见 [third-party-dependencies.md](./third-party-dependencies.md)。同一包存在多个版本时，许可分别放在 `<包名>/<版本>/`。
 
 ## 分发的许可类型
 
-生产依赖共 875 个包（以 `electron-agent/package-lock.json` 中 `dev` 为假者计）。其中绝大多数是 MIT / ISC / Apache-2.0 / BSD 系列宽松许可，随附版权声明与许可文本即满足要求。需要单独说明的只有下面几项。
+生产依赖的准确版本与数量以生成清单为准，安装由 `electron-agent/pnpm-lock.yaml` 固定。其中绝大多数是 MIT / ISC / Apache-2.0 / BSD 系列宽松许可，随附版权声明与许可文本即满足要求。需要单独说明的只有下面几项。
 
 ### EPL-2.0：elkjs
 
@@ -21,8 +21,8 @@
 
 ### MPL-2.0 OR Apache-2.0：dompurify
 
-- 包：`dompurify@3.4.15`，上游给出双许可。本项目按 **Apache-2.0** 使用，相应履行 Apache-2.0 义务（随附许可文本、保留版权声明、不改动其文件内声明）。
-- 引入路径：`mermaid@11.17.2` → `dompurify`，同样打进渲染进程分块。
+- 包：`dompurify@3.4.14`（Mermaid）和 `dompurify@3.4.17`（RepoWiki），上游给出双许可。本项目按 **Apache-2.0** 使用，相应履行 Apache-2.0 义务（随附许可文本、保留版权声明、不改动其文件内声明）。
+- 引入路径：`mermaid@11.17.2` → `dompurify`，以及 RepoWiki 的 SVG 净化，均打进渲染进程分块。
 
 ### OFL-1.1：Inter 字体
 
@@ -55,21 +55,27 @@
 - 包：`giscus@1.6.0`（MIT）与 `@giscus/react@3.1.0`（元数据无 `license` 字段，源码仓库 `giscus/giscus-component` 为 MIT）。
 - 同样只被 `@lobehub/ui` 的 `es/awesome/Giscus` 使用，本项目未引用，渲染产物中不含。处理方式同上：以 `!node_modules/giscus/**`、`!node_modules/@giscus/**` 排除出安装包。
 
-## 逐字移植的第三方文本
+## 移植的第三方文本与逻辑
 
 ### TencentDB Agent Memory（MIT）
 
-- 项目：https://github.com/TencentCloud/TencentDB-Agent-Memory
+- 项目：[TencentCloud/TencentDB-Agent-Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory)
 - 许可证：MIT（Copyright Tencent）
-- 用途：`electron-agent/electron/agent/memoryPrompts.ts` 中的 L1 记忆抽取系统提示词（`MEMORY_EXTRACT_WORK_SYSTEM_PROMPT`、`MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT`）为**逐字移植**，取自上游 `MemoryCore/src/core/prompts/l1-extraction.ts`。
-- 上游版本锚点：HEAD `0468a2a5b50eaafc54758ed1e2e6609472e5b6ce`；该文件最后一次变更 `41444344ce11467a5b5ad6aa032f5e261da1f4d2`（2026-07-22，v2.0.0-beta.1）。
-- 边界：仅移植提示词文本常量，未复制其运行时、存储层或调度实现。该文本按 MIT 授权，不受本仓库许可限制。
+- 用途：`electron-agent/electron/agent/completionJson.ts` 中的 JSON 控制字符净化逻辑改编自上游，继续供通用模型输出解析使用。
+- 边界：AgentData 长期记忆功能和 L1 提炼提示词已移除；保留的通用解析逻辑按 MIT 授权，不受本仓库许可限制。
 
 ### GPT with Taste（MIT）
 
 - 项目：https://github.com/NB-Corp/gpt-with-taste
 - 许可证文件：`extensions/gpt-with-taste/LICENSE`（MIT，Copyright 2026 GPT with Taste contributors / X-T-E-R）。
 - 用途：`extensions/gpt-with-taste/texts/` 下的行为文本。构建时由 `copyPiAdjacentAssets` 连同该 LICENSE 一起拷到 `out/main/texts/`，并随安装包分发（`resources/app.asar.unpacked/out/main/texts/LICENSE`）。
+
+### RepoWiki（MIT）
+
+- 来源：TypeScript RepoWiki v3 源码包，SHA256 `899862f29c20f402e379dcab35bc2fa603f61aa4e3c52e1e015a47ac4c7988b5`，保存在 `electron-agent/vendor/repo-wiki/`。
+- 原项目：[he-yufeng/RepoWiki](https://github.com/he-yufeng/RepoWiki)，参考提交 `29d9029b4c770b66772c1d565f2d5b5980074147`，Copyright (c) 2026 Yufeng He。
+- 独立 TypeScript 适配沿用 MIT；宿主构建独立 CJS 子进程和 React 面板。原始 MIT 许可与来源声明分别保留在 vendor 的 `LICENSE`、`THIRD_PARTY_NOTICES.md`，并原样分发到 `resources/licenses/repo-wiki/`。
+- 新增运行依赖及其传递依赖由同一收集脚本按已安装版本收集；这不改变 RepoWiki 和这些依赖各自的许可。
 
 ## 内置的运行时 SDK
 

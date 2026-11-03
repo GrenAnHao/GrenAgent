@@ -8,13 +8,13 @@ describe('formatStructuredMessageText', () => {
 
   it('把 SystemWorker 提示拆成可读预格式化文本', () => {
     const raw = [
-      'Extract durable memory as strict JSON. Return JSON only.',
-      'Task kind: memory_extract',
+      'Generate a Wiki page as strict JSON. Return JSON only.',
+      'Task kind: wiki_page_generate',
       'Input: {"delta":"user: 你是什么模型?"}',
     ].join('\n');
     const formatted = formatStructuredMessageText(raw);
     expect(formatted.mode).toBe('pre');
-    expect(formatted.text).toContain('Task kind: memory_extract');
+    expect(formatted.text).toContain('Task kind: wiki_page_generate');
     expect(formatted.text).toContain('\n  "delta"');
     expect(formatted.text).toContain('你是什么模型?');
   });

@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo, type ReactNode } from 'react';
-import { ThemeProvider, Flexbox, ConfigProvider } from '@lobehub/ui';
-import { m } from 'motion/react';
-import { ANTD_CSS_VAR_KEY, ThemeBridge } from './components/ThemeBridge';
+import { Flexbox } from '@lobehub/ui';
+import { WorkbenchThemeProvider } from './theme/WorkbenchThemeProvider';
 import { ExtensionUiHost } from './features/extensionUi/ExtensionUiHost';
 import { FullAccessConfirmModal } from './features/chat/input/FullAccessConfirmModal';
 import { useThemeStore } from './stores/themeStore';
-import { schemePrimary, schemeTokens } from './theme/colorSchemes';
 import { MarkdownWarmup } from './features/chat/MarkdownWarmup';
 import { CodeViewWarmup } from './features/tools/LazyHighlighter';
 import { Sidebar } from './features/sessions/Sidebar';
@@ -45,6 +43,10 @@ import { isUnder, pathsEquivalent } from './lib/pathUtils';
 import { useStableCallback } from './lib/structuralShare';
 import { applyOpenedProject, enterPendingNewSession } from './lib/pendingSession';
 import { canReuseScratch, readRememberedScratch, rememberScratch } from './lib/startupConversation';
+import { useChatDraftStore } from './stores/chatDraftStore';
+import { useComposerFilesStore } from './features/chat/input/composerFiles';
+import { useSessionPreferencesStore } from './stores/sessionPreferencesStore';
+import { useSessionViewStateStore } from './stores/sessionViewStateStore';
 import { lastOpenEquals, lastOpenFromState, pickStartupTarget, readLastOpen, writeLastOpen } from './lib/lastOpen';
 import {
   bumpSessionMutationEpoch,
@@ -605,9 +607,15 @@ const Workspace = memo(function Workspace() {
       // 删的是会话区正在显示的会话：先同步清空会话区，避免被删会话消息残留。
       store.reset();
       st.setActiveSession('');
+      if (pathsEquivalent(st.workspaceSessionPaths[cwd] ?? '', path)) st.setWorkspaceSessionPath(cwd, '');
     }
     try {
       await pi.deleteSession(cwd, path);
+      // 删除成功才清该会话的偏好/输入/视图；墓碑阻止在途保存把它复活。
+      useSessionPreferencesStore.getState().remove(path);
+      useChatDraftStore.getState().remove(path);
+      useComposerFilesStore.getState().remove(path);
+      useSessionViewStateStore.getState().remove(path);
       // 主进程已经停掉并摘下这份会话；停靠的 handle 被拆时不再发 agent_end，这里自己熄灭运行态。
       forgetRunningSession(path);
       forgetSessionAttention(path);
@@ -616,7 +624,9 @@ const Workspace = memo(function Workspace() {
       if (histKey) void pi.deleteUiHistory(cwd, histKey).catch(() => {});
       bumpSessionMutationEpoch();
       invalidateAllSessionsCache();
-      if (wasActive) {
+      const afterDelete = useSessionStore.getState();
+      if (wasActive && !afterDelete.activeSessionPath && !afterDelete.draftConversationCwd) {
+        // 删除等待期间若用户已经打开 B 或新草稿，就保留其新选择，不抢回画面。
         // 从"已过滤隐藏集"的可见列表里挑下一个，避免选到刚隐藏的已删项。
         const cur = useSessionStore.getState();
         const visible = visibleSessions(cur.allSessions, cur.optimisticSessions, cur.deletedSessionPaths);
@@ -624,42 +634,13 @@ const Workspace = memo(function Workspace() {
           .filter((s) => s.cwd && pathsEquivalent(s.cwd, cwd))
           .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))[0];
         if (nextInProject) {
-          // 让本次「删除后自动切」超越之前在途的手动切链（旧链 await 回来会因 token 变化被丢弃），
-          // 避免删除后的显示被更早、更慢返回的手动切结果覆盖。
-          ++selectTokenRef.current;
-          try {
-            await pi.switchSession(cwd, nextInProject.path);
-            const [{ messages }, uiHistory] = await Promise.all([
-              pi.getMessages(cwd, nextInProject.path),
-              readUiHistoryForSession(cwd, nextInProject.path),
-            ]);
-            store.loadMessages(messages, { force: true, sessionPath: nextInProject.path, uiHistory });
-            await restoreRunningTurns();
-            st.setActiveSession(nextInProject.path);
-            st.setWorkspaceSessionPath(cwd, nextInProject.path);
-            useThinkingMemoryStore.getState().bumpSwitch(cwd);
-          } catch {
-            /* 切换失败：保持空会话区 */
-          }
+          // 复用手动切换的 token/回滚流程：用户随后选择 B 时，整条自动切换链都会失效。
+          await handleOpenSession(cwd, nextInProject.path);
         } else {
-          // 项目内已无其它会话：对齐后端 delete_pi_session 删活跃会话前 new_session 切到的新空会话。
-          try {
-            const state = (await pi.getState(cwd)) as { sessionFile?: string };
-            const newPath = state.sessionFile;
-            if (newPath) {
-              st.setActiveSession(newPath);
-              st.setWorkspaceSessionPath(cwd, newPath);
-              st.upsertOptimisticSession({
-                id: `opt-${newPath}`,
-                path: newPath,
-                cwd,
-                timestamp: new Date().toISOString(),
-                name: null,
-              });
-            }
-          } catch {
-            /* getState 失败保持空会话区 */
-          }
+          // 最后一份会话删掉后按普通新建流程进入草稿，四项从项目/应用默认初始化；
+          // 不接管后端为释放被删 handle 而临时创建的、仍带 SDK 默认的空会话。
+          ++selectTokenRef.current;
+          enterPendingNewSession(cwd, () => store.reset());
         }
       }
       void refreshAllSessions(true);
@@ -668,7 +649,7 @@ const Workspace = memo(function Workspace() {
       st.unhideDeletedSession(path);
       st.setError(e instanceof Error ? e.message : String(e));
     }
-  }, [store]);
+  }, [store, handleOpenSession]);
 
   const handleSubmitRename = useCallback(async (cwd: string, path: string, name: string) => {
     await pi.setSessionDisplayName(path, name);
@@ -972,7 +953,6 @@ const Workspace = memo(function Workspace() {
         <ModuleRail />
         <Flexbox flex={1} style={{ minWidth: 0, height: '100%', background: 'var(--gren-content-bg, transparent)' }}>
           <ModuleContainer
-            onOpenSession={handleOpenSourceSession}
             chat={
               <ChatColumns
                 sidebar={
@@ -1019,32 +999,6 @@ function ActiveWorkspace() {
 export default function App() {
   useEffect(() => startRunningSessionTracking(), []);
   const appearance = useThemeStore((s) => s.appearance);
-  const primaryColor = useThemeStore((s) => s.primaryColor);
-  const neutralColor = useThemeStore((s) => s.neutralColor);
-  const colorScheme = useThemeStore((s) => s.colorScheme);
-  const [systemDark, setSystemDark] = useState(
-    () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches,
-  );
-  useEffect(() => {
-    if (appearance !== 'auto' || typeof window === 'undefined') return;
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    setSystemDark(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, [appearance]);
-  const isDark = appearance === 'dark' || (appearance === 'auto' && systemDark);
-  // cssVar 模式：antd 组件样式改为引用 CSS 变量，切主题/方案只换变量值，不再为整棵
-  // 组件树重新序列化样式表（这是切换卡顿的主因）。token 为方案覆盖（含明暗）。
-  const antdTheme = useMemo(() => {
-    const token = schemeTokens(colorScheme, isDark);
-    // hashed:false 配合 cssVar：组件样式只有一份（不按 token 哈希隔离），切主题仅换变量值。
-    // cssVar.key 必须显式指定：留空时 antd 用 useId 生成随机 key（如 css-var-_r_0_），
-    // 而整份 --ant-* 只被序列化成 `.<key>{...}` 这一条类规则，antd 又从不把该 key 加到任何
-    // 元素上。于是靠继承取 --ant-* 的消费者（@lobehub/ui 组件、cssVar.* 静态样式、--gren-*）
-    // 全部取空值 → 深色下退回浅色兜底。给定固定 key 后由 ThemeBridge 挂到根元素上。
-    return { cssVar: { key: ANTD_CSS_VAR_KEY }, hashed: false, ...(token ? { token } : {}) };
-  }, [colorScheme, isDark]);
   const worksDir = useSessionStore((s) => s.worksDir);
 
   // worksDir 决定侧栏「对话 / 项目」归类（works 目录下的会话算「对话」，其余算「项目」）。
@@ -1116,7 +1070,7 @@ export default function App() {
       }
 
       if (ws) {
-        useSessionStore.getState().setDraftConversation(ws);
+        useSessionStore.getState().setDraftConversation(ws, target?.kind === 'projectDraft' ? target.draftId : undefined);
         useSessionStore.getState().setActiveSession('');
         useSessionStore.getState().setActiveWorkspace(ws);
       }
@@ -1137,39 +1091,16 @@ export default function App() {
     };
   }, []);
 
-  // appearance 必须显式传确定亮暗。@lobehub/ui 的 ThemeProvider 把 theme 作为函数交给
-  // antd-style 的 AntdProvider，后者调 themeProp(appearance) 拿到 createLobeAntdTheme 的结果，
-  // 再拼成 algorithm: [baseAlgorithm, ...lobe算法]。lobe 的算法在数组末位、会覆盖 baseAlgorithm，
-  // 所以真正决定颜色的是传进 themeProp 的 appearance，而不是 isDarkMode：实测 appearance='light'
-  // 配 darkAlgorithm 仍算出 colorBgContainer/colorBgElevated=#ffffff（与纯浅色完全一致）。
-  // 而只传 themeMode 时 appearance 是非受控的、初值恒为 'light'，要等内部 ThemeObserver 在
-  // useLayoutEffect 里 setAppearance 才纠正，themeMode='auto' 更要多绕一层 setTimeout。
-  // 传确定值让首帧就算对，同时消掉 auto 那次注定被覆盖的多余状态更新；跟随系统已由上面的 isDark 处理。
-  const resolvedMode = isDark ? 'dark' : 'light';
-
-  // 主题色只能走 customTheme.primaryColor（预设名）：lobe 的算法在 antd 基础算法之后无条件展开
-  // 自己的 base token，那份 token 把整套 primary 家族写成灰阶，所以 theme.token.colorPrimary
-  // 一定被覆盖，见 theme/colorSchemes 的注释。用户在设置里显式选过的色优先于方案自带的默认色。
-  const resolvedPrimary = primaryColor ?? schemePrimary(colorScheme, isDark);
-
   return (
-    <ThemeProvider
-      themeMode={resolvedMode}
-      appearance={resolvedMode}
-      customTheme={{ primaryColor: resolvedPrimary, neutralColor }}
-      theme={antdTheme}
-    >
-      <ConfigProvider motion={m}>
-        <ThemeBridge />
-        <ExtensionUiHost />
-        <AttentionHost />
-        <AppLinkGuard />
-        <FindShortcutHost />
-        <FullAccessConfirmModal />
-        <MarkdownWarmup />
-        <CodeViewWarmup />
-        <ActiveWorkspace />
-      </ConfigProvider>
-    </ThemeProvider>
+    <WorkbenchThemeProvider appearance={appearance}>
+      <ExtensionUiHost />
+      <AttentionHost />
+      <AppLinkGuard />
+      <FindShortcutHost />
+      <FullAccessConfirmModal />
+      <MarkdownWarmup />
+      <CodeViewWarmup />
+      <ActiveWorkspace />
+    </WorkbenchThemeProvider>
   );
 }

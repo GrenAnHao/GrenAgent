@@ -1,0 +1,6 @@
+{"case":"现场形状，成功回执","backendWorkCount":1,"backendHasWork":true,"frontendGroup":true,"frontendMode":"single","frontendUnitCount":0,"frontendRows":[]}
+{"case":"现场形状，禁用错误","backendWorkCount":1,"backendHasWork":true,"frontendGroup":true,"frontendMode":"single","frontendUnitCount":0,"frontendRows":[]}
+{"case":"去掉空数组的单任务","backendWorkCount":1,"backendHasWork":true,"frontendGroup":false,"frontendMode":"single","frontendUnitCount":1,"frontendRows":[{"task":"只回复 OK","status":"done"}]}
+{"case":"真实并行两个任务","backendWorkCount":2,"backendHasWork":true,"frontendGroup":true,"frontendMode":"parallel","frontendUnitCount":2,"frontendRows":[{"task":"只回复 A","status":"starting"},{"task":"只回复 B","status":"starting"}]}
+{"case":"混用 task 与 tasks","backendWorkCount":2,"backendHasWork":true,"frontendGroup":true,"frontendMode":"parallel","frontendUnitCount":1,"frontendRows":[{"task":"数组任务","status":"starting"}]}
+Confirmed: both successful and rejected single-task calls with tasks:[] produce zero display rows in current code.

@@ -1,0 +1,5 @@
+{
+  "actualFileExists": true,
+  "actualWorkspaceExists": true,
+  "incorrectLinkRootExists": false
+}

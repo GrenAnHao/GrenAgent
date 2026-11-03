@@ -1,0 +1,432 @@
+
+===== electron-agent/vendor/repo-wiki/apps/web/src/workspace/Markdown.tsx =====
+diff --git "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx"
+index 6aa6a86b..86a08008 100644
+--- "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx"	
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx"	
+@@ -15,6 +15,7 @@ import ReactMarkdown, {
+ import remarkGfm from "remark-gfm";
+ import { sanitizeDiagramSvg, diagramIsSafeInput } from "./security";
+ import type { SourceRef } from "./api";
++import { resolveWikiLink } from "../../../../../../shared/wikiLinks";
+ import "./Mermaid.css";
+ 
+ export function Mermaid({ code }: { code: string }) {
+@@ -144,18 +145,20 @@ export function Mermaid({ code }: { code: string }) {
+     </section>
+   );
+ }
+-function safeDecode(path: string) {
+-  try {
+-    return decodeURIComponent(path);
+-  } catch {
+-    return path;
+-  }
++export function scrollToMarkdownHeading(root: Element | null | undefined, target: string) {
++  const slug = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s+/g, "-");
++  const heading = Array.from(root?.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6") || []).find(
++    (item) => item.id === target || slug(item.textContent || "") === target,
++  );
++  heading?.scrollIntoView({ block: "start" });
++  heading?.focus({ preventScroll: true });
+ }
+ const headingText = (node: any): string => node?.type === "text" ? node.value : (node?.children || []).map(headingText).join("");
+ export function Markdown({
+   value,
+   onSource,
+   onPage,
++  currentPageId,
+   headingPrefix = "wiki-heading",
+   leadingTitle,
+ }: {
+@@ -163,25 +166,11 @@ export function Markdown({
+   headingPrefix?: string;
+   leadingTitle?: string;
+   onSource: (ref: SourceRef) => void;
+-  onPage: (id: string) => void;
++  onPage: (id: string, hash?: string) => void;
++  currentPageId?: string;
+ }) {
+-  const sourceFromHref = (href: string): SourceRef | null => {
+-    let path = href.replace(/^source:/, "");
+-    const match = path.match(/#L(\d+)(?:-L?(\d+))?$/);
+-    path = path.replace(/#L.*$/, "");
+-    if (
+-      href.startsWith("source:") ||
+-      (match && !/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("//"))
+-    )
+-      return {
+-        path: safeDecode(path),
+-        start_line: Number(match?.[1] || 1),
+-        end_line: Number(match?.[2] || match?.[1] || 80),
+-      };
+-    return null;
+-  };
+-  const handlers = useRef({ onSource, onPage, headingPrefix, leadingTitle });
+-  handlers.current = { onSource, onPage, headingPrefix, leadingTitle };
++  const handlers = useRef({ onSource, onPage, currentPageId, headingPrefix, leadingTitle });
++  handlers.current = { onSource, onPage, currentPageId, headingPrefix, leadingTitle };
+   const components = useMemo<Components>(
+     () => ({
+       ...Object.fromEntries(
+@@ -224,54 +213,37 @@ export function Markdown({
+       },
+       a({ href, children }) {
+         if (!href) return <span>{children}</span>;
+-        const ref = sourceFromHref(href || "");
+-        if (ref)
++        const link = resolveWikiLink(href, handlers.current.currentPageId);
++        if (link.kind === 'invalid') return <span>{children}</span>;
++        if (link.kind === 'source')
+           return (
+             <button
+               type="button"
+               className="inline-source"
+-              onClick={() => handlers.current.onSource(ref)}
++              onClick={() => handlers.current.onSource({ path: link.path, start_line: link.start ?? 1, end_line: link.end ?? 80 })}
+             >
+               {children}
+               <span> ↗</span>
+             </button>
+           );
+-        if (href?.startsWith("#"))
++        if (link.kind === 'anchor')
+           return (
+             <button
+               type="button"
+               className="inline-page"
+               onClick={(event) => {
+-                const target = safeDecode(href.slice(1));
+-                const headings = event.currentTarget
+-                  .closest(".markdown")
+-                  ?.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6");
+-                const slug = (text: string) =>
+-                  text
+-                    .toLowerCase()
+-                    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+-                    .trim()
+-                    .replace(/\s+/g, "-");
+-                const heading = Array.from(headings || []).find(
+-                  (item) =>
+-                    item.id === target ||
+-                    slug(item.textContent || "") === target,
+-                );
+-                heading?.scrollIntoView({ block: "start" });
+-                heading?.focus({ preventScroll: true });
++                scrollToMarkdownHeading(event.currentTarget.closest('.markdown'), link.hash);
+               }}
+             >
+               {children}
+             </button>
+           );
+-        if (href && !/^(https?:|mailto:|#)/i.test(href))
++        if (link.kind === 'page')
+           return (
+             <button
+               type="button"
+               className="inline-page"
+-              onClick={() =>
+-                handlers.current.onPage(href.replace(/\.md(?:#.*)?$/, ""))
+-              }
++              onClick={() => link.hash === undefined ? handlers.current.onPage(link.pageId) : handlers.current.onPage(link.pageId, link.hash)}
+             >
+               {children}
+             </button>
+
+===== electron-agent/vendor/repo-wiki/apps/web/src/workspace/Markdown.test.tsx =====
+diff --git "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx"
+index 958a6df8..1f9a7cf5 100644
+--- "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx"	
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx"	
+@@ -66,6 +66,39 @@ describe("safe Markdown renderer", () => {
+     fireEvent.click(screen.getByRole("button", { name: "模块" }));
+     expect(onPage).toHaveBeenCalledWith("modules/core");
+   });
++  it("resolves nested relative page links against the current page directory", () => {
++    const onPage = vi.fn();
++    render(<Markdown {...props} currentPageId="modules/core" onPage={onPage} value={'[Sibling](./api.md) [Parent](../guides/start.md)'} />);
++    fireEvent.click(screen.getByRole('button', { name: 'Sibling' }));
++    fireEvent.click(screen.getByRole('button', { name: 'Parent' }));
++    expect(onPage.mock.calls).toEqual([['modules/api'], ['guides/start']]);
++  });
++  it("decodes page paths and routes query/hash separately without corrupting page IDs", () => {
++    const onPage = vi.fn();
++    render(<Markdown {...props} currentPageId="modules/core" onPage={onPage} value={'[Guide](../guides/%E5%BC%80%E5%A7%8B.md?view=reader#%E5%AE%89%E8%A3%85)'} />);
++    fireEvent.click(screen.getByRole('button', { name: 'Guide' }));
++    expect(onPage).toHaveBeenCalledWith('guides/开始', '安装');
++  });
++  it("uses the latest current-page context after a navigation rerender", () => {
++    const onPage = vi.fn();
++    const { rerender } = render(<Markdown {...props} currentPageId="modules/core" onPage={onPage} value={'[Sibling](api.md)'} />);
++    rerender(<Markdown {...props} currentPageId="guides/start" onPage={onPage} value={'[Sibling](api.md)'} />);
++    fireEvent.click(screen.getByRole('button', { name: 'Sibling' }));
++    expect(onPage).toHaveBeenCalledWith('guides/api');
++  });
++  it("never routes unknown protocols, invalid escapes or traversal beyond the Wiki root", () => {
++    const { container } = render(<Markdown {...props} currentPageId="modules/core" value={'[Unknown](tel:+123) [Broken](bad%ZZ.md) [Escape](../../outside.md) [Encoded](%6aavascript:alert%281%29)'} />);
++    expect(container.querySelectorAll('button,a')).toHaveLength(0);
++    expect(screen.getByText('Unknown')).toBeInTheDocument();
++  });
++  it("keeps root-relative source citations and Markdown-looking code examples unchanged", () => {
++    const onSource = vi.fn();
++    const { container } = render(<Markdown {...props} currentPageId="modules/core" onSource={onSource} value={'[Code](source:src/a%20b.ts#L2-L4)\n\n`[sample](../missing.md)`\n\n```md\n[example](../missing.md)\n```'} />);
++    fireEvent.click(screen.getByRole('button', { name: /Code/ }));
++    expect(onSource).toHaveBeenCalledWith({ path: 'src/a b.ts', start_line: 2, end_line: 4 });
++    expect(container.querySelectorAll('button')).toHaveLength(1);
++    expect(container.querySelector('pre code')).toHaveTextContent('[example](../missing.md)');
++  });
+   it("makes external web links noopener noreferrer", () => {
+     render(<Markdown {...props} value={"[Docs](https://example.com/docs)"} />);
+     expect(screen.getByRole("link", { name: "Docs" })).toHaveAttribute(
+
+===== electron-agent/vendor/repo-wiki/apps/web/src/App.tsx =====
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\.agents\evidence\2026-11-02-repo-wiki-generation-validation-repair\ui-preimage\electron-agent\vendor\repo-wiki\apps\web\src\App.tsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\electron-agent\vendor\repo-wiki\apps\web\src\App.tsx', CRLF will be replaced by LF the next time Git touches it
+diff --git "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\App.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\App.tsx"
+index f61a12d4..24f1d600 100644
+--- "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\App.tsx"	
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\App.tsx"	
+@@ -21,7 +21,7 @@ import {
+   type WikiPage,
+ } from "./workspace/api";
+ import { Icon } from "./workspace/Icons";
+-import { Markdown } from "./workspace/Markdown";
++import { Markdown, scrollToMarkdownHeading } from "./workspace/Markdown";
+ import { markdownFiles } from "./workspace/imports";
+ import { WikiTree } from "./workspace/WikiTree";
+ import { documentOutline } from "./workspace/documentOutline";
+@@ -65,6 +65,7 @@ const statusText: Record<string, string> = {
+ };
+ const count = (value: unknown) =>
+   Array.isArray(value) ? value.length : typeof value === "number" ? value : 0;
++const logicalDraftPageId = (id: string) => id.slice(id.indexOf(":") + 1);
+ type ContentMode = "wiki" | "cards";
+ type GenerationConsent = {
+   projectId: string;
+@@ -359,6 +360,8 @@ export default function App({
+     [page?.markdown, page?.title, headingPrefix],
+   );
+   const pendingHeading = useRef<string | null>(null);
++  const [pendingWikiHeading, setPendingWikiHeading] = useState<{ pageId: string; hash: string } | null>(null);
++  const [pendingDraftHeading, setPendingDraftHeading] = useState<{ pageId: string; hash: string } | null>(null);
+   useEffect(() => {
+     if (viewMode === "preview" && pendingHeading.current) {
+       const target = pendingHeading.current;
+@@ -370,6 +373,33 @@ export default function App({
+       );
+     }
+   }, [viewMode]);
++  useEffect(() => {
++    if (!pendingWikiHeading) return;
++    if (pendingWikiHeading.pageId !== selectedId) {
++      setPendingWikiHeading(null);
++      return;
++    }
++    if (viewMode !== "preview" || page?.id !== pendingWikiHeading.pageId) return;
++    const { pageId, hash } = pendingWikiHeading;
++    const frame = requestAnimationFrame(() => {
++      scrollToMarkdownHeading(documentRef.current?.querySelector(".markdown"), hash);
++      setPendingWikiHeading((current) => current?.pageId === pageId && current.hash === hash ? null : current);
++    });
++    return () => cancelAnimationFrame(frame);
++  }, [pendingWikiHeading, selectedId, page?.id, page?.markdown, viewMode]);
++  useEffect(() => {
++    if (!pendingDraftHeading) return;
++    if (stagedDraftId !== pendingDraftHeading.pageId || modal !== "drafts") {
++      setPendingDraftHeading(null);
++      return;
++    }
++    const { pageId, hash } = pendingDraftHeading;
++    const frame = requestAnimationFrame(() => {
++      scrollToMarkdownHeading(document.querySelector('[aria-label="未发布草稿正文"] .markdown'), hash);
++      setPendingDraftHeading((current) => current?.pageId === pageId && current.hash === hash ? null : current);
++    });
++    return () => cancelAnimationFrame(frame);
++  }, [pendingDraftHeading, stagedDraftId, modal]);
+   function scrollToHeading(id: string) {
+     if (editing) return;
+     if (viewMode === "source") {
+@@ -840,6 +870,16 @@ export default function App({
+       setInspectorOpen(false);
+     }
+   }
++  function navigateFromMarkdown(id: string, hash?: string) {
++    navigate(id);
++    setPendingWikiHeading(hash ? { pageId: id, hash } : null);
++  }
++  function navigateDraftFromMarkdown(id: string, hash?: string) {
++    const target = stagedDrafts.find((item) => logicalDraftPageId(item.id) === id);
++    if (!target) return;
++    setStagedDraftId(target.id);
++    setPendingDraftHeading(hash ? { pageId: target.id, hash } : null);
++  }
+   function handleTabKeys(event: React.KeyboardEvent, index: number) {
+     if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+       event.preventDefault();
+@@ -2054,7 +2094,8 @@ export default function App({
+                               <Markdown
+                                 value={page.markdown}
+                                 onSource={openSource}
+-                                onPage={navigate}
++                                onPage={navigateFromMarkdown}
++                                currentPageId={page.id}
+                                 headingPrefix={headingPrefix}
+                                 leadingTitle={page.title}
+                               />
+@@ -2488,8 +2529,8 @@ export default function App({
+       )}
+       {modal === 'drafts' && <Modal title="未发布草稿" eyebrow="DRAFT PREVIEW" error={error} onClose={() => setModal(null)}>
+         <p>以下成果尚未发布，正式文档保持可读。</p>
+-        <nav aria-label="未发布草稿目录">{stagedDrafts.map(item => <button className="button" type="button" aria-pressed={item.id === stagedDraftId} key={item.id} onClick={() => setStagedDraftId(item.id)}>{item.title}</button>)}</nav>
+-        {stagedDrafts.length ? <article aria-label="未发布草稿正文"><Markdown value={stagedDrafts.find(item => item.id === stagedDraftId)?.markdown || ''} onSource={ref => { setModal(null); void openSource(ref); }} onPage={id => { if (stagedDrafts.some(item => item.id === id)) setStagedDraftId(id); }} headingPrefix="draft-heading" /></article> : <p>当前没有可预览的正文成果。</p>}
++        <nav aria-label="未发布草稿目录">{stagedDrafts.map(item => <button className="button" type="button" aria-pressed={item.id === stagedDraftId} key={item.id} onClick={() => { setStagedDraftId(item.id); setPendingDraftHeading(null); }}>{item.title}</button>)}</nav>
++        {stagedDrafts.length ? <article aria-label="未发布草稿正文"><Markdown value={stagedDrafts.find(item => item.id === stagedDraftId)?.markdown || ''} onSource={ref => { setModal(null); void openSource(ref); }} onPage={navigateDraftFromMarkdown} currentPageId={logicalDraftPageId(stagedDraftId)} headingPrefix="draft-heading" /></article> : <p>当前没有可预览的正文成果。</p>}
+       </Modal>}
+       {sourceOpen && (
+         <div
+
+===== electron-agent/src/features/repoWiki/testing/runtimeFixture.ts =====
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\.agents\evidence\2026-11-02-repo-wiki-generation-validation-repair\ui-preimage\electron-agent\src\features\repoWiki\testing\runtimeFixture.ts', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\electron-agent\src\features\repoWiki\testing\runtimeFixture.ts', CRLF will be replaced by LF the next time Git touches it
+diff --git "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\src\\features\\repoWiki\\testing\\runtimeFixture.ts" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\testing\\runtimeFixture.ts"
+index 6ddb6cf9..74bdf96c 100644
+--- "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\src\\features\\repoWiki\\testing\\runtimeFixture.ts"	
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\testing\\runtimeFixture.ts"	
+@@ -31,6 +31,24 @@ export function createRepoWikiRuntimeFixture(onCall: (command: string) => void =
+       cards: { count: 1, identity: {}, last_run: null, updated_at: timestamp, namespace: 'cards', status: 'ready' },
+     },
+   };
++  const enableLinkFixture = () => {
++    const sibling: WikiPage = {
++      ...overview, id: 'chapters/sibling', title: '同层目标',
++      markdown: '# 同层目标\n\n同层页面已打开。', sources: [],
++    };
++    const guide: WikiPage = {
++      ...overview, id: 'guide-name', title: '使用指南',
++      markdown: '# 使用指南\n\n[再次定位](#detail)\n\n' + Array.from({ length: 8 }, (_, i) => `前置说明 ${i + 1}。`).join('\n\n') + '\n\n## Detail\n\n跨页 hash 已到位。',
++      sources: [],
++    };
++    project.pages = [
++      { ...overview, markdown: `${overview.markdown}\n\n[链接检查](chapters/start.md)` },
++      { ...overview, id: 'chapters/start', title: '章节起点', markdown: '[同层页面](./sibling.md)\n\n[跨级并定位](../guide%2Dname.md?view=reader#detail)\n\n[源码例子](source:src/index.ts#L1-L3)\n\n\`[不是链接](./missing.md)\`\n\n\`\`\`md\n[仍不是链接](./missing.md)\n\`\`\`', sources: [] },
++      sibling,
++      guide,
++    ];
++    project.page_count = project.pages.length;
++  };
+   // There is deliberately no preloaded Wiki registry: main imports opened roots.
+   const openedRoots = new Set([fixtureWorkspace, nextFixtureWorkspace]);
+   const wikiProjects = new Map<string, Project>();
+@@ -163,7 +181,11 @@ export function createRepoWikiRuntimeFixture(onCall: (command: string) => void =
+       const selectedProject = allProjects().find((item) => item.id === args.project_id) || project;
+       switch (command) {
+         case 'repoWiki_knowledge': result = currentKnowledge(args.target === 'cards' ? 'cards' : 'wiki'); break;
+-        case 'repoWiki_drafts': result = { taskId: knowledge?.run?.taskId, items: [{ id: 'draft-architecture', title: '架构草稿', markdown: '# 架构草稿\n\n这是尚未发布的阶段成果。', sources: [] }] }; break;
++        case 'repoWiki_drafts': result = { taskId: knowledge?.run?.taskId, items: [
++          { id: 'generate:chapters/start', title: '架构草稿', markdown: '# 架构草稿\n\n这是尚未发布的阶段成果。\n\n[同层草稿](./sibling.md)\n\n[跨页草稿](../guide%2Dname.md?view=reader#detail)\n\n[正式概览](../overview.md)', sources: [] },
++          { id: 'generate:chapters/sibling', title: '同层草稿', markdown: '# 同层草稿\n\n同层草稿已打开。', sources: [] },
++          { id: 'generate:guide-name', title: '指南草稿', markdown: '# 指南草稿\n\n前置说明。\n\n## Detail\n\n草稿 hash 已定位。', sources: [] },
++        ] }; break;
+         case 'repoWiki_action': {
+           const next = knowledgeResponses.shift();
+           if (next) { knowledge = clone(next); result = next; break; }
+@@ -241,6 +263,7 @@ export function createRepoWikiRuntimeFixture(onCall: (command: string) => void =
+   };
+   return {
+     bridge, calls, emit,
++    enableLinkFixture,
+     setKnowledge: (next: RepoWikiKnowledgeSnapshot | null) => { knowledge = clone(next); },
+     /** The snapshot the host would project for `item`, without changing the fixture's server state. */
+     knowledgeFor: (item: Run) => deriveKnowledge(activeProjectId || project.id, (item.target as 'wiki' | 'cards') || 'wiki', clone(item)),
+
+===== electron-agent/ui-harness/scenarios/repo-wiki.tsx =====
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\.agents\evidence\2026-11-02-repo-wiki-generation-validation-repair\ui-preimage\electron-agent\ui-harness\scenarios\repo-wiki.tsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\electron-agent\ui-harness\scenarios\repo-wiki.tsx', CRLF will be replaced by LF the next time Git touches it
+diff --git "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx"
+index 1b330e60..b3f1822c 100644
+--- "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx"	
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx"	
+@@ -7,6 +7,7 @@ import { exposeActions, exposeData, installBridge, track } from '../stubs';
+ import type { RepoWikiKnowledgeSnapshot } from '../../shared/knowledgeKernelContracts';
+ 
+ const fixture = createRepoWikiRuntimeFixture(track);
++fixture.enableLinkFixture();
+ const hostRoots = [fixtureWorkspace, nextFixtureWorkspace, ...Array.from({ length: 5 }, (_, index) => `D:\\Projects\\Host-${index + 1}`)];
+ fixture.setOpenedRoots(hostRoots);
+ const activationGate = fixture.holdNext('repoWiki_activate');
+
+===== electron-agent/ui-harness/probes/repo-wiki.mjs =====
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\.agents\evidence\2026-11-02-repo-wiki-generation-validation-repair\ui-preimage\electron-agent\ui-harness\probes\repo-wiki.mjs', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'D:\OneDrive\Project Files\Pi\electron-agent\ui-harness\probes\repo-wiki.mjs', CRLF will be replaced by LF the next time Git touches it
+diff --git "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"
+index c2df5ffb..f7c2757b 100644
+--- "a/D:\\OneDrive\\Project Files\\Pi\\.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"	
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"	
+@@ -3,6 +3,10 @@ const close = '[data-testid="module-chat"]';
+ const modal = '[role="dialog"]';
+ const save = '.document-edit-actions .button.primary';
+ const snapshot = (t) => t.act('snapshot');
++const clickMarkdownLink = async (t, label, key) => {
++  await t.js(`Array.from(document.querySelectorAll('.markdown button.inline-page')).find(button => button.textContent.trim() === ${JSON.stringify(label)})?.setAttribute('data-ui-link', ${JSON.stringify(key)})`);
++  await t.click(`[data-ui-link="${key}"]`);
++};
+ 
+ export default async function (t) {
+   const data = await t.data();
+@@ -68,6 +72,36 @@ export default async function (t) {
+ 
+   await t.click('.wiki-tree [role="treeitem"]');
+   t.ok('读取真实 Markdown 组件', await t.waitForText('.markdown', '真实阅读正文。'));
++  const embeddedHash = await t.js('location.hash');
++  await clickMarkdownLink(t, '链接检查', 'root-link');
++  t.ok('从概览打开嵌套 Wiki 页面', await t.waitForText('.markdown', '同层页面'));
++  t.check('嵌套入口请求精确页面 ID', (await snapshot(t)).calls.filter(call => call.command === 'repoWiki_page').at(-1)?.args.slug, 'chapters/start');
++  await clickMarkdownLink(t, '同层页面', 'sibling-link');
++  t.ok('嵌套页相对链接读取同层页面', await t.waitForText('.markdown', '同层页面已打开。'));
++  t.check('同层链接以嵌套页面目录为基准', (await snapshot(t)).calls.filter(call => call.command === 'repoWiki_page').at(-1)?.args.slug, 'chapters/sibling');
++  await t.click('.wiki-tree [role="treeitem"]');
++  await clickMarkdownLink(t, '链接检查', 'root-link-return');
++  t.ok('回到嵌套链接来源页', await t.waitForText('.markdown', '跨级并定位'));
++  await clickMarkdownLink(t, '跨级并定位', 'cross-page-link');
++  t.ok('编码路径与 query/hash 定位到目标正文', await t.waitForText('.markdown', '跨页 hash 已到位。'));
++  t.check('编码路径解码后请求正确页面 ID', (await snapshot(t)).calls.filter(call => call.command === 'repoWiki_page').at(-1)?.args.slug, 'guide-name');
++  t.ok('目标标题挂载后完成 hash 定位', await t.waitUntil(`document.activeElement?.textContent === 'Detail'`));
++  t.check('嵌入 Wiki 不改宿主 hash', await t.js('location.hash'), embeddedHash);
++  await t.shot('links-formal-cross-page');
++  await t.js(`document.querySelector('.document-content')?.scrollTo({ top: 0 })`);
++  await clickMarkdownLink(t, '再次定位', 'same-page-link');
++  t.ok('同页 hash 点击再次定位', await t.waitUntil(`document.activeElement?.textContent === 'Detail'`));
++  t.check('重复定位仍不改宿主 hash', await t.js('location.hash'), embeddedHash);
++  await t.click('.wiki-tree [role="treeitem"]');
++  await clickMarkdownLink(t, '链接检查', 'root-link-again');
++  t.ok('跨级链接页的来源回归', await t.waitForText('.markdown', '源码例子'));
++  t.check('Markdown 代码示例不变成导航按钮', await t.count('.markdown .inline-page'), 2);
++  t.check('Markdown 代码示例保留原文', await t.js("document.querySelector('.markdown pre')?.textContent?.trim()"), '[仍不是链接](./missing.md)');
++  await t.click('.markdown .inline-source');
++  t.ok('嵌套页仍能打开源码来源', await t.waitForText('.source-code', 'export const forest = true;'));
++  await t.click('[aria-label="关闭源码"]');
++  await t.click('.wiki-tree [role="treeitem"]');
++  t.ok('返回概览后原阅读流程继续', await t.waitForText('.markdown', '真实阅读正文。'));
+   await t.click('[aria-label="源码"]');
+   t.ok('源码切换为只读 Markdown', await t.waitFor('[aria-label="Markdown 源码"]'));
+   await t.click('[aria-label="预览"]');
+@@ -259,6 +293,19 @@ export default async function (t) {
+   await t.js(`Array.from(document.querySelectorAll('[data-testid="knowledge-overview"] button')).find(button => button.textContent === '查看未发布草稿').setAttribute('data-ui-drafts', 'true')`);
+   await t.click('[data-ui-drafts]');
+   t.ok('阶段成果以只读未发布草稿预览', await t.waitForText('[role="dialog"][aria-label="未发布草稿"]', '这是尚未发布的阶段成果。'));
++  await t.click('[aria-label="未发布草稿目录"] button');
++  await clickMarkdownLink(t, '同层草稿', 'draft-sibling-link');
++  t.ok('阶段前缀草稿 ID 可按 logical page ID 打开同层草稿', await t.waitForText('.markdown', '同层草稿已打开。'));
++  await t.click('[aria-label="未发布草稿目录"] button');
++  const draftPageReads = (await snapshot(t)).calls.filter(call => call.command === 'repoWiki_page').length;
++  await clickMarkdownLink(t, '跨页草稿', 'draft-cross-page-link');
++  t.ok('未发布草稿跨页 hash 等待目标正文挂载后定位', await t.waitUntil(`document.activeElement?.textContent === 'Detail'`));
++  t.check('草稿跨页链接不触发正式 Wiki 页请求', (await snapshot(t)).calls.filter(call => call.command === 'repoWiki_page').length, draftPageReads);
++  await t.shot('links-draft-cross-page');
++  await t.click('[aria-label="未发布草稿目录"] button');
++  await clickMarkdownLink(t, '正式概览', 'draft-formal-link');
++  t.ok('缺少同 logical ID 草稿时不跳到正式页面', await t.waitForText('[aria-label="未发布草稿正文"] .markdown', '这是尚未发布的阶段成果。'));
++  t.check('未匹配草稿链接仍不会读取正式页', (await snapshot(t)).calls.filter(call => call.command === 'repoWiki_page').length, draftPageReads);
+   await t.key('Escape');
+   await t.wheel('[data-testid="knowledge-overview"]', 460);
+   t.info('修复入口滚动与命中', await t.js(`(() => { const root=document.querySelector('[data-testid="knowledge-overview"]'); const button=document.querySelector('[data-knowledge-action="repair"]'); const rect=button?.getBoundingClientRect(); return {scrollTop:root?.scrollTop,scrollHeight:root?.scrollHeight,clientHeight:root?.clientHeight,button:rect?{top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right}:null,hit:rect?button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)):false}; })()`));

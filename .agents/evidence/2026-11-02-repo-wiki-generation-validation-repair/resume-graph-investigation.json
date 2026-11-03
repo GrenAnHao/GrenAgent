@@ -1,0 +1,28 @@
+{
+  "preparedReplayRemaining": [],
+  "candidateNodeFound": true,
+  "nodeInputEqualsParent": true,
+  "nodeDeps": [
+    "catalogue:modules/pocock/upstream"
+  ],
+  "savedDeps": [
+    {
+      "phase": "catalogue",
+      "itemId": "catalogue:modules/pocock/upstream",
+      "outputHash": "7fd8e0f003dc9ebca97c658f0a569e1758894f9c27166bdf34ee9c429572eda1"
+    }
+  ],
+  "expectedDeps": [
+    {
+      "phase": "catalogue",
+      "itemId": "catalogue:modules/pocock/upstream",
+      "outputHash": "7fd8e0f003dc9ebca97c658f0a569e1758894f9c27166bdf34ee9c429572eda1",
+      "state": "prepared"
+    }
+  ],
+  "dependencyHashMatch": true,
+  "validation": "ok",
+  "advance": "ok",
+  "payloadBytes": 28706,
+  "retryOf": "4c12a6f4-e458-4d73-960c-d8ca7bbd78bd"
+}

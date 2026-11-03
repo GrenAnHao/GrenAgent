@@ -1,0 +1,21 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs chat-file-links
+
+构建：场景有增减
+场景已构建（生产模式，11.3s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[38932:1028/141556.252:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ chat-file-links
+  PASS 链接存在：查看验证记录
+  FAIL 会话链接：工作区根没有错误的 /D:/ 前缀  got ["/D:/Link Workspace/Pi/docs"]  want ["D:/Link Workspace/Pi"]
+  FAIL 会话链接：文件树没有 workspace path does not exist  got 1  want 0
+  FAIL 会话原始 /D:/ 链接打开 Markdown 正文  got false
+  INFO 截图 chat-link-broken  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\chat-file-links-chat-link-broken.png
+  ── 1 passed, 3 failed
+
+失败场景：chat-file-links（3.3s）
+单独复跑确认：node ui-harness/check.mjs chat-file-links

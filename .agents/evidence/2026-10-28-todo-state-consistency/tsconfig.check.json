@@ -1,0 +1,18 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "include": [
+    "../../../electron-agent/src/test/setup.ts",
+    "../../../electron-agent/electron/app/uiHistoryService.ts",
+    "../../../electron-agent/electron/app/uiHistoryService.ordering.test.ts",
+    "../../../electron-agent/src/stores/agent.ts",
+    "../../../electron-agent/src/stores/agentReducer.ts",
+    "../../../electron-agent/src/stores/sessionSnapshot.ts",
+    "../../../electron-agent/src/stores/sessionMessageSync.ts",
+    "../../../electron-agent/src/lib/sessionMessageCache.ts",
+    "../../../electron-agent/src/stores/todoConsistency.test.ts",
+    "../../../electron-agent/ui-harness/scenarios/todo-consistency.tsx",
+    "../../../extensions/todo/index.ts",
+    "../../../extensions/todo/todo.ts",
+    "../../../extensions/todo/index.test.ts"
+  ]
+}

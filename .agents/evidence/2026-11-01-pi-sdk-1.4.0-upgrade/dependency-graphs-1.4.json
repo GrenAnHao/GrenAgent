@@ -1,0 +1,236 @@
+{
+  "cli": {
+    "packages": [
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.4.0",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-ai@1.4.0_af3da2237bea33bbd60a197b0c0b1c52\\node_modules\\@earendil-works\\pi-ai\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.4.0",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_d4b154627b8a3796aa750263124a9dcd\\node_modules\\@earendil-works\\pi-coding-agent\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.4.0",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-telemetry@1.4.0\\node_modules\\@earendil-works\\pi-telemetry\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.4.0",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-agent-co_62969534a7cf7496214949e4ca83e818\\node_modules\\@earendil-works\\pi-agent-core\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.4.0",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-codemode@1.4.0\\node_modules\\@earendil-works\\pi-codemode\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.4.0",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-mcp@1.4.0\\node_modules\\@earendil-works\\pi-mcp\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.4.0",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-tui@1.4.0\\node_modules\\@earendil-works\\pi-tui\\package.json"
+      }
+    ],
+    "npmPackages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.4.0"
+      }
+    ],
+    "pnpmPackages": [
+      "@earendil-works/pi-agent-core@1.4.0",
+      "@earendil-works/pi-ai@1.4.0",
+      "@earendil-works/pi-codemode@1.4.0",
+      "@earendil-works/pi-coding-agent@1.4.0",
+      "@earendil-works/pi-mcp@1.4.0",
+      "@earendil-works/pi-telemetry@1.4.0",
+      "@earendil-works/pi-tui@1.4.0"
+    ]
+  },
+  "extensions": {
+    "packages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.4.0",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-agent-co_ced03ddf9410f5fd4b9fedc63889512f\\node_modules\\@earendil-works\\pi-agent-core\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.4.0",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-ai@1.4.0_283d789a2c842736b9c0ad1606d9dd22\\node_modules\\@earendil-works\\pi-ai\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.4.0",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_17c08a6b516064de546a78eac99040d6\\node_modules\\@earendil-works\\pi-coding-agent\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.4.0",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-telemetry@1.4.0\\node_modules\\@earendil-works\\pi-telemetry\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.4.0",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-codemode@1.4.0\\node_modules\\@earendil-works\\pi-codemode\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.4.0",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-mcp@1.4.0\\node_modules\\@earendil-works\\pi-mcp\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.4.0",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-tui@1.4.0\\node_modules\\@earendil-works\\pi-tui\\package.json"
+      }
+    ],
+    "npmPackages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.4.0"
+      }
+    ],
+    "pnpmPackages": [
+      "@earendil-works/pi-agent-core@1.4.0",
+      "@earendil-works/pi-ai@1.4.0",
+      "@earendil-works/pi-codemode@1.4.0",
+      "@earendil-works/pi-coding-agent@1.4.0",
+      "@earendil-works/pi-mcp@1.4.0",
+      "@earendil-works/pi-telemetry@1.4.0",
+      "@earendil-works/pi-tui@1.4.0"
+    ]
+  },
+  "electron-agent": {
+    "packages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.4.0",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-agent-co_0683b869c8303cecb6245964533966b0\\node_modules\\@earendil-works\\pi-agent-core\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.4.0",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-ai@1.4.0_2d172287ce0546aa51242b4cf950465e\\node_modules\\@earendil-works\\pi-ai\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.4.0",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_d419fad67b15cfecb14d39de4240c678\\node_modules\\@earendil-works\\pi-coding-agent\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.4.0",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-telemetry@1.4.0\\node_modules\\@earendil-works\\pi-telemetry\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.4.0",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-codemode@1.4.0\\node_modules\\@earendil-works\\pi-codemode\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.4.0",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-mcp@1.4.0\\node_modules\\@earendil-works\\pi-mcp\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.4.0",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-tui@1.4.0\\node_modules\\@earendil-works\\pi-tui\\package.json"
+      }
+    ],
+    "npmPackages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.4.0"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.4.0"
+      }
+    ],
+    "pnpmPackages": [
+      "@earendil-works/pi-agent-core@1.4.0",
+      "@earendil-works/pi-ai@1.4.0",
+      "@earendil-works/pi-codemode@1.4.0",
+      "@earendil-works/pi-coding-agent@1.4.0",
+      "@earendil-works/pi-mcp@1.4.0",
+      "@earendil-works/pi-telemetry@1.4.0",
+      "@earendil-works/pi-tui@1.4.0"
+    ]
+  }
+}

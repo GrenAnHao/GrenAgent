@@ -1,0 +1,43 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs chat-file-links
+
+构建：上次构建期间有源文件被改过
+场景已构建（生产模式，16.4s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[81444:1028/141714.866:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ chat-file-links
+  PASS 链接存在：查看验证记录
+  PASS 会话链接：工作区根没有错误的 /D:/ 前缀
+  PASS 会话链接：文件树没有 workspace path does not exist
+  PASS 会话原始 /D:/ 链接打开 Markdown 正文
+  PASS 链接存在：预览里的绝对链接
+  PASS 文件预览：同形状 Windows 链接也能打开
+  PASS 链接存在：查看编码盘符
+  PASS 编码盘符：激活正确文件
+  PASS 链接存在：查看验证记录
+  PASS 重复点击：回到原文件
+  PASS 重复点击：不重复创建文件管理器
+  PASS 不同链接：只保留两个文件标签
+  PASS 链接存在：查看截图
+  PASS 图片链接：进入图片预览
+  PASS 图片链接：图片解码完成
+  PASS 链接存在：普通相对链接
+  PASS 兼容：普通相对链接仍能打开
+  PASS 恢复：重挂载后文件和工作区仍正确
+  PASS 恢复：没有异常工作区
+  PASS 导航：应用页面没有被链接跳走
+  INFO 截图 chat-link-opened  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\chat-file-links-chat-link-opened.png
+  PASS 链接存在：缺失文件
+  PASS 缺失文件：错误只落在目标文件，不破坏文件树
+  PASS 缺失文件：文件树仍然可用
+  PASS 链接存在：查看验证记录
+  PASS 浅色：错误后仍可打开正确文件
+  PASS 所有文件 IPC 使用真实项目根
+  INFO 截图 chat-link-light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\chat-file-links-chat-link-light.png
+  ── 26 passed, 0 failed
+
+通过：chat-file-links（10.0s）。只跑了 1/35 个场景，其余 34 个没指定，未运行

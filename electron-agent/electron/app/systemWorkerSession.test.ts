@@ -3,12 +3,12 @@ import { isSystemWorkerSessionLines } from './systemWorkerSession';
 
 const EXTRACT_TEXT = [
   'Extract durable memory as strict JSON with optional keys l1 (object), l2 (string), and l3 (string). Return JSON only.',
-  'Task kind: memory_extract',
+  'Task kind: content_classify',
   'Input: {"delta":"user: 你是什么模型?"}',
 ].join('\n');
 
 describe('isSystemWorkerSessionLines', () => {
-  it('识别 memory_extract 短调用会话', () => {
+  it('识别 content_classify 短调用会话', () => {
     const lines = [
       JSON.stringify({ type: 'session', id: 'extract', cwd: 'C:/work' }),
       JSON.stringify({

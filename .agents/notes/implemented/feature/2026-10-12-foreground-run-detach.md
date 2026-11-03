@@ -50,7 +50,7 @@ Status: implemented
   - 父会话这一轮被打断（Esc）不再连带取消它们。转后台之前打断，照旧全部取消。
   - 单会话名额占到各自结束为止；注册表、父会话目录照前台的规矩在结束时记账。
   - 记账出错（例如注册表写不进去）不挡结算通知。
-  - 流式阶段就开工的并行项也登记进 `inflight`，界面上的取消和卡死回收都够得到它们。原来只有执行阶段起的项登记，转后台以后早开工的那几个谁也停不了。
+  - 并行项在完整参数通过授权后启动并登记进 `inflight`，界面上的取消和卡死回收都够得到它们。提前启动路径已由 [启动前完整授权](../bug-fix/2026-10-28-subagent-authorization-before-launch.md) 移除。
   - 它们仍是一次性子代理，不能用 `send_message` 追问（用户确认的 3a）。
 - **不转后台的情况**：
   - codemode 脚本里的调用：嵌套调用的 `tool_call` 事件带 `parentToolCallId`，multi-agent 在同一个 `tool_call` 钩子里记下这些调用 id。被拦下、没走到 execute 的 id 在 `agent_end` 清掉。
@@ -59,7 +59,7 @@ Status: implemented
 - **代码**：
   - `extensions/multi-agent/detach.ts`：`SteerWatch`、`waitOrDetach`、`ForegroundRun`、`detachableSignal`。
   - `manager.ts`：抽出 `settleOneShot` / `settleInBackground`，后台 spawn 和转后台共用。
-  - 流式阶段就开工的并行项（`parallel-early.ts`）经 `EarlyBatch.onSettled` 接上同一套。
+  - 并行项统一在执行阶段经 `ForegroundRun` 接上同一套。
 - **界面**：
   - 单任务回执本来就会被识别成后台子代理，卡片跟着注册表走，不用改。
   - 并行组卡片：
@@ -115,7 +115,7 @@ Status: implemented
 
 | 级别 | 问题 | 修正 |
 |---|---|---|
-| 高 | 流式阶段就开工的并行项没登记进 `inflight`，转后台以后界面取消、卡死回收都停不了它 | `launchEarly` 登记，结束时删 |
+| 高 | 流式阶段就开工的并行项没登记进 `inflight`，转后台以后界面取消、卡死回收都停不了它 | 执行阶段统一登记，结束时删；提前启动路径已移除 |
 | 高 | 组卡片里转后台的项在注册表里找不到（被删、被挤出 50 行、没有 agentId）时一直转圈、一直轮询 | 有 agentId 的确认找不到后画「已中断」；没有 agentId 的按任务文字跟最新一行 |
 | 中 | 触发条件把跟进、更早排着的消息也算进去；回执写「The user sent」，子代理里其实是父代理 | 只认这一轮的 steer（`SteerWatch`）；回执措辞改成中性 |
 | 低 | 注册表写失败会让 `runOne` / `launchEarly` 的 Promise 失败，转后台的项发不出通知，`all.finally` 还会留下未处理的 rejection | 写注册表包一层，通知放进 finally；转后台路径用 `all.then(release, release)` |

@@ -1,0 +1,39 @@
+{
+  "targetedTests": {
+    "files": 23,
+    "passed": 208,
+    "failed": 0,
+    "exitCode": 0,
+    "log": "backend-targeted-tests.log"
+  },
+  "auditTests": {
+    "passed": 8,
+    "failed": 4,
+    "testFileUnchanged": true,
+    "headSourceSameFailures": true,
+    "baselineLog": "audit-baseline-tests.log"
+  },
+  "nodeTypecheck": {
+    "exitCode": 1,
+    "diagnostics": 150,
+    "log": "backend-typecheck.log",
+    "changedProductionFilesReported": []
+  },
+  "migration": {
+    "schemaVersion": 5,
+    "memoryTablesRemoved": [
+      "memories",
+      "memory_captures",
+      "memory_layer_schedules"
+    ],
+    "otherCleanup": [
+      "memory_* service_tasks",
+      "memory plugin_state",
+      "memory agent_config",
+      "Memory agent_jobs and scoped audit events"
+    ],
+    "diskReclaimed": "VACUUM + wal_checkpoint(TRUNCATE) only when legacy data is removed",
+    "idempotent": true
+  },
+  "scope": "Memory only; retain session history, session-state compaction, Wiki, CodeGraph, permissions, shared tasks and audit"
+}

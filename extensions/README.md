@@ -6,22 +6,23 @@
 
 | 目录 | 工具 / 命令 | 需要 key? | 说明 |
 |---|---|---|---|
-| [`memory`](./memory) | `memory_search` `conversation_search` | Agent Data Runtime | 本地 L0-L3 长期记忆、会话捕获与自动召回 |
+| [`wiki-rag`](./wiki-rag) | `wiki_list` `wiki_search` `wiki_read` | Agent Data Runtime | 本地知识库只读检索 |
+| [`code-retrieval`](./code-retrieval) | `code_explore` | Agent Data Runtime | CodeGraph 代码检索 |
 | [`web-fetch`](./web-fetch) | `fetch_url` | 否 | 网页抓取(SSRF 防护，`format` 选 markdown / text / html / json / llms) |
 | [`image-gen`](./image-gen) | `generate_image` | 是 | 文生图(OpenAI 兼容) |
 | [`multi-agent`](./multi-agent) | `spawn_agent` | 子 agent 需 | 委派隔离 pi 子进程(单个/并行) |
 | [`fable-behavior`](./fable-behavior) | — | 否 | Fable 5 + coding-agent 行为层(Tier 注入 + 子 agent 种子) |
+| [`gpt-with-taste`](./gpt-with-taste) | — | 否 | GPT 系模型的行为层(请求期投影 + `/taste` 开关)；生效时 fable 让位 |
 | [`tts`](./tts) | `speak` | 是 | 文字转语音(OpenAI 兼容) |
 | [`im-gateway`](./im-gateway) / [`im-platforms`](./im-platforms) | — | — | **暂缓**：源码保留，未打进产品加载清单。接回见仓库根目录 `docs/im-reintroduction.md` |
 
-合计 **当前桌面端打进主进程 / worker 的全部扩展**，长期记忆与知识检索由本地 `memory`、`wiki-rag` 与 `code-retrieval` 提供。
+合计 **当前桌面端打进主进程 / worker 的全部扩展**，知识库与代码检索由本地 `wiki-rag` 与 `code-retrieval` 提供。
 
 ## 一键加载全部
 
 ```bash
 # 方式 1:逐个 -e(开发调试)
-pi -e ./extensions/memory/index.ts \
-   -e ./extensions/web-fetch/index.ts \
+pi -e ./extensions/web-fetch/index.ts \
    -e ./extensions/image-gen/index.ts \
    -e ./extensions/multi-agent/index.ts
 
@@ -34,12 +35,11 @@ cp -r extensions/* ~/.pi/agent/extensions/
 
 ## 统一配置
 
-桌面端由 Electron 托管本地 Agent Data Runtime；扩展通过受保护的 loopback endpoint 访问数据。其他需要外部服务的扩展仍按各自 README 配置。
+桌面端由 Electron 托管本地 Agent Data Runtime；扩展通过受保护的命名管道 endpoint 访问数据。其他需要外部服务的扩展仍按各自 README 配置。
 
 ## 技术共性
 
 - TypeScript extension,`typebox` schema,`registerTool` / `registerCommand` / 生命周期钩子。
-- `memory` 通过本地 Runtime 访问长期记忆与会话检索，并在 `before_agent_start` 注入相关上下文。
 - `session-memory` 只管理会话短期工作状态，不承担长期知识存储。
 
 ## 测试
@@ -49,4 +49,4 @@ cp -r extensions/* ~/.pi/agent/extensions/
 ## 注意
 
 - 包名:按官方新名 `@earendil-works/*` + `typebox`(实测该 Pi 版本 bundle 的是 `typebox`,不是 `@sinclair/typebox`)。
-- Agent Data Runtime 使用应用数据目录保存 Memory/Wiki 数据；扩展不直接管理 SQLite 文件。
+- Agent Data Runtime 使用应用数据目录保存 Wiki 元数据、任务与审计；扩展不直接管理 SQLite 文件。

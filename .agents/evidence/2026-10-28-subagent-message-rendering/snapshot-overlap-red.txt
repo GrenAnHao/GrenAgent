@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:66240) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/stores/agentNoticeProjection.test.ts (8 tests | 1 failed) 19ms
+     × does not lose a repeated send when a persisted snapshot overlaps only the first live message 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/stores/agentNoticeProjection.test.ts > agent event presentation metadata > does not lose a repeated send when a persisted snapshot overlaps only the first live message
+AssertionError: expected [ { kind: 'notice', id: 'm19', …(5) } ] to have a length of 2 but got 1
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/stores/agentNoticeProjection.test.ts:77:20
+     75|     const tail = messagesFromAgent([notice({ timestamp: 1000 }), notic…
+     76|     const merged = mergeLiveTail([persisted], tail);
+     77|     expect(merged).toHaveLength(2);
+       |                    ^
+     78|     expect(merged[0].id).toBe(persisted.id);
+     79|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 passed (8)
+   Start at  14:50:49
+   Duration  14.19s (transform 542ms, setup 8.27s, import 664ms, tests 19ms, environment 4.08s)
+

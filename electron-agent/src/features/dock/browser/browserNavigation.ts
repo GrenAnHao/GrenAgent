@@ -1,3 +1,5 @@
+import grenAgentIcon from '../../../../brand/source/grenagent-icon.svg?raw';
+
 interface NavigationError extends Error {
   code?: string;
   errno?: number;
@@ -142,7 +144,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-const PI_BRAND_ICON = `<svg viewBox="40 56 160 134" xmlns="http://www.w3.org/2000/svg" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M40 56 H200 V84 H40 Z M74 84 H102 V190 H74 Z M150 84 H178 V190 H150 Z"/></svg>`;
+const GRENAGENT_ICON = grenAgentIcon.replace('<svg ', '<svg aria-hidden="true" ');
 
 function networkDetailsHtml(): string {
   return `
@@ -198,9 +200,8 @@ ${detailsLink}
     }
     html, body { margin: 0; min-height: 100%; background: #202124; color: var(--text-color); font-family: system-ui, sans-serif; }
     .interstitial-wrapper { box-sizing: border-box; font-size: 1em; line-height: 1.6em; margin: 20vh auto 0; max-width: 600px; width: 100%; padding: 0 48px 48px; }
-    .icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: 0 0 24px; color: var(--link-color); animation: icon-spin 3s linear infinite; transform-origin: 50% 50%; }
+    .icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: 0 0 24px; color: var(--heading-color); }
     .icon svg { width: 28px; height: 28px; }
-    @keyframes icon-spin { 100% { transform: rotate(360deg); } }
     h1 { color: var(--heading-color); font-size: 1.2em; font-weight: 500; line-height: 1.2em; margin: 0 0 12px; }
     #main-message > p { margin: 0; font-size: 1em; }
     #suggestions-list { margin-top: 18px; }
@@ -226,7 +227,7 @@ ${detailsLink}
 <body class="neterror" data-gren-browser-error="1">
   <div id="main-frame-error" class="interstitial-wrapper">
     <div id="main-content">
-      <div class="icon" aria-hidden="true">${PI_BRAND_ICON}</div>
+      <div class="icon" aria-hidden="true">${GRENAGENT_ICON}</div>
       <div id="main-message">
         <h1>${escapeHtml(view.title)}</h1>
         <p>${escapeHtml(view.summary)}</p>

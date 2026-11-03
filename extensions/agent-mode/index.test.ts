@@ -6,7 +6,7 @@ vi.mock("../_shared/runtime-config.js", () => ({
 }));
 
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
-import factory from "./index.js";
+import factory, { persistedMode } from "./index.js";
 import {
   agentModeConfigKey,
   getAgentMode,
@@ -57,8 +57,9 @@ describe("agent-mode factory", () => {
     expect(commands).not.toContain("mode");
     expect(commands).not.toContain("plan");
     expect(commands).not.toContain("plan-build");
+    expect(commands).not.toContain("brainstorm-deliver");
     expect(commands).toEqual(
-      expect.arrayContaining(["plan-update", "plan-confirm", "plan-cancel", "plan-finish", "brainstorm-deliver"]),
+      expect.arrayContaining(["plan-update", "plan-confirm", "plan-cancel", "plan-finish"]),
     );
   });
 
@@ -124,6 +125,43 @@ describe("agent-mode factory", () => {
 
 });
 
+describe("removed brainstorm mode compatibility", () => {
+  it.each(["agent-mode", "session-controls"])("latest legacy %s entry restores Agent over an earlier Plan", (customType) => {
+    expect(persistedMode([
+      { type: "custom", customType: "agent-mode", data: { mode: "plan" } },
+      { type: "custom", customType, data: { mode: "brainstorm" } },
+    ])).toBe("agent");
+  });
+
+  it("legacy project default restores Agent over an earlier session Ask", async () => {
+    vi.mocked(getConfig).mockImplementation((name: string) =>
+      name === agentModeConfigKey("D:/proj-a") ? "brainstorm" : undefined,
+    );
+    const { handlers } = load();
+    const session = ctx("D:/proj-a", [
+      { type: "custom", customType: "agent-mode", data: { mode: "ask" } },
+    ]);
+    await handlers.session_start?.({}, session);
+    expect(getAgentMode("D:/proj-a")).toBe("agent");
+    expect(session.ui.setStatus).toHaveBeenCalledWith("agent-mode", "agent");
+  });
+
+  it("legacy project default hot update restores Agent", async () => {
+    const subscribers: Array<(next: Record<string, string>) => void> = [];
+    vi.mocked(watchConfig).mockImplementation((cb) => {
+      subscribers.push(cb);
+      return () => {};
+    });
+    const { handlers } = load();
+    const session = ctx("D:/proj-a");
+    await handlers.session_start?.({}, session);
+    const key = agentModeConfigKey("D:/proj-a");
+    for (const cb of subscribers) cb({ [key]: "ask" });
+    for (const cb of subscribers) cb({ [key]: "brainstorm" });
+    expect(getAgentMode("D:/proj-a")).toBe("agent");
+  });
+});
+
 describe("agent-mode per session", () => {
   it("切会话各回各的模式，项目默认变化不改已打开会话", async () => {
     const subscribers: Array<(next: Record<string, string>) => void> = [];
@@ -155,5 +193,67 @@ describe("agent-mode per session", () => {
     expect(await handlers.tool_call?.({ toolName: "write", input: { path: "a.ts" } }, session)).toBeUndefined();
     setAgentMode("ask", "D:/proj-a", "sa");
     expect(await handlers.tool_call?.({ toolName: "write", input: { path: "a.ts" } }, session)).toMatchObject({ block: true });
+  });
+});
+
+describe("agent-mode 初值固化", () => {
+  it("缺模式的旧会话首次继承项目默认时写回 canonical 条目（不再只钉内存）", async () => {
+    vi.mocked(getConfig).mockImplementation((name: string) =>
+      name === agentModeConfigKey("D:/proj-a") ? "debug" : undefined,
+    );
+    const { handlers, appendEntry } = load();
+    const session = ctx("D:/proj-a", [], "sa");
+    await handlers.session_start?.({}, session);
+    expect(getAgentMode("D:/proj-a", "sa")).toBe("debug");
+    expect(appendEntry).toHaveBeenCalledWith("session-preferences", expect.objectContaining({ mode: "debug" }));
+  });
+
+  it("会话已有模式条目时不重复固化", async () => {
+    const { handlers, appendEntry } = load();
+    const session = ctx(
+      "D:/proj-a",
+      [{ type: "custom", customType: "session-controls", data: { mode: "plan" } }],
+      "sa",
+    );
+    await handlers.session_start?.({}, session);
+    expect(getAgentMode("D:/proj-a", "sa")).toBe("plan");
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("固化失败不抹掉钉住的模式，也不抛错（下轮仍按会话运行）", async () => {
+    const { handlers } = load();
+    let entry: unknown;
+    // 直接构造一个 appendEntry 抛错的扩展实例
+    const throwing: Record<string, (event: unknown, ctx?: unknown) => unknown> = {};
+    factory({
+      registerCommand: () => {},
+      on: (ev: string, h: (event: unknown, ctx?: unknown) => unknown) => { throwing[ev] = h; },
+      appendEntry: (type: string, data: unknown) => { entry = { type, data }; throw new Error("disk full"); },
+      getActiveTools: () => ["read"],
+      setActiveTools: () => {},
+      registerTool: () => {},
+      sendMessage: () => {},
+    } as never);
+    const session = ctx("D:/proj-a", [], "sa");
+    await expect(throwing.session_start?.({}, session)).resolves.toBeUndefined();
+    expect(getAgentMode("D:/proj-a", "sa")).toBe("agent");
+    expect(entry).toMatchObject({ type: "session-preferences" });
+    void handlers;
+  });
+
+  it("已有 canonical mode 时仍读扩展自动写的更新模式（Plan 确认不锁死）", async () => {
+    const { handlers } = load();
+    // canonical 里 mode=plan，之后扩展自动切 agent，条目排在后面
+    const session = ctx(
+      "D:/proj-a",
+      [
+        { type: "custom", customType: "session-preferences", data: { mode: "plan", revision: 1 } },
+        { type: "custom", customType: "agent-mode", data: { mode: "agent" } },
+      ],
+      "sa",
+    );
+    // live 表没有该会话的模式：走 session_start 的会话条目恢复
+    await handlers.session_start?.({}, session);
+    expect(getAgentMode("D:/proj-a", "sa")).toBe("agent");
   });
 });

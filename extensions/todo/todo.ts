@@ -82,15 +82,17 @@ interface BranchEntryLike {
     toolName?: string;
     details?: unknown;
     isError?: boolean;
+    stopReason?: string;
+    content?: unknown;
   };
 }
 
 export function reconstructFromEntries(entries: readonly BranchEntryLike[]): TodoState {
   let state = emptyTodoState();
-  for (const entry of entries) {
-    if (entry.type !== "message") continue;
-    const msg = entry.message;
-    if (!msg || msg.role !== "toolResult" || msg.toolName !== "todo") continue;
+  const branch = entries.flatMap((entry) => entry.type === "message" && entry.message ? [entry.message] : []);
+  const messages = closeTodosInContext(branch) ?? branch;
+  for (const msg of messages) {
+    if (msg.role !== "toolResult" || msg.toolName?.toLowerCase() !== "todo") continue;
     if (msg.isError === true) continue;
     const details = msg.details;
     if (typeof details === "object" && details !== null && "error" in details && (details as { error?: unknown }).error != null) {
@@ -119,7 +121,7 @@ export function closeTodosInContext<T extends TodoContextMessage>(messages: read
   let index = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (!message || message.role !== "toolResult" || message.toolName !== "todo" || message.isError === true) continue;
+    if (!message || message.role !== "toolResult" || message.toolName?.toLowerCase() !== "todo" || message.isError === true) continue;
     if (typeof message.details !== "object" || message.details === null) continue;
     if ("error" in message.details && (message.details as { error?: unknown }).error != null) continue;
     index = i;
@@ -156,13 +158,15 @@ function replaceTodoMessage<T extends TodoContextMessage>(
   nextId: number,
 ): T[] {
   const text = countMessage(todos);
-  const content = Array.isArray(current.content)
-    ? current.content.map((part, partIndex) => {
-        if (partIndex !== 0 || typeof part !== "object" || part === null) return part;
-        if ((part as { type?: unknown }).type !== "text") return part;
-        return { ...part, text };
-      })
-    : current.content;
+  const firstText = Array.isArray(current.content)
+    ? current.content.findIndex((part) => typeof part === "object" && part !== null && (part as { type?: unknown }).type === "text")
+    : -1;
+  const content = typeof current.content === "string" ? text
+    : Array.isArray(current.content)
+      ? firstText < 0
+        ? [{ type: "text", text }, ...current.content]
+        : current.content.map((part, partIndex) => partIndex === firstText ? { ...(part as object), text } : part)
+      : current.content;
   const next = messages.slice();
   next[index] = {
     ...current,

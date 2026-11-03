@@ -16,6 +16,7 @@ export interface AgentConfig {
   description: string;
   tools?: string[];
   model?: string;
+  thinkingLevel?: string;
   /** frontmatter `backend: worker`：这个角色的子代理跑在独立 worker 进程里（崩溃隔离、重 CPU / 原生模块）。 */
   backend?: "worker" | "in-process";
   systemPrompt: string;
@@ -65,6 +66,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
       model: frontmatter.model,
       ...backendOf(frontmatter.backend),
       systemPrompt: body,
+      ...(frontmatter.thinking_level ? { thinkingLevel: String(frontmatter.thinking_level).trim() } : {}),
       source,
       filePath,
     });
@@ -145,6 +147,7 @@ export function builtinDefaultAgents(): AgentConfig[] {
       model: frontmatter.model,
       ...backendOf(frontmatter.backend),
       systemPrompt: body,
+      ...(frontmatter.thinking_level ? { thinkingLevel: String(frontmatter.thinking_level).trim() } : {}),
       source: "user",
       filePath: `<builtin:${name}>`,
     });

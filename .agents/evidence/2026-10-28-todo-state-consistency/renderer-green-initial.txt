@@ -1,0 +1,47 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:72508) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:24636) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:81116) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:74944) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:78672) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:67156) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46436) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/stores/todoConsistency.test.ts (9 tests | 1 failed) 18ms
+     × agent_settled 在缺少 agent_end 时也使用最终消息重建收尾 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > agent_settled 在缺少 agent_end 时也使用最终消息重建收尾
+AssertionError: expected undefined to be 'stop' // Object.is equality
+
+- Expected:
+"stop"
+
++ Received:
+undefined
+
+ ❯ src/stores/todoConsistency.test.ts:60:33
+     58|     state = applyEvent(state, { type: 'message_end', message: stop } a…
+     59|     state = applyEvent(state, { type: 'agent_settled' } as AgentEvent);
+     60|     expect(state.assistantStop).toBe('stop');
+       |                                 ^
+     61|     expect(state.todoListFinished).toBe(true);
+     62|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  1 failed | 189 passed (190)
+   Start at  14:48:56
+   Duration  71.06s (transform 9.17s, setup 115.22s, import 52.69s, tests 1.19s, environment 51.92s)
+

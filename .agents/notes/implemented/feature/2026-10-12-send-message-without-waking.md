@@ -48,8 +48,8 @@ Status: implemented
   - 对方在跑：details 的 `delivery` 是 `"next-step"`。
 - **工具说明**：写明 `wake: false` 的行为，并加一条点名工具的 guideline：「Use send_message with wake: false for information the recipient does not need to act on right away」。
 - **子代理的结尾提示**：最终结果用 `send_message` 加 `wake: false` 发给父会话。子代理随后就结算，结算通知会唤醒父会话，所以父会话只为这个结果跑一轮。提示里注明：还有子代理或后台任务在跑时，这条照样会唤醒父会话。中途改变父会话下一步的发现，照旧用默认的唤醒。
-- **界面**：
-  - `agent-message` 显示成一个提示条「来自 X 的消息（未唤醒）」（`AgentMessagePill`），默认收起，展开看正文。父会话和子代理的对话里都会出现。
+- **界面**（原折叠展示决定由[子代理消息完整呈现](2026-10-28-subagent-message-rendering.md)部分取代；这里保留原落地记录，投递语义仍有效）：
+  - 原落地的 `agent-message` 显示成一个提示条「来自 X 的消息（未唤醒）」（`AgentMessagePill`），默认收起，展开看正文。父会话和子代理的对话里都会出现。
   - reducer 原来按正文去重通知（同一条消息的 message_start / message_end 各来一次）。对 `agent-message` 改为按原消息的 timestamp 认同一条，同一个发送方连发两条一模一样的消息，两条都显示。
 
 ### 顺手修的

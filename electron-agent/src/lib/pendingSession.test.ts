@@ -7,6 +7,7 @@ beforeEach(() => {
     activeWorkspace: '/proj',
     activeSessionPath: '/proj/old.jsonl',
     draftConversationCwd: null,
+    draftConversationId: null,
   });
 });
 
@@ -53,6 +54,26 @@ describe('needsSessionCreateOnSend', () => {
 });
 
 describe('enterPendingNewSession', () => {
+  it('同项目连续新建草稿使用不同身份，不能覆盖之前草稿的偏好和输入', () => {
+    enterPendingNewSession('/proj');
+    const first = useSessionStore.getState().draftConversationId;
+    enterPendingNewSession('/proj');
+    const second = useSessionStore.getState().draftConversationId;
+    expect(typeof first).toBe('string');
+    expect(first).toMatch(/^draft:/);
+    expect(second).not.toBe(first);
+  });
+
+  it('恢复已有草稿身份，旧首发完成不能清除后来创建的草稿', () => {
+    useSessionStore.getState().setDraftConversation('/proj', 'draft:restored');
+    expect(useSessionStore.getState().draftConversationId).toBe('draft:restored');
+    useSessionStore.getState().setDraftConversation('/proj', 'draft:newer');
+    useSessionStore.getState().clearDraftConversation('/proj', 'draft:restored');
+    expect(useSessionStore.getState().draftConversationId).toBe('draft:newer');
+    useSessionStore.getState().clearDraftConversation('/proj', 'draft:newer');
+    expect(useSessionStore.getState().draftConversationId).toBeNull();
+    expect(useSessionStore.getState().draftConversationCwd).toBeNull();
+  });
   it('清掉当前会话并记下待创建 cwd，同工作区时回调 reset', () => {
     const reset = vi.fn();
     enterPendingNewSession('/proj', reset);
@@ -75,6 +96,21 @@ describe('enterPendingNewSession', () => {
 });
 
 describe('applyOpenedProject', () => {
+  it('从其他项目恢复已有草稿时切回目标工作区并保留草稿身份', () => {
+    useSessionStore.setState({ activeWorkspace: '/other', draftConversationCwd: '/proj', draftConversationId: 'draft:keep-current' });
+    const reset = vi.fn();
+    applyOpenedProject('/proj', null, reset);
+    expect(useSessionStore.getState().activeWorkspace).toBe('/proj');
+    expect(useSessionStore.getState().draftConversationId).toBe('draft:keep-current');
+    expect(useSessionStore.getState().activeSessionPath).toBe('');
+    expect(reset).not.toHaveBeenCalled();
+  });
+  it('重复打开同一未使用项目不替换当前草稿身份', () => {
+    useSessionStore.getState().setDraftConversation('/proj', 'draft:keep-current');
+    applyOpenedProject('/proj', null);
+    expect(useSessionStore.getState().draftConversationId).toBe('draft:keep-current');
+  });
+
   it('没有可恢复会话时把项目标成草稿，供输入栏读默认模型', () => {
     useSessionStore.setState({
       activeWorkspace: '/works/scratch',

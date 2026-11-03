@@ -25,6 +25,10 @@ describe('copyPiAdjacentAssets', () => {
     expect(existsSync(join(dir, 'pi-sandbox-launch.exe'))).toBe(true);
     expect(existsSync(join(dir, 'pi-job-guard.exe'))).toBe(true);
     expect(existsSync(join(dir, 'prompts/tier1/identity.md'))).toBe(true);
+    expect(readFileSync(join(dir, 'texts/main.md'), 'utf8')).toContain('GPT with Taste');
+    // 上游文本是 MIT：发行包里带着版权声明。
+    expect(readFileSync(join(dir, 'texts/LICENSE'), 'utf8')).toContain('MIT License');
+    expect(readFileSync(join(dir, 'ultra-rules.md'), 'utf8')).toContain('# Ultra scheduling');
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -36,6 +40,8 @@ describe('copyPiAdjacentAssets', () => {
     expect(existsSync(join(dir, 'chunks', 'pi-sandbox-win.exe'))).toBe(true);
     expect(existsSync(join(dir, 'chunks', 'pi-sandbox-launch.exe'))).toBe(true);
     expect(existsSync(join(dir, 'chunks', 'prompts/tier1/identity.md'))).toBe(true);
+    expect(existsSync(join(dir, 'chunks', 'texts/sub.md'))).toBe(true);
+    expect(readFileSync(join(dir, 'chunks', 'ultra-rules.md'), 'utf8')).toContain('# Ultra scheduling');
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -46,5 +52,6 @@ describe('copyPiAdjacentAssets', () => {
     expect(config.asarUnpack).toContain('out-pkg/main/chunks/pi-sandbox-win.exe');
     expect(config.asarUnpack).toContain('out-pkg/main/chunks/pi-sandbox-launch.exe');
     expect(config.asarUnpack).toContain('out-pkg/main/pi-job-guard.exe');
+    expect(config.asarUnpack).toContain('out-pkg/main/texts/**');
   });
 });

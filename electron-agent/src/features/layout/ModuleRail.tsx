@@ -13,7 +13,7 @@ interface ModuleDef {
   devOnly?: boolean;
 }
 
-// 全局 Agent Data 中心统一管理本地 CodeGraph、Wiki 与 Memory。
+// 全局 Agent Data 中心统一管理本地 CodeGraph 与 Wiki。
 // IM（微信 / HTTP 网关）已从产品路径卸下，侧栏不再露「连接」。接回见 docs/im-reintroduction.md。
 const MODULES: ModuleDef[] = [
   { id: 'chat', label: '对话', Icon: MessageSquare },
@@ -26,21 +26,20 @@ const MODULES: ModuleDef[] = [
 
 // 改用 createStaticStyles（与 dockTabStyles 等同一套写法）而非内联 style：内联写不出 hover，
 // 且原先激活态只有 colorFillTertiary（暗色下约 6% 白）+ colorText，几乎看不出选中。
-// 现在激活态 = colorFill 实感底 + 左侧主色指示条 + 高对比图标色，未激活/hover 各自分层。
+// 激活态用柔和强调色底和图标色，和会话栏的中性选中态区分。
 const styles = createStaticStyles(({ css }) => ({
   rail: css`
     display: flex;
     flex: 0 0 auto;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 12px;
 
-    width: 56px;
+    width: 52px;
     height: 100%;
     padding: 10px 0;
-    border-inline-end: 1px solid ${cssVar.colorBorderSecondary};
 
-    background: var(--gren-sidebar-bg, ${cssVar.colorBgLayout});
+    background: var(--gren-rail-bg, ${cssVar.colorBgLayout});
   `,
   spacer: css`
     flex: 1;
@@ -52,10 +51,10 @@ const styles = createStaticStyles(({ css }) => ({
     align-items: center;
     justify-content: center;
 
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
     border: none;
-    border-radius: 10px;
+    border-radius: 8px;
 
     color: ${cssVar.colorTextSecondary};
 
@@ -68,30 +67,16 @@ const styles = createStaticStyles(({ css }) => ({
 
     &:hover {
       color: ${cssVar.colorText};
-      background: ${cssVar.colorFillTertiary};
+      background: var(--gren-sidebar-hover-bg, ${cssVar.colorFillTertiary});
     }
   `,
   itemActive: css`
-    color: ${cssVar.colorText};
-    background: ${cssVar.colorFill};
-
-    /* 左侧主色指示条：只靠底色区分在暗色下辨识度不足，加一条竖条一眼看出当前模块。 */
-    &::before {
-      content: '';
-
-      position: absolute;
-      inset-block: 9px;
-      /* rail 56px / 按钮 42px → 左右各 7px 余量；-5 让指示条离窗口边缘留 2px。 */
-      inset-inline-start: -5px;
-
-      width: 3px;
-      border-radius: 0 3px 3px 0;
-
-      background: ${cssVar.colorPrimary};
-    }
+    color: var(--gren-accent, ${cssVar.colorPrimary});
+    background: color-mix(in srgb, var(--gren-accent, ${cssVar.colorPrimary}) 12%, transparent);
 
     &:hover {
-      background: ${cssVar.colorFill};
+      color: var(--gren-accent, ${cssVar.colorPrimary});
+      background: color-mix(in srgb, var(--gren-accent, ${cssVar.colorPrimary}) 16%, transparent);
     }
   `,
 }));
@@ -137,7 +122,7 @@ export function ModuleRail() {
         }
         className={cx(styles.item, active && styles.itemActive)}
       >
-        <Icon size={20} />
+        <Icon size={18} />
       </button>
     );
   };

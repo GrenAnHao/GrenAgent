@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { createIdbStorage } from '../../../lib/idbStorage';
+import { createComposerFilesStorage } from './composerFilesStorage';
 import type { ImageAttachment } from './ChatInputContext';
 import type { PastedText } from './editor/types';
 
@@ -24,6 +24,11 @@ interface ComposerFilesState {
    * 见 .agents/notes/implemented/feature/2026-10-19-composer-draft-full-restore.md
    */
   byKey: Record<string, ComposerFiles>;
+  adoptions: Record<string, string>;
+  removed: Record<string, true>;
+  resolveKey: (key: string) => string | null;
+  adopt: (from: string, to: string) => void;
+  remove: (key: string) => void;
   addAttachments: (key: string, items: ImageAttachment[]) => void;
   removeAttachment: (key: string, index: number) => void;
   addPastedText: (key: string, text: PastedText) => void;
@@ -95,16 +100,42 @@ export function mergeComposerFiles(
 
 export const useComposerFilesStore = create<ComposerFilesState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       byKey: {},
+      adoptions: {},
+      removed: {},
+      resolveKey: (key) => {
+        const s = get();
+        const target = s.adoptions[key] ?? key;
+        return s.removed[target] ? null : target;
+      },
+      adopt: (from, to) => set((s) => {
+        if (!from || !to || from === to || s.removed[to]) return s;
+        const byKey = { ...s.byKey };
+        if (!(to in byKey) && from in byKey) byKey[to] = byKey[from];
+        delete byKey[from];
+        return { byKey, adoptions: { ...s.adoptions, [from]: to } };
+      }),
+      remove: (key) => set((s) => {
+        const target = s.adoptions[key] ?? key;
+        const byKey = { ...s.byKey };
+        delete byKey[target];
+        delete byKey[key];
+        return { byKey, removed: { ...s.removed, [target]: true } };
+      }),
       addAttachments: (key, items) =>
         set((s) => {
-          if (items.length === 0) return s;
+          const target = s.resolveKey(key);
+          if (!target || items.length === 0) return s;
+          key = target;
           const cur = s.byKey[key] ?? EMPTY_COMPOSER_FILES;
           return { byKey: withBucket(s.byKey, key, { ...cur, attachments: [...cur.attachments, ...items] }) };
         }),
       removeAttachment: (key, index) =>
         set((s) => {
+          const target = s.resolveKey(key);
+          if (!target) return s;
+          key = target;
           const cur = s.byKey[key];
           if (!cur) return s;
           return {
@@ -113,21 +144,33 @@ export const useComposerFilesStore = create<ComposerFilesState>()(
         }),
       addPastedText: (key, text) =>
         set((s) => {
+          const target = s.resolveKey(key);
+          if (!target) return s;
+          key = target;
           const cur = s.byKey[key] ?? EMPTY_COMPOSER_FILES;
           return { byKey: withBucket(s.byKey, key, { ...cur, pastedTexts: [...cur.pastedTexts, text] }) };
         }),
       removePastedText: (key, id) =>
         set((s) => {
+          const target = s.resolveKey(key);
+          if (!target) return s;
+          key = target;
           const cur = s.byKey[key];
           if (!cur) return s;
           return { byKey: withBucket(s.byKey, key, { ...cur, pastedTexts: cur.pastedTexts.filter((p) => p.id !== id) }) };
         }),
       restore: (key, files) =>
-        set((s) => ({
-          byKey: withBucket(s.byKey, key, { attachments: files.attachments.slice(), pastedTexts: files.pastedTexts.slice() }),
-        })),
+        set((s) => {
+          const target = s.resolveKey(key);
+          return target ? {
+            byKey: withBucket(s.byKey, target, { attachments: files.attachments.slice(), pastedTexts: files.pastedTexts.slice() }),
+          } : s;
+        }),
       clear: (key) =>
         set((s) => {
+          const target = s.resolveKey(key);
+          if (!target) return s;
+          key = target;
           if (!(key in s.byKey)) return s;
           const rest = { ...s.byKey };
           delete rest[key];
@@ -136,15 +179,17 @@ export const useComposerFilesStore = create<ComposerFilesState>()(
     }),
     {
       name: 'pi-composer-files',
-      storage: createJSONStorage(() => createIdbStorage('pi-composer-files')),
+      storage: createJSONStorage(createComposerFilesStorage),
       partialize: (s) => ({ byKey: stripAttachmentUrls(s.byKey) }),
-      merge: (persisted, current) => ({
-        ...current,
-        byKey: mergeComposerFiles(
-          reviveComposerFiles((persisted as { byKey?: unknown } | undefined)?.byKey),
-          current.byKey,
-        ),
-      }),
+      merge: (persisted, current) => {
+        const saved = reviveComposerFiles((persisted as { byKey?: unknown } | undefined)?.byKey);
+        const restored: Record<string, ComposerFiles> = {};
+        for (const [key, files] of Object.entries(saved)) {
+          const target = current.adoptions[key] ?? key;
+          if (!current.removed[target]) restored[target] = files;
+        }
+        return { ...current, byKey: mergeComposerFiles(restored, current.byKey) };
+      },
     },
   ),
 );

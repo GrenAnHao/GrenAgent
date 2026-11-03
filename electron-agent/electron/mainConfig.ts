@@ -6,10 +6,16 @@ export function resolveRendererHtml(appPath: string): string {
   return join(appPath, "dist", "index.html");
 }
 
-/** unpackaged：相对 main 编译目录；packaged：asar 根下的 build/icon.ico。 */
-export function resolveAppIcon(packaged: boolean, appPath: string, mainDir: string): string {
-  if (packaged) return join(appPath, 'build', 'icon.ico');
-  return join(mainDir, '../../build/icon.ico');
+/** Resolve committed platform artwork from the repo or packaged asar root. */
+export function resolveAppIcon(
+  packaged: boolean,
+  appPath: string,
+  mainDir: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const file = platform === 'win32' ? 'icon.ico' : 'icon.png';
+  if (packaged) return join(appPath, 'build', file);
+  return join(mainDir, '../../build', file);
 }
 
 export const browserWindowOptions: BrowserWindowConstructorOptions = {

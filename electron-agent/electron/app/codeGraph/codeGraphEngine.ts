@@ -1,11 +1,13 @@
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import type { CodeGraph, IndexProgress } from '@colbymchenry/codegraph';
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from '../../agentData/codeRetrievalProtocol';
 import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import { executeCodeGraphTool } from './codeGraphQuery';
 import { timeSync } from '../../agentData/methodTiming';
 import { isIndexed } from './indexProbe';
+import { closeIndexVersions, indexDataVersion, observeRead } from './readConsistency';
 import type { SyncView } from './syncScheduler';
 
 export const CODEGRAPH_SDK_VERSION = '1.6.2';
@@ -51,7 +53,12 @@ export interface CodeGraphStatusView extends Partial<SyncView> {
   /** 自动同步是否开启（GREN_CODEGRAPH_AUTO_SYNC=off 时为 false）。 */
   autoSync?: boolean;
 }
-export interface CodeGraphEngineOptions { loadSdk?: () => Promise<CodeGraphSdk>; idleTimeoutMs?: number }
+export interface CodeGraphEngineOptions {
+  loadSdk?: () => Promise<CodeGraphSdk>;
+  idleTimeoutMs?: number;
+  /** 测试注入。不给就读索引库上的 PRAGMA data_version。 */
+  dataVersion?: (workspace: string) => number | undefined;
+}
 interface Entry { graph?: CodeGraph; opening?: Promise<CodeGraph>; timer?: ReturnType<typeof setTimeout>; pinned?: boolean }
 interface Job { workspace: string; controller: AbortController; promise: Promise<SyncOutcome> }
 interface Watcher { start(): boolean; stop(): void }
@@ -69,6 +76,7 @@ export class CodeGraphEngine {
   /** refresh 换下来的旧连接：等它们手上的读结束再关，close() 要等它们。 */
   private readonly retiring = new Set<Promise<void>>();
   private sdk?: Promise<CodeGraphSdk>;
+  private readonly versions = new Map<string, DatabaseSync>();
   private closed = false;
   private shutdown?: Promise<void>;
 
@@ -100,7 +108,9 @@ export class CodeGraphEngine {
     const name = readCodeRetrievalTool(tool);
     const validated = validateCodeRetrievalArgs(workspace, name, args);
     // 只计到它第一次 await 为止；explore / context 内部还有 await，后半段不在统计里。
-    return this.read(workspace, (graph) => timeSync(`codegraph.${name}`, () => executeCodeGraphTool(graph, workspace, name, validated)));
+    // 调用前后比对 data_version：提交插进来就重试一次，还撞上就标 mixed。
+    const version = this.options.dataVersion ?? ((root: string) => indexDataVersion(root, this.versions));
+    return observeRead(() => version(workspace), () => this.read(workspace, (graph) => timeSync(`codegraph.${name}`, () => executeCodeGraphTool(graph, workspace, name, validated))));
   }
 
   /** 与 runSync 不给 mode 时同一条判断；调度器据此决定这次同步期间同工作区的读要不要停。 */
@@ -253,6 +263,7 @@ export class CodeGraphEngine {
     this.shutdown = Promise.allSettled(active).then(() => {
       for (const entry of this.entries.values()) entry.graph?.close();
       this.entries.clear();
+      closeIndexVersions(this.versions);
     });
     return this.shutdown;
   }

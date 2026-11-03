@@ -155,6 +155,7 @@ function serializePrepared(prepared: PreparedEmbedded): SerializedPrepared {
     workspace: prepared.workspace,
     ctx: { origin: "subagent", workspace: prepared.ctx.workspace, cwd: prepared.ctx.cwd, config: prepared.ctx.config },
     ...(parentSessionId ? { parentSessionId } : {}),
+    routingMode: prepared.routingMode,
   };
 }
 
@@ -431,6 +432,8 @@ export async function resumeWorkerChildSession(sessionPath: string, childId?: st
   }
   conn.child.once("exit", release);
   const proxy = new WorkerSessionProxy(conn, undefined, childId);
+  // 宿主自己的域配置跟着进程走；真正的域在 worker 里由 openResumedChildSession 按会话标记重建，
+  // 不把宿主父会话的配置当子会话的域。
   const ctx = { origin: "subagent" as const, workspace: als?.workspace ?? cwd, cwd, config: { ...(als?.config ?? {}) } };
   let resumed: WorkerResumed;
   try {
@@ -448,6 +451,7 @@ export async function resumeWorkerChildSession(sessionPath: string, childId?: st
     session: proxy.session(resumed) as unknown as AgentSessionLike,
     sessionManager: proxy.sessionManager(sessionPath),
     cwd: resumed.cwd,
+    routingMode: resumed.routingMode === "ultra" ? "ultra" : "ordinary",
     // 子会话在 worker 里，审批路由也登记在 worker 里；宿主这边由 Activation 登记。
     unsub: () => {},
   };

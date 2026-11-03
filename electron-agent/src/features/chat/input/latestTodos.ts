@@ -1,4 +1,4 @@
-import { coerceTodoStatus, normalizeTodos, type Todo } from '@extensions/_shared/todo-model';
+import { closeFinishedTodos, coerceTodoStatus, normalizeTodos, type Todo } from '@extensions/_shared/todo-model';
 import type { ChatMessage } from '../../../stores/agentReducer';
 import { getDetails } from '../../tools/toolUtils';
 
@@ -38,13 +38,13 @@ function todosFromTool(message: Extract<ChatMessage, { kind: 'tool' }>): Todo[] 
   return todosFromArgs(message.args);
 }
 
-function latestTodoSnapshot(messages: readonly ChatMessage[]): { index: number; todos: Todo[] } | null {
+function latestTodoSnapshot(messages: readonly ChatMessage[]): { index: number; todos: Todo[]; committed: boolean } | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     if (message.kind !== 'tool' || message.toolName.toLowerCase() !== 'todo') continue;
     const todos = todosFromTool(message);
     if (todos == null) continue;
-    return { index: i, todos };
+    return { index: i, todos, committed: message.status === 'done' };
   }
   return null;
 }
@@ -61,5 +61,6 @@ export function dockTodos(messages: readonly ChatMessage[], listFinished: boolea
   const noPending = snapshot.todos.every((todo) => todo.status !== 'pending');
   const finished = noPending && (listFinished || snapshot.todos.every((todo) => todo.status === 'completed'));
   if (nextRound && finished) return null;
-  return snapshot.todos;
+  // 已确认收尾属于这份成功快照；新调用的乐观参数不能继承旧清单的完成标记。
+  return listFinished && snapshot.committed ? closeFinishedTodos(snapshot.todos) ?? snapshot.todos : snapshot.todos;
 }

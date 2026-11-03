@@ -113,26 +113,61 @@ export interface DockTab {
   ownerSessionPath?: string | null;
   /** 归属会话所在工作区（草稿会话靠它区分）。 */
   ownerWorkspace?: string;
+  /**
+   * 草稿会话的独立身份（`draft:<uuid>`）。同项目两份未落盘草稿各有自己的标签与展开态；
+   * 缺省（旧数据）表示这份草稿标签只按工作区归属，兼容一次。
+   */
+  ownerDraftId?: string;
 }
 
-/** 当前正在查看的聊天会话。sessionPath 为 null 表示草稿。 */
+/** 当前正在查看的聊天会话。sessionPath 为 null 表示草稿（draftId 区分同项目的多份草稿）。 */
 export interface DockSessionView {
   sessionPath: string | null;
   workspace: string;
+  draftId?: string | null;
 }
 
-export type DockTabOwner = Pick<DockTab, 'ownerSessionPath' | 'ownerWorkspace'>;
+export type DockTabOwner = Pick<DockTab, 'ownerSessionPath' | 'ownerWorkspace' | 'ownerDraftId'>;
+
+/** 一定能落到某份会话视图的 owner（会话路径或草稿 + 工作区；draftId 只对草稿有值）。 */
+export interface DockTabOwnerRecord {
+  ownerSessionPath: string | null;
+  ownerWorkspace: string;
+  ownerDraftId?: string;
+}
+
+/** 会话 store 快照里正在查看的会话（'' / null 都算草稿）。 */
+export function dockViewOfState(st: {
+  activeSessionPath?: string | null;
+  activeWorkspace?: string | null;
+  draftConversationCwd?: string | null;
+  draftConversationId?: string | null;
+}): DockSessionView {
+  const sessionPath = st.activeSessionPath || null;
+  const workspace = st.activeWorkspace ?? '';
+  if (sessionPath) return { sessionPath, workspace };
+  // 草稿：只有当前工作区的未落盘草稿才有 draftId，别把别的项目的草稿身份借过来。
+  const draftHere = Boolean(st.draftConversationCwd && pathsEquivalent(st.draftConversationCwd, workspace));
+  return {
+    sessionPath,
+    workspace,
+    ...(draftHere && st.draftConversationId ? { draftId: st.draftConversationId } : {}),
+  };
+}
 
 /** 从会话 store 读取正在查看的会话（'' / null 都算草稿）。 */
 export function currentDockView(): DockSessionView {
-  const st = useSessionStore.getState();
-  return { sessionPath: st.activeSessionPath || null, workspace: st.activeWorkspace ?? '' };
+  return dockViewOfState(useSessionStore.getState());
 }
 
 /** 打开会话归属 tab 时记录的 owner 字段。 */
-export function currentDockOwner(): Required<DockTabOwner> {
+export function currentDockOwner(): DockTabOwnerRecord {
   const view = currentDockView();
-  return { ownerSessionPath: view.sessionPath, ownerWorkspace: view.workspace };
+  return {
+    ownerSessionPath: view.sessionPath,
+    ownerWorkspace: view.workspace,
+    ...(view.sessionPath || !view.draftId ? {} : { ownerDraftId: view.draftId }),
+  };
 }
 
 /**
@@ -144,7 +179,15 @@ export function dockOwnerFromStore(
   workspace: string,
 ): DockTabOwner {
   if (!store?.getLoadedSessionPath) return {};
-  return { ownerSessionPath: store.getLoadedSessionPath() ?? null, ownerWorkspace: workspace };
+  const sessionPath = store.getLoadedSessionPath() ?? null;
+  // 草稿身份以当前视图为准（store 只知道自己加载的会话路径，不知道草稿 id）。
+  const view = currentDockView();
+  const draftId = !sessionPath && view.sessionPath === null ? view.draftId : undefined;
+  return {
+    ownerSessionPath: sessionPath,
+    ownerWorkspace: workspace,
+    ...(draftId ? { ownerDraftId: draftId } : {}),
+  };
 }
 
 export function isSessionOwnedKind(kind: DockTabKind): boolean {
@@ -155,19 +198,29 @@ function normKey(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
-/** 会话视图的 map key（草稿按工作区区分）。 */
+/**
+ * 会话视图的 map key：会话按路径；草稿按「工作区 + draftId」。
+ * 旧数据没有 draftId 时退回只按工作区（兼容一次）。
+ */
 export function dockSessionKey(view: DockSessionView): string {
-  return view.sessionPath ? `s:${normKey(view.sessionPath)}` : `d:${normKey(view.workspace)}`;
+  if (view.sessionPath) return `s:${normKey(view.sessionPath)}`;
+  const base = `d:${normKey(view.workspace)}`;
+  return view.draftId ? `${base}#${view.draftId}` : base;
 }
 
 function ownerMatches(tab: DockTab, view: DockSessionView): boolean {
-  if (tab.ownerSessionPath == null) return !view.sessionPath && pathsEquivalent(tab.ownerWorkspace ?? '', view.workspace);
+  if (tab.ownerSessionPath == null) {
+    if (view.sessionPath || !pathsEquivalent(tab.ownerWorkspace ?? '', view.workspace)) return false;
+    // 有草稿身份的标签只在那份草稿里可见；旧数据没有身份时才按工作区兜底。
+    if (tab.ownerDraftId) return tab.ownerDraftId === view.draftId;
+    return true;
+  }
   return Boolean(view.sessionPath) && pathsEquivalent(tab.ownerSessionPath, view.sessionPath as string);
 }
 
 /** 归属 owner 的会话是不是正在画面上。后台会话打开 tab 时不能抢占当前画面。 */
-export function isDockOwnerViewed(owner: Required<DockTabOwner>, view: DockSessionView = currentDockView()): boolean {
-  return ownerMatches({ ownerSessionPath: owner.ownerSessionPath, ownerWorkspace: owner.ownerWorkspace } as DockTab, view);
+export function isDockOwnerViewed(owner: DockTabOwner, view: DockSessionView = currentDockView()): boolean {
+  return ownerMatches(owner as DockTab, view);
 }
 
 /** 全局 tab 总可见；会话归属 tab 只在归属会话里可见。 */
@@ -236,7 +289,9 @@ interface DockState {
   addTab: (input: Omit<DockTab, 'order'> & { order?: number }) => void;
   updateTab: (
     id: string,
-    patch: Partial<Pick<DockTab, 'title' | 'payload' | 'touchedAt' | 'ownerSessionPath' | 'ownerWorkspace'>>,
+    patch: Partial<
+      Pick<DockTab, 'title' | 'payload' | 'touchedAt' | 'ownerSessionPath' | 'ownerWorkspace' | 'ownerDraftId'>
+    >,
   ) => void;
   closeTab: (id: string) => void;
   restoreClosedTab: (id: string, closedAt: number) => void;
@@ -255,7 +310,7 @@ interface DockState {
    * 草稿首发落盘成会话：草稿名下的标签和右面板状态过户给新会话。必须在 setActiveSession(新路径) 之前调，
    * 随后那次「草稿 → 新会话」的切换不再当成换会话处理。
    */
-  adoptDraftView: (workspace: string, sessionPath: string) => void;
+  adoptDraftView: (workspace: string, sessionPath: string, draftId?: string | null) => void;
   /** 删除会话时丢弃它名下的 tab。 */
   dropSessionTabs: (sessionPath: string, wasViewed?: boolean) => void;
 }
@@ -271,11 +326,26 @@ export interface SubAgentOpenInput {
   ownerWorkspace?: string;
 }
 
-function ownerOf(input: DockTabOwner): Required<DockTabOwner> {
+function ownerOf(input: DockTabOwner): DockTabOwnerRecord {
+  const current = currentDockOwner();
   if (input.ownerSessionPath !== undefined) {
-    return { ownerSessionPath: input.ownerSessionPath, ownerWorkspace: input.ownerWorkspace ?? currentDockView().workspace };
+    if (input.ownerSessionPath != null) {
+      return {
+        ownerSessionPath: input.ownerSessionPath,
+        ownerWorkspace: input.ownerWorkspace ?? current.ownerWorkspace,
+      };
+    }
+    return {
+      ownerSessionPath: null,
+      ownerWorkspace: input.ownerWorkspace ?? current.ownerWorkspace,
+      ...(input.ownerDraftId
+        ? { ownerDraftId: input.ownerDraftId }
+        : input.ownerWorkspace === undefined || pathsEquivalent(input.ownerWorkspace, current.ownerWorkspace)
+          ? (current.ownerDraftId ? { ownerDraftId: current.ownerDraftId } : {})
+          : {}),
+    };
   }
-  return currentDockOwner();
+  return current;
 }
 
 /**
@@ -289,9 +359,10 @@ function withRightOwner<T extends DockTabOwner & { region: DockRegion }>(tab: T)
 
 /** 回到底部区的非会话类 tab（终端等）重新全局共享，和底部区原来的语义一致。 */
 function withoutOwner(tab: DockTab): DockTab {
-  const { ownerSessionPath: _p, ownerWorkspace: _w, ...rest } = tab;
+  const { ownerSessionPath: _p, ownerWorkspace: _w, ownerDraftId: _d, ...rest } = tab;
   void _p;
   void _w;
+  void _d;
   return rest;
 }
 
@@ -733,25 +804,40 @@ export const useDockStore = create<DockState>()(
         if (fill !== useLayoutStore.getState().rightPanelFill) useLayoutStore.setState({ rightPanelFill: fill });
       },
 
-      adoptDraftView: (workspace, sessionPath) => {
+      adoptDraftView: (workspace, sessionPath, draftId) => {
         if (!workspace || !sessionPath) return;
-        const from = dockSessionKey({ sessionPath: null, workspace });
+        // 同一项目可能同时有多份未落盘草稿：给了 draftId 就只过户那一份；没有身份时按工作区兜底（兼容旧调用）。
+        const from = dockSessionKey({ sessionPath: null, workspace, draftId: draftId ?? null });
         const to = dockSessionKey({ sessionPath, workspace });
-        const draftOwned = (o: DockTabOwner) =>
-          o.ownerSessionPath === null && pathsEquivalent(o.ownerWorkspace ?? '', workspace);
+        const draftOwned = (o: DockTabOwner) => {
+          if (o.ownerSessionPath !== null) return false;
+          if (!pathsEquivalent(o.ownerWorkspace ?? '', workspace)) return false;
+          if (!draftId) return true;
+          return o.ownerDraftId === draftId;
+        };
         set((s) => {
           const { [from]: draftActive, ...activeBySession } = s.activeBySession;
           const { [from]: draftOpen, ...rightOpenBySession } = s.rightOpenBySession;
           const { [from]: draftFill, ...rightFillBySession } = s.rightFillBySession;
+          const adoptTab = <T extends DockTabOwner>(t: T): T => {
+            if (!draftOwned(t)) return t;
+            const { ownerDraftId: _d, ...rest } = t;
+            void _d;
+            return { ...rest, ownerSessionPath: sessionPath } as T;
+          };
           return {
-            tabs: s.tabs.map((t) => (draftOwned(t) ? { ...t, ownerSessionPath: sessionPath } : t)),
-            closedTabs: s.closedTabs.map((c) => (draftOwned(c) ? { ...c, ownerSessionPath: sessionPath } : c)),
+            tabs: s.tabs.map(adoptTab),
+            closedTabs: s.closedTabs.map(adoptTab),
             activeBySession: draftActive ? { ...activeBySession, [to]: draftActive } : activeBySession,
             rightOpenBySession: draftOpen === undefined ? rightOpenBySession : { ...rightOpenBySession, [to]: draftOpen },
             rightFillBySession: draftFill === undefined ? rightFillBySession : { ...rightFillBySession, [to]: draftFill },
           };
         });
-        pendingDraftAdoption = { from, to };
+        // 只有当前画面确实停在这份草稿上，随后的「草稿 → 新会话」才算过户切换；
+        // 后台草稿首发结束时当前画面可能是别的会话（甚至另一份草稿），那次标记会误吃掉下一次无关切换。
+        const current = currentDockView();
+        pendingDraftAdoption =
+          current.sessionPath === null && dockSessionKey(current) === from ? { from, to } : null;
       },
 
       dropSessionTabs: (sessionPath, wasViewed = false) => {

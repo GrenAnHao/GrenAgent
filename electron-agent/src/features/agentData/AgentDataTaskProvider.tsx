@@ -16,6 +16,7 @@ interface AgentDataTaskMonitor {
   watchedTaskVersion: number;
   /** 服务端活动任务计数（含系统任务）；未获取时为 undefined。 */
   activeCount?: number;
+  pollingCount?: number;
 }
 
 interface MonitorRuntime {
@@ -28,6 +29,7 @@ interface MonitorRuntime {
   tasks: TaskView[];
   pages: number;
   activeCount?: number;
+  pollingCount?: number;
   nextCursor?: string;
   moreRequested: boolean;
   tracked: Map<string, { ref: TaskRef; view: AgentDataTab }>;
@@ -38,11 +40,13 @@ interface MonitorRuntime {
 }
 
 const Context = createContext<AgentDataTaskMonitor | undefined>(undefined);
-const isActive = (task: TaskView) => ['pending', 'queued', 'running', 'blocked'].includes(task.status);
+const isActive = (task: TaskView) => ['pending', 'queued', 'running', 'paused', 'blocked'].includes(task.status);
+const isPolling = (task: TaskView) => ['pending', 'queued', 'running'].includes(task.status);
 const taskKey = (ref: TaskRef) => `${ref.source}:${ref.id}`;
 const canFetch = (state: MonitorRuntime) => state.mounted && state.visible && state.focused && !document.hidden;
-const shouldPoll = (state: MonitorRuntime) => state.view === 'overview' || state.view === 'jobs'
-  ? (state.activeCount === undefined ? state.tasks.some(isActive) : state.activeCount > 0) || state.tracked.size > 0
+// Repo Wiki's project collection shows every live generation task, so it polls like the task views.
+const shouldPoll = (state: MonitorRuntime) => state.view === 'overview' || state.view === 'jobs' || state.view === 'repoWiki'
+  ? (state.pollingCount === undefined ? state.activeCount === undefined ? state.tasks.some(isPolling) : state.activeCount > state.tasks.filter(task => ['paused', 'blocked'].includes(task.status)).length : state.pollingCount > 0) || state.tracked.size > 0
   : [...state.tracked.values()].some((tracked) => tracked.view === state.view);
 function clearTimer(state: MonitorRuntime) {
   clearTimeout(state.timer);
@@ -59,6 +63,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
   const [loaded, setLoaded] = useState(false);
   const [watchedTaskVersion, setWatchedTaskVersion] = useState(0);
   const [serverActiveCount, setServerActiveCount] = useState<number>();
+  const [serverPollingCount, setServerPollingCount] = useState<number>();
   const runtime = useRef<MonitorRuntime>({
     visible, view: activeView, focused: false, mounted: false, awake: false, generation: 0,
     tasks: [], pages: 1, moreRequested: false, tracked: new Map(), settled: new Set(), refreshAgain: false,
@@ -87,6 +92,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
           const nextTasks: TaskView[] = [];
           let cursor: string | undefined;
           let activeCount: number | undefined;
+          let pollingCount: number | undefined;
           let fetched = 0;
           do {
             if (!canFetch(state) || !isCurrent()) break;
@@ -94,6 +100,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
             if (!isCurrent()) break;
             nextTasks.push(...page.items);
             activeCount = page.activeCount;
+            pollingCount = page.pollingCount;
             cursor = page.nextCursor;
             fetched++;
           } while (cursor && fetched < pageCount);
@@ -114,6 +121,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
           for (const ref of trackedRefs) {
             const id = taskKey(ref);
             const observed = nextTasks.find((task) => task.key === id);
+            if (observed && ['paused', 'blocked'].includes(observed.status)) { state.tracked.delete(id); continue; }
             if (!missing.has(id) && (!observed || isActive(observed))) continue;
             state.tracked.delete(id);
             if (!state.settled.has(id)) {
@@ -135,10 +143,12 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
           const nextJobs = unique.filter((task) => task.ref.source === 'user').map(projectJob);
           state.tasks = unique;
           state.activeCount = activeCount;
+          state.pollingCount = pollingCount;
           state.pages = Math.max(1, fetched);
           state.nextCursor = cursor;
           setTasks(unique); setNextCursor(cursor);
           setServerActiveCount(activeCount !== undefined && Number.isSafeInteger(activeCount) && activeCount >= 0 ? activeCount : undefined);
+          setServerPollingCount(pollingCount !== undefined && Number.isSafeInteger(pollingCount) && pollingCount >= 0 ? pollingCount : undefined);
           setJobs(nextJobs);
           setLoaded(true);
           setError(undefined);
@@ -197,7 +207,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
     updateGate();
     if (wasAwake && state.awake && viewChanged) {
       clearTimer(state);
-      if (shouldPoll(state)) void refresh();
+      if (activeView === 'jobs' || activeView === 'overview' || shouldPoll(state)) void refresh();
     }
   }, [visible, activeView, refresh, updateGate]);
 
@@ -217,11 +227,11 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
     await refresh();
   }, [refresh]);
 
-  return <Context.Provider value={{ jobs, tasks, nextCursor, loadingMore, loadMore, error, loading, loaded, refresh, track, watchedTaskVersion, activeCount: serverActiveCount }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ jobs, tasks, nextCursor, loadingMore, loadMore, error, loading, loaded, refresh, track, watchedTaskVersion, activeCount: serverActiveCount, pollingCount: serverPollingCount }}>{children}</Context.Provider>;
 }
 
 function projectJob(task: TaskView): AgentJob {
-  const state: AgentJob['state'] = task.status === 'queued' ? 'pending' : task.status === 'blocked' ? 'running' : task.status;
+  const state: AgentJob['state'] = task.status === 'queued' ? 'pending' : task.status;
   return { id: task.ref.id, kind: task.kind, workspace: task.workspace ?? '', state, progress: task.progress ?? 0,
     createdAt: task.createdAt, updatedAt: task.updatedAt, ...(task.error ? { error: task.error } : {}),
     ...(task.resource || task.cancellationRequested || task.stage || task.retryOf ? { metadata: {

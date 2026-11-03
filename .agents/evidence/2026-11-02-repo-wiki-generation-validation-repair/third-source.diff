@@ -1,0 +1,35 @@
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/third-preimage/validation.ts b/electron/agentData/knowledgeKernel/validation.ts
+index db70858..e440042 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/third-preimage/validation.ts
++++ b/electron/agentData/knowledgeKernel/validation.ts
+@@ -49,7 +49,12 @@ export function normalizeStageSources(phase: Phase, payload: unknown, files: Rec
+   const cited=result.sources as SourceReference[];
+   const replacements=[];const remove=[];
+   for(const link of markdownLinks(result.markdown)){
+-   const target=resolveWikiLink(link.url,context.pageId);
++   // Some models emit source:path:line[-line]; accept only the unambiguous,
++   // valid line form, then run it through the same source resolver and evidence checks.
++   const colon=link.url.match(/^source:([^:?#]+):(\d+)(?:-(\d+))?$/);
++   const startLine=colon?Number(colon[2]):0,endLine=colon?Number(colon[3]??colon[2]):0;
++   const colonHref=colon&&Number.isSafeInteger(startLine)&&Number.isSafeInteger(endLine)&&startLine>0&&endLine>=startLine?`source:${colon[1]}#L${startLine}-L${endLine}`:undefined;
++   const target=resolveWikiLink(colonHref??link.url,context.pageId);
+    const path=target.kind==='source'?target.path:target.kind==='page'&&!context.pageIds?.includes(target.pageId)?(files[target.resolvedPath]?target.resolvedPath:!target.path.split('/').includes('..')?target.path.replace(/^(?:\.\/)+/,''):target.resolvedPath):undefined;
+    if(!path||!files[path]){if(target.kind==='source')remove.push(link);continue;}
+    const start=target.kind==='source'?target.start:undefined,end=target.kind==='source'?target.end:undefined;
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/third-preimage/validation.test.ts b/electron/agentData/knowledgeKernel/validation.test.ts
+index 6a22b6a..f8b0a97 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/third-preimage/validation.test.ts
++++ b/electron/agentData/knowledgeKernel/validation.test.ts
+@@ -69,3 +69,12 @@ describe('rendered Markdown link validation',()=>{
+   expect(stageFailure(new Error('C:\\private\\repo\\file.md?token=secret'))).toEqual({code:'STAGE_FAILED',message:'Stage failed (STAGE_FAILED)',retriable:false});
+  });
+ });
++it('normalizes source colon line citations only with verified manifest and Read ranges',()=>{
++ const result=normalize('[one](source:README.md:2) [range](source:README.md:3-5) [encoded](source:docs/guide%20name.md:1-6)');
++ expect(result.markdown).toBe('[one](source:README.md#L2-L2) [range](source:README.md#L3-L5) [encoded](source:docs/guide%20name.md#L1-L6)');
++ expect(()=>validateStageResult(request,result)).not.toThrow();
++ const unverified=normalize('[unread](source:unread.md:1) [range](source:README.md:1-9)');expect(unverified.markdown).toBe('unread range');
++ for(const link of ['source:../../README.md:1','source:/README.md:1','source:https://host/a:1','source:README.md:0','source:README.md:5-2','source:README.md:2?secret=x']){
++  const result=normalize(`[x](${link})`);expect(()=>validateStageResult(request,result)).toThrow();
++ }
++});

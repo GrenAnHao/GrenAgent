@@ -1,0 +1,51 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+ ❯ |main| electron/app/uiHistoryService.ordering.test.ts (3 tests | 2 failed) 13ms
+     × 删除等待先前写入，旧 todo 历史不能在删除后复活 8ms
+     × 读取等待先前写入，不返回旧任务快照 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |main| electron/app/uiHistoryService.ordering.test.ts > UI history operation ordering > 删除等待先前写入，旧 todo 历史不能在删除后复活
+AssertionError: expected 'stale todo' to be '' // Object.is equality
+
+- Expected
++ Received
+
++ stale todo
+
+ ❯ electron/app/uiHistoryService.ordering.test.ts:44:49
+     42|     gate.resolve();
+     43|     await Promise.all([write, deletion]);
+     44|     expect(await service.read('/repo', 'todo')).toBe('');
+       |                                                 ^
+     45|   });
+     46|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |main| electron/app/uiHistoryService.ordering.test.ts > UI history operation ordering > 读取等待先前写入，不返回旧任务快照
+AssertionError: expected '' to be 'completed todo' // Object.is equality
+
+- Expected
++ Received
+
+- completed todo
+
+ ❯ electron/app/uiHistoryService.ordering.test.ts:59:24
+     57|     gate.resolve();
+     58|     await write;
+     59|     expect(await read).toBe('completed todo');
+       |                        ^
+     60|   });
+     61|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  15:14:54
+   Duration  1.34s (transform 209ms, setup 0ms, import 289ms, tests 13ms, environment 0ms)
+

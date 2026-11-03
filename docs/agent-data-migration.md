@@ -1,6 +1,6 @@
 # Agent Data 数据迁移说明
 
-Electron 版已移除旧的托管运行时路径，改用本地 Agent Data Runtime。Memory、Wiki RAG 和管理元数据统一存储在 Electron 用户数据目录下的 `agent-data.db`。
+Electron 版已移除旧的托管运行时路径，改用本地 Agent Data Runtime。Wiki RAG 和管理元数据统一存储在 Electron 用户数据目录下的 `agent-data.db`。
 
 ## 迁移策略
 
@@ -8,10 +8,13 @@ Electron 版已移除旧的托管运行时路径，改用本地 Agent Data Runti
 
 如需保留旧数据，请在清理旧运行时前使用其原有导出功能保存归档。新数据可通过管理 API 的 `admin.export`/`admin.import` 接口导出和导入；导入前应保留当前数据库备份。
 
+## 长期记忆移除
+
+AgentData Memory 已移除。启动迁移会清理旧分层记忆、捕获原文、游标、待处理记录和记忆专用任务、配置及审计数据，不保留归档，也不再接收这些数据的导入。Wiki、代码索引、线程与工具授权等共享数据保留；会话 JSONL 与 `session-memory` 的压缩摘要和工作状态继续保留。
+
 ## 数据范围
 
-- Memory：按用户、工作区和会话隔离，包含 L0-L3 记忆、捕获游标和待处理记录。
-- Wiki：按工作区隔离的 Markdown 页面、来源路径、分块 hash 和 FTS5 索引。
+- Wiki：`agent-data.db` 保存知识库元数据，独立的 `wiki/<wikiId>/` 目录保存原文、Markdown 页面与 FTS5 索引。
 - 管理：任务、模块配置、审计事件和诊断快照。
 
 应用退出时由主进程关闭 Runtime；正常关闭不会删除数据库。删除工作区数据应通过管理面板提供的明确操作执行，并在 UI 中显示确认结果。

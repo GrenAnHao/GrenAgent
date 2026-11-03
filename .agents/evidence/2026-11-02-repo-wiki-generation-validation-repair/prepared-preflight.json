@@ -1,0 +1,45 @@
+[
+  {
+    "pageId": "architecture",
+    "valid": true
+  },
+  {
+    "pageId": "getting-started",
+    "valid": true
+  },
+  {
+    "pageId": "modules/bin",
+    "valid": true
+  },
+  {
+    "pageId": "modules/notes/method",
+    "valid": false,
+    "error": "INVALID_PAGE_LINK: page modules/notes/method; target ../../scripts/evidence"
+  },
+  {
+    "pageId": "modules/notes/scripts",
+    "valid": false,
+    "error": "INVALID_PAGE_LINK: page modules/notes/scripts; target ../../scripts/cli"
+  },
+  {
+    "pageId": "modules/notes/templates",
+    "valid": true
+  },
+  {
+    "pageId": "modules/scripts/evidence",
+    "valid": true
+  },
+  {
+    "pageId": "modules/scripts/installer",
+    "valid": false,
+    "error": "INVALID_PAGE_LINK: page modules/scripts/installer; target ../../templates"
+  },
+  {
+    "pageId": "modules/templates",
+    "valid": true
+  },
+  {
+    "pageId": "overview",
+    "valid": true
+  }
+]

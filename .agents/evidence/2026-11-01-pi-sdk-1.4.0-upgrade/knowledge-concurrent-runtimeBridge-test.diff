@@ -1,0 +1,48 @@
+diff --git a/.tmp-pi-sdk-1.4/baseline-files/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.test.ts b/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.test.ts
+index d0106cac..8fa9fe5c 100644
+--- a/.tmp-pi-sdk-1.4/baseline-files/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.test.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.test.ts
+@@ -3,6 +3,7 @@ import { AgentDataStorage } from '../storage';
+ import { KnowledgeBuildStore } from './store';
+ import { create } from './testFixture';
+ import { createKnowledgeKernelRuntime } from './runtimeBridge';
++import { DEFAULT_KNOWLEDGE_BUDGETS } from '../../../shared/knowledgeKernelContracts';
+ 
+ const model = { bindingId: 'binding', expectedModel: 'test/model', expectedConfiguration: 'config', model: { id: 'model', name: 'model', api: 'openai-completions', provider: 'test', reasoning: false, input: ['text'], contextWindow: 16000, maxTokens: 2000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } } as any;
+ const usage = { input: 20, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 30, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+@@ -134,8 +135,8 @@ describe('knowledge kernel runtime bridge', () => {
+     try {
+       await runtime.ready;
+       const job = create(store), fence = store.claim('scope', job.id, 'owner', 0); store.beginAttempt(job.id, 'generate', 'page', fence, 'input');
+-      store.reserveExecutionBudget({ requestId: 'prior', taskId: job.id, fence, phase: 'generate', itemId: 'page', attempt: 1, kind: 'model', reserved: { totalTokens: 118000 } });
+-      store.finishExecutionBudget('prior', { totalTokens: 118000 });
++      store.reserveExecutionBudget({ requestId: 'prior', taskId: job.id, fence, phase: 'generate', itemId: 'page', attempt: 1, kind: 'model', reserved: { totalTokens: DEFAULT_KNOWLEDGE_BUDGETS.unit.maxTotalTokens - 2000 } });
++      store.finishExecutionBudget('prior', { totalTokens: DEFAULT_KNOWLEDGE_BUDGETS.unit.maxTotalTokens - 2000 });
+       await (runtime.coordinator as any).options.bindModel(job.id);
+       const input = { controllerEpoch: 'epoch', requestId: 'limited', taskId: job.id, fence, phase: 'generate', itemId: 'page', attempt: 1, bindingId: 'binding', transcript: { messages: [] }, options: { maxTokens: 2000 } };
+       await runtime.request('admin.knowledge.worker', { kind: 'model', input });
+@@ -143,4 +144,24 @@ describe('knowledge kernel runtime bridge', () => {
+       expect(store.getExecutionRequest('limited')!.reserved.totalTokens).toBe(2000);
+     } finally { await runtime.close(); storage.close(); }
+   });
++
++  it('estimates transcript tokens from bytes instead of counting each byte as a token', async () => {
++    const storage = new AgentDataStorage(':memory:'); storage.migrate();
++    const store = new KnowledgeBuildStore(storage.db, { controllerEpoch: 'epoch' });
++    const runtime = createKnowledgeKernelRuntime(storage.db, ports({ modelMessage: async () => ({ stopReason: 'stop', usage }) }));
++    try {
++      await runtime.ready;
++      const job = create(store), fence = store.claim('scope', job.id, 'owner', 0); store.beginAttempt(job.id, 'generate', 'page', fence, 'input');
++      // A later tool-loop turn: 60k already used and a ~30 KB transcript. Counting bytes as tokens
++      // would overflow this binding's 16k context window and report BUDGET_EXHAUSTED.
++      store.reserveExecutionBudget({ requestId: 'used', taskId: job.id, fence, phase: 'generate', itemId: 'page', attempt: 1, kind: 'model', reserved: { totalTokens: 60000 } });
++      store.finishExecutionBudget('used', { totalTokens: 60000 });
++      await (runtime.coordinator as any).options.bindModel(job.id);
++      const transcript = { messages: [{ role: 'user', content: 'x'.repeat(30000) }] };
++      const input = { controllerEpoch: 'epoch', requestId: 'fourth', taskId: job.id, fence, phase: 'generate', itemId: 'page', attempt: 1, bindingId: 'binding', transcript, options: { maxTokens: 2000 } };
++      await runtime.request('admin.knowledge.worker', { kind: 'model', input });
++      const reserved = store.getExecutionRequest('fourth')!.reserved.totalTokens!;
++      expect(reserved).toBeLessThan(Math.ceil(Buffer.byteLength(JSON.stringify(transcript)) / 2));
++    } finally { await runtime.close(); storage.close(); }
++  });
+ });

@@ -1,3 +1,5 @@
+import type { FilePickerOptions } from '../../electron/ipc/filePicker';
+
 export type RuntimeArgs = Record<string, unknown> | undefined;
 
 export type UnlistenFn = () => void;
@@ -38,6 +40,7 @@ export interface GrenRuntimeBridge {
   invoke<T>(command: string, args?: RuntimeArgs): Promise<T>;
   subscribe<T>(event: string, handler: (event: RuntimeEvent<T>) => void): Promise<UnlistenFn>;
   pickDirectory(): Promise<string | null>;
+  pickFile?(options?: FilePickerOptions): Promise<string | null>;
   openUrl(url: string): Promise<void>;
   openPath(path: string): Promise<void>;
   revealItemInDir(path: string): Promise<void>;
@@ -124,6 +127,12 @@ function serializeRuntimeArg(value: unknown): unknown {
 
 export function openDirectory(): Promise<string | null> {
   return bridge().pickDirectory();
+}
+
+export async function openFile(options?: FilePickerOptions): Promise<string | null> {
+  const runtime = bridge();
+  if (!runtime.pickFile) throw new Error('当前运行环境不支持文件选择，请重启或更新应用');
+  return runtime.pickFile(options);
 }
 
 export function openUrl(url: string): Promise<void> {

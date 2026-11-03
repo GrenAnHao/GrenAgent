@@ -1,0 +1,21 @@
+{
+  "kind": "pre-fix-observation",
+  "scope": "本会话上一轮文件链接修复的最后一次 todo",
+  "authoritative": {
+    "file": "C:/Users/rxstudio/.pi/agent/sessions/--D--OneDrive-Project Files-Pi--/2026-10-28T05-31-29-885Z_01a180fd-f6dd-7286-9055-c36d3b94b185.jsonl",
+    "callLine": 339,
+    "resultLine": 340,
+    "timestampUTC": "2026-10-28T06:20:44.478Z",
+    "toolCallId": "call_1151c340ebf1450f924dd574ca9bcc8f|fc_082de15f1a12d594016ae1943a6664819b8bf0d85aa79f3ab7",
+    "isError": false,
+    "statuses": ["completed", "completed", "completed"]
+  },
+  "uiHistoryObservedBeforeFix": {
+    "file": ".pi/ui-history/2026-10-28T05-31-29-885Z_01a180fd-f6dd-7286-9055-c36d3b94b185.jsonl",
+    "missingToolCallId": "call_1151c340ebf1450f924dd574ca9bcc8f|fc_082de15f1a12d594016ae1943a6664819b8bf0d85aa79f3ab7",
+    "previousTodoLineAtRead": 214,
+    "previousToolCallId": "call_ac98b5be5245470f8f6e9f28d13e861c|fc_082de15f1a12d594016ae1934a82b0819b9d116c41455023b6",
+    "statuses": ["completed", "completed", "in_progress"]
+  },
+  "limit": "已确认源结果与 UI 历史不一致；没有现场完整 IPC 帧日志，不能判定当时具体丢失了哪一帧。UI 历史会被后续写入覆盖，行号记录的是修复前读取时的位置。"
+}

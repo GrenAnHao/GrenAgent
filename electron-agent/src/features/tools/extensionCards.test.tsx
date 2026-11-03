@@ -17,6 +17,7 @@ vi.mock('../../platform/runtime', () => ({
 }));
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/proj' }),
+  useOptionalAgentStoreContext: () => undefined,
 }));
 
 afterEach(() => {

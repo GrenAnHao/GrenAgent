@@ -3,16 +3,18 @@ export interface NormalizedTask {
   task: string;
   model?: string;
   agent?: string;
+  thinking_level?: string;
   /** 卡片上的短任务名。不进入子代理正文。 */
   title?: string;
 }
 
-export type TaskInput = string | { task: string; model?: string; agent?: string };
+export type TaskInput = string | { task: string; model?: string; agent?: string; thinking_level?: string };
 
 export interface SpawnParams {
   task?: string;
   model?: string;
   agent?: string;
+  thinking_level?: string;
   tasks?: TaskInput[];
   chain?: Array<{ task?: string }>;
 }
@@ -237,7 +239,7 @@ export function normalizeTasks(params: SpawnParams): NormalizedTask[] {
       if (task) out.push({ task, agent: clean(params.agent) });
     } else if (t && typeof t.task === "string") {
       const task = clean(t.task);
-      if (task) out.push({ task, model: clean(t.model), agent: clean(t.agent) ?? clean(params.agent) });
+      if (task) out.push({ task, model: clean(t.model), agent: clean(t.agent) ?? clean(params.agent), ...(clean(t.thinking_level) ? { thinking_level: clean(t.thinking_level) } : {}) });
     }
   }
   return out;

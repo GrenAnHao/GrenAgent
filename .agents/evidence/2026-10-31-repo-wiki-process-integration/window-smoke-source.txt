@@ -1,0 +1,76 @@
+import { build } from '../electron-agent/node_modules/esbuild/lib/main.js';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+
+const root = process.cwd();
+const require = createRequire(import.meta.url);
+const fixture = await mkdtemp(join(root, '.tmp-repowiki-source/window-smoke-'));
+const entry = join(fixture, 'main.mjs');
+const serviceFile = resolve(root, 'electron-agent/electron/app/repoWikiService.ts');
+const registerFile = resolve(root, 'electron-agent/electron/ipc/register.ts');
+await writeFile(join(fixture, 'index.html'), '<!doctype html><title>Repo Wiki IPC fixture</title>');
+await writeFile(join(fixture, 'other.html'), '<!doctype html><title>Untrusted navigation</title>');
+const source = `
+import { app, BrowserWindow } from 'electron';
+import { pathToFileURL } from 'node:url';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { RepoWikiService, isTrustedRepoWikiSender } from ${JSON.stringify(serviceFile)};
+import { registerIpcHandlers, registerCommand } from ${JSON.stringify(registerFile)};
+const base = ${JSON.stringify(fixture)};
+app.setPath('userData', join(base, 'profile'));
+app.disableHardwareAcceleration();
+let service, window, other;
+(async () => {
+  await app.whenReady();
+  const repo = join(base, 'repo');
+  await mkdir(repo);
+  await writeFile(join(repo, 'README.md'), '# IPC fixture only\\n');
+  const options = { show:false, webPreferences:{ offscreen:true, contextIsolation:true, sandbox:true,
+    preload: ${JSON.stringify(resolve(root, 'electron-agent/out-pkg/preload/preload.js'))} } };
+  window = new BrowserWindow(options);
+  const html = join(base, 'index.html');
+  const appUrl = pathToFileURL(html).href;
+  registerIpcHandlers();
+  service = new RepoWikiService({
+    entry: ${JSON.stringify(resolve(root, 'electron-agent/out-pkg/main/repo-wiki-host.cjs'))},
+    dataDir: join(base, 'data'), registerCommand,
+    allowedWorkspaces: async () => [repo],
+    resolveModel: async () => ({cacheKey:'offline-smoke',complete:async () => {throw new Error('No paid call permitted')}}),
+    isTrustedSender: (event) => isTrustedRepoWikiSender(event, {
+      window, appUrl, windowForSender: BrowserWindow.fromWebContents,
+    }),
+  });
+  await window.loadFile(html);
+  const invoke = (win, command, args={}) => win.webContents.executeJavaScript(
+    'window.gren.invoke(' + JSON.stringify(command) + ',' + JSON.stringify(args) + ')');
+  const health = await invoke(window, 'repoWiki_health');
+  const project = await invoke(window, 'repoWiki_create', {path:repo,name:'Native IPC fixture'});
+  const projects = await invoke(window, 'repoWiki_projects');
+  if (!projects.some(p => p.id===project.id)) throw new Error('Native IPC persistence failed');
+  const childPid = service.pid;
+  if (!childPid || childPid===process.pid) throw new Error('Child PID was not isolated');
+  other = new BrowserWindow(options);
+  await other.loadFile(html);
+  let rejectedOther=false, rejectedNavigation=false;
+  try { await invoke(other,'repoWiki_health'); } catch { rejectedOther=true; }
+  await window.loadFile(join(base,'other.html'));
+  try { await invoke(window,'repoWiki_health'); } catch { rejectedNavigation=true; }
+  if (!rejectedOther || !rejectedNavigation) throw new Error('Native sender authorization failed');
+  await service.stop();
+  console.log(JSON.stringify({nativePreload:true,nativeInvoke:true,isolated:childPid!==process.pid,
+    mainPid:process.pid,childPid,backend:health.backend,rejectedOther,rejectedNavigation,stopped:!service.pid}));
+  other.destroy(); window.destroy(); app.exit(0);
+})().catch(async error => { console.error(error); await service?.stop(); other?.destroy(); window?.destroy(); app.exit(1); });
+`;
+await build({ stdin:{contents:source,resolveDir:root,loader:'ts'},bundle:true,platform:'node',format:'esm',target:'node22',external:['electron'],outfile:entry,logLevel:'warning' });
+const env = {...process.env};
+delete env.ELECTRON_RUN_AS_NODE;
+const child = spawn(require('../electron-agent/node_modules/electron'), [entry], {env,windowsHide:true,stdio:['ignore','pipe','pipe']});
+child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr);
+const timer = setTimeout(() => child.kill(),90000);
+const code = await new Promise((resolve,reject) => {child.once('error',reject);child.once('exit',code=>resolve(code??1));});
+clearTimeout(timer);
+process.exitCode=code;

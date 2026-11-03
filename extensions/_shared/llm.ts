@@ -49,7 +49,7 @@ export function parseJsonLoose<T = unknown>(raw: string): T | undefined {
 /**
  * Resolve the model to use: an override spec ("provider/id") resolved via the
  * registry, falling back to the current ctx.model. The env var that supplies
- * `override` (GOAL_MODEL / MEMORY_MODEL / SESSION_STATE_MODEL) is read by callers.
+ * `override` (GOAL_MODEL / SESSION_STATE_MODEL) is read by callers.
  *
  * 与 pi 的 `ExtensionContext.model: Model<any> | undefined` 对齐取 `Model<any>`；
  * 若写成 `Model<never>`（bottom type），每个调用方都得 `as never` 绕过。

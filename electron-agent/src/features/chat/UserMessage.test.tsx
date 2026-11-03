@@ -75,15 +75,15 @@ describe('UserMessage', () => {
     expect(screen.getByText('hello world')).toBeTruthy();
   });
 
-  it('memory_extract 提示走预格式化，JSON 键单独成行', () => {
+  it('wiki_page_generate 提示走预格式化，JSON 键单独成行', () => {
     const text = [
-      'Extract durable memory as strict JSON. Return JSON only.',
-      'Task kind: memory_extract',
+      'Generate a Wiki page as strict JSON. Return JSON only.',
+      'Task kind: wiki_page_generate',
       'Input: {"delta":"user: 你是什么模型?"}',
     ].join('\n');
     renderMsg(text);
     const pre = screen.getByTestId('structured-pre');
-    expect(pre.textContent).toContain('Task kind: memory_extract');
+    expect(pre.textContent).toContain('Task kind: wiki_page_generate');
     expect(pre.textContent).toContain('"delta"');
     expect(pre.textContent).toContain('你是什么模型?');
   });

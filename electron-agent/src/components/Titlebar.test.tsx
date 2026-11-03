@@ -66,10 +66,14 @@ describe('Titlebar sidebar toggle', () => {
     expect(useLayoutStore.getState().sidebarOpen).toBe(true);
   });
 
-  it('does not render the pi mark in the titlebar', () => {
+  it('keeps the original text brand without a graphic in the titlebar', () => {
     const { container } = render(<Titlebar />);
     expect(container.querySelector('svg[viewBox="0 0 240 220"]')).toBeNull();
     expect(container.querySelector('svg[viewBox="40 56 160 134"]')).toBeNull();
+    const brand = screen.getByTestId('titlebar-brand');
+    expect(brand.textContent).toBe('GrenAgent');
+    expect(brand.querySelector('svg')).toBeNull();
+    expect(container.querySelector('svg[viewBox="0 0 1514 378"]')).toBeNull();
     expect(screen.getByText('Gren')).toBeTruthy();
   });
 

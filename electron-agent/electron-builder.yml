@@ -8,6 +8,7 @@ electronDist: node_modules/electron/dist
 files:
   - package.json
   - build/icon.ico
+  - build/icon.png
   # 生产构建写在 out-pkg/（见 electron.vite.config.ts），这里映射回 asar 里原来的 out/、dist/ 布局，
   # package.json 的 main、子进程入口和页面路径都不用改。不收 out/、dist/：那是 dev / start 的产物。
   - from: out-pkg/main
@@ -59,6 +60,8 @@ asarUnpack:
   - out-pkg/main/codegraph-host.jsc
   - out-pkg/main/codegraph-worker.js
   - out-pkg/main/codegraph-worker.jsc
+  # RepoWiki 单文件 CJS 子进程不参与字节码构建，也不依赖 asar 内的 node_modules。
+  - out-pkg/main/repo-wiki-host.cjs
   # agent-host 的进程树守卫：主进程 spawn 它，asar 里的 exe 起不来。
   - out-pkg/main/pi-job-guard.exe
   - out-pkg/main/bytecode-loader.cjs
@@ -66,6 +69,8 @@ asarUnpack:
   - out-pkg/main/runner.py
   - out-pkg/main/runner.mjs
   - out-pkg/main/prompts/**
+  # gpt-with-taste 的 texts/：agent-host 从 app.asar.unpacked 加载，import.meta.url 旁必须真有这些文件。
+  - out-pkg/main/texts/**
   # 选 A：预编译 helper 入仓后由 copyPiAdjacentAssets 拷到 out-pkg/main。
   # asar:true 下 exe 必须 unpack，否则无法 spawn。
   - out-pkg/main/pi-sandbox-win.exe

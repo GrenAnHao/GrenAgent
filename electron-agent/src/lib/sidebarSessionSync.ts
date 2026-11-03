@@ -8,9 +8,10 @@ interface RpcSessionState {
 }
 
 /** 首条消息发送后立刻在侧栏占位（pi 延迟落盘，list_all_sessions 扫不到）。 */
-export async function syncSidebarOnSend(cwd: string, text: string, images = 0): Promise<void> {
+export async function syncSidebarOnSend(cwd: string, text: string, images = 0, targetSessionPath?: string | null): Promise<void> {
+  if (targetSessionPath === null) return;
   const st = useSessionStore.getState();
-  let path: string | null = st.activeSessionPath ?? st.workspaceSessionPaths[cwd] ?? null;
+  let path: string | null = targetSessionPath ?? st.activeSessionPath ?? st.workspaceSessionPaths[cwd] ?? null;
   if (!path) {
     try {
       const state = (await pi.getState(cwd)) as RpcSessionState;

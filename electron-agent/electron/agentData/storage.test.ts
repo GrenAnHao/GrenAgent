@@ -9,11 +9,11 @@ describe('AgentDataStorage', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-data-'));
     const file = join(dir, 'data.db');
     const first = new AgentDataStorage(file); first.migrate(); first.migrate();
-    expect(first.schemaVersion()).toBe(4);
+    expect(first.schemaVersion()).toBe(7);
     expect(first.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'goal_%'").all()).toHaveLength(0);
     first.close();
     const second = new AgentDataStorage(file); second.migrate();
-    expect(second.schemaVersion()).toBe(4);
+    expect(second.schemaVersion()).toBe(7);
     expect(second.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'goal_%'").all()).toHaveLength(0);
     second.close();
     rmSync(dir, { recursive: true, force: true });
@@ -55,11 +55,21 @@ describe('AgentDataStorage', () => {
     `);
     storage.migrate();
 
-    expect(storage.schemaVersion()).toBe(4);
+    expect(storage.schemaVersion()).toBe(7);
     expect(storage.db.prepare('SELECT id,session_id FROM threads').get()).toMatchObject({ id: 'legacy-thread', session_id: null });
     expect(storage.db.prepare('SELECT id,session_id FROM turns').get()).toMatchObject({ id: 'legacy-turn', session_id: null });
     expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'goal_%'").all()).toHaveLength(0);
     expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('permission_rules','tool_audit')").all()).toHaveLength(2);
     storage.close();
   });
+});
+
+it('upgrades schema 6 twice without losing existing knowledge items', () => {
+  const storage = new AgentDataStorage(':memory:');
+  try {
+    storage.db.exec("CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(6); CREATE TABLE knowledge_build_items(task_id TEXT NOT NULL,phase TEXT NOT NULL,item_id TEXT NOT NULL,state TEXT NOT NULL,attempt INTEGER NOT NULL,input_hash TEXT NOT NULL,output_hash TEXT,payload TEXT,evidence TEXT NOT NULL DEFAULT '[]',dependencies TEXT NOT NULL DEFAULT '[]',error TEXT,revision INTEGER NOT NULL DEFAULT 0,source_task_id TEXT,updated_at INTEGER NOT NULL,PRIMARY KEY(task_id,phase,item_id)); INSERT INTO knowledge_build_items(task_id,phase,item_id,state,attempt,input_hash,updated_at) VALUES('old','generate','page','running',1,'in',1)");
+    storage.migrate(); storage.migrate();
+    expect(storage.schemaVersion()).toBe(7);
+    expect(storage.db.prepare("SELECT task_id,stage_kind FROM knowledge_build_items WHERE task_id='old'").get()).toMatchObject({ task_id: 'old', stage_kind: null });
+  } finally { storage.close(); }
 });

@@ -3,6 +3,7 @@ import { basename, extname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { parse as parseYaml } from 'yaml';
 
 export interface SkillInfo { name: string; description: string; path: string; scope: string; }
 
@@ -126,7 +127,19 @@ async function readSkillInfo(path: string, fallbackName: string): Promise<SkillI
 function parseFrontmatter(text: string): { name?: string; description?: string } {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/); if (lines[0] !== '---') return {};
   const end = lines.slice(1).indexOf('---'); if (end < 0) return {};
-  const frontmatter = lines.slice(1, end + 1); const value = (key: string) => frontmatter.find((line) => line.startsWith(`${key}:`))?.slice(key.length + 1).trim();
+  const frontmatter = lines.slice(1, end + 1);
+  // 先按真正的 YAML 解析：`description: >-` 这类折叠 / 多行写法逐行读只会得到 ">-"。
+  try {
+    const doc: unknown = parseYaml(frontmatter.join('\n'));
+    if (doc && typeof doc === 'object' && !Array.isArray(doc)) {
+      const record = doc as Record<string, unknown>;
+      const field = (key: string) => (typeof record[key] === 'string' ? compact(record[key] as string) : undefined);
+      return { name: field('name'), description: field('description') };
+    }
+  } catch {
+    // 手写的头部不一定是合法 YAML，退回逐行读，保持以前能读出来的照样能读。
+  }
+  const value = (key: string) => frontmatter.find((line) => line.startsWith(`${key}:`))?.slice(key.length + 1).trim();
   const unquote = (item: string | undefined) => item?.replace(/^['"]|['"]$/g, '');
   return { name: unquote(value('name')), description: unquote(value('description')) };
 }

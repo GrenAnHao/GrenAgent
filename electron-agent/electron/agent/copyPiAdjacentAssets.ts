@@ -11,6 +11,11 @@ export const PI_ADJACENT_ASSETS = [
   // agent-host 的进程树守卫（electron-agent/native/job-guard.c），主进程按 out/main 旁找它。
   { from: 'electron-agent/native/bin/pi-job-guard.exe', to: 'pi-job-guard.exe' },
   { from: 'extensions/fable-behavior/prompts', to: 'prompts', dir: true },
+  // gpt-with-taste 的六份行为文本：readFileSync(import.meta.url 旁的 texts/)。
+  { from: 'extensions/gpt-with-taste/texts', to: 'texts', dir: true },
+  // 文本取自上游（MIT），发行包里必须带上这条版权声明。
+  { from: 'extensions/gpt-with-taste/LICENSE', to: 'texts/LICENSE' },
+  { from: 'extensions/agent-mode/ultra-rules.md', to: 'ultra-rules.md' },
 ] as const;
 
 function copyAssetsTo(repoRoot: string, destDir: string): void {

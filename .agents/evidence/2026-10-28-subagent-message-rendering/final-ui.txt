@@ -1,0 +1,185 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs agent-message task-notices subagent-conversation
+
+构建：场景有增减
+场景已构建（生产模式，47.8s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[73152:1028/153658.649:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ agent-message
+  PASS 历史代理消息立即显示正文
+  PASS 接收方和发送方均有身份
+  PASS 接收状态是未唤醒
+  PASS 收到的正文按 Markdown 渲染
+  PASS 发送的正文无需点击即可读
+  PASS 发送卡写明双方和实际投递状态
+  PASS 发送消息提供折叠按钮
+  PASS 收起后保留双方和投递状态，正文不外铺
+  PASS 折叠头仍能辨认发送与接收方
+  INFO 截图 communication-collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-collapsed.png
+  PASS 再次展开恢复完整正文
+  PASS 唤醒型历史消息按代理通信展示
+  PASS 发送卡仍处在前后正文之间
+  PASS 普通注入保持原样
+  INFO 截图 communication-default  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-default.png
+  PASS 实时静默通信正文直接可见
+  PASS start/end 只产生一张接收卡
+  PASS 正文相同的独立消息保留两条
+  PASS 唤醒型实时消息不会等到刷新才出现
+  PASS 实时唤醒消息 start/end 不重复
+  PASS 超长消息首段立即显示
+  PASS 长正文限高且全文仍在滚动区
+  PASS 末段没有被截断
+  PASS 用户能滚动读取末段
+  PASS 窄屏长单词不撑破页面
+  INFO 截图 communication-long-narrow  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-long-narrow.png
+  PASS 空正文保留身份并明确缺口
+  PASS 空正文不生成空白 Markdown 容器
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 真实子代理详情显示发送正文
+  PASS 子代理发送方使用自身身份而非父会话身份
+  PASS 父代理给子代理的接收正文默认可读
+  PASS 子代理接收方也使用自身身份
+  PASS 子代理实际中间与最终输出均呈现在对话中
+  INFO 截图 communication-child-transcript  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-child-transcript.png
+  PASS 超过六条调用也不会藏起通信卡
+  PASS 完整与截短历史两张通信卡均展示
+  PASS 上游参数预览的限制写明
+  PASS 截短记录保留已有正文
+  INFO 截图 communication-codemode-history  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-codemode-history.png
+  PASS 浅色主题通信卡保持可见
+  PASS 没有渲染错误兜底
+  INFO 截图 communication-light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-light.png
+  ── 36 passed, 0 failed
+
+[43840:1028/153716.977:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ task-notices
+  PASS 结算时间线加载
+  PASS 默认全部收起，不外铺正文
+  PASS 没有多余类型标签
+  PASS bash-ok 终态明确且不混淆
+  PASS bash-exit 终态明确且不混淆
+  PASS bash-failed 终态明确且不混淆
+  PASS bash-cancel 终态明确且不混淆
+  PASS bash-timeout 终态明确且不混淆
+  PASS bash-unknown 终态明确且不混淆
+  PASS sa-done 终态明确且不混淆
+  PASS sa-error 终态明确且不混淆
+  PASS sa-abort 终态明确且不混淆
+  PASS sa-timeout 终态明确且不混淆
+  PASS 非零退出头部直接写失败和退出码
+  FAIL 默认紧凑行高  got false
+  PASS 快照补得真实耗时
+  FAIL 通知原本没有的耗时从快照补回  got false
+  INFO 截图 tasks-collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\task-notices-tasks-collapsed.png
+  PASS 展开直接读取留存输出
+  PASS 未显示写给模型的工具API指令
+  PASS 再点收起，正文不留空块
+  PASS 失败仍有具体输出
+  INFO 截图 tasks-failure-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\task-notices-tasks-failure-expanded.png
+  PASS 已清理的记录如实说明输出缺口
+  PASS 缺少开始时间不伪造耗时
+  PASS 迟到运行中帧不让结算倒退
+  PASS 子代理失败保留中间产出
+  PASS 失败原因与产出分开呈现
+  PASS 超时原因含真实时间
+  PASS 成功正文中的Diagnostic是正文而非失败诊断
+  PASS 成功正文不凭引用文案生成错误块
+  PASS 空结果仍有身份和状态，展开不留白
+  PASS 长结果全文仍保留
+  PASS 长结果限高滚动，不截成摘要
+  PASS 实时重复start/end只出现一个结算卡
+  PASS 窄屏标题与元信息不撑破页面
+  INFO 截图 tasks-light-narrow  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\task-notices-tasks-light-narrow.png
+  PASS 没有组件渲染错误
+  ── 33 passed, 2 failed
+
+[75432:1028/153730.651:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+  [page] ResizeObserver loop completed with undelivered notifications.
+
+▸ subagent-conversation
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 长工具循环：只挂载视口附近的工具（10/180）
+  PASS 整轮正文：仅一个复制入口
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 挂载后立刻上滚：停在用户滚到的位置（离底 175px，scrollTop 12133）
+  PASS 完成思考：展开按钮滚动停下后可以被点中
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 完成思考：展开沿用流式 160px 上限
+  PASS 完成思考：正文可以内部滚动
+  PASS 完成思考：长内容没有撑开整列
+  PASS 完成思考：滚动停下后正文可以被指针命中
+  PASS 完成思考：真实滚轮推进内部正文
+  INFO 截图 thinking-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-thinking-expanded.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 历史：滚到顶部后任务仍可访问
+  PASS 历史：顶部同样没有全量挂载工具
+  PASS 历史：底部正文离屏后卸载
+  INFO 截图 history-top  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-history-top.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 回到底部：最终正文重新显示
+  PASS 回到底部：无错误边界降级
+  PASS 回到底部：贴底时末尾留白就是最后一行
+  PASS 回到底部：最后一行离面板底边留出空白
+  INFO 截图 long-bottom  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-long-bottom.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 间距对照：两列均渲染三条工具
+  PASS 子代理：思考与工具行距和主对话一致
+  INFO 截图 compact-row-spacing  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-compact-row-spacing.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 后台子代理：启动工具已返回仍显示正在深度思考
+  PASS 折叠思考：只显示外部单行预览
+  PASS 折叠思考：追加文字时外部预览持续滑动
+  PASS 折叠思考：滑动方向连续向最新内容推进
+  PASS 折叠思考：预览保持单行裁切
+  PASS 运行中：「正在处理」下面留出末尾空白（95.9999942779541px）
+  INFO 截图 live-thinking-preview  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-live-thinking-preview.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 流式思考：展开正文仍限制 160px
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 流式思考：再次折叠后恢复外部预览
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 子代理真正完成：停止预览与运行状态
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 结果不带路径：运行中靠登记表路径接上子会话事件流
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 结果不带路径：完成后仍显示子会话正文
+  PASS 结果不带路径：完成后思考仍在
+  INFO 截图 nopath-finished  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-nopath-finished.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 终态挂载缺路径：补查登记表后显示完整子会话
+  PASS 终态挂载缺路径：只补查一次，不常驻轮询（1 → 1）
+  PASS 终态挂载缺路径：轮询释放后正文仍在
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS pi grep：有命中的折叠行写「2 处」（检索 CodeRetrievalPanel · 2 处）
+  PASS pi grep：真的没命中才写「0 处」（检索 NoSuchSymbolAnywhere · 0 处）
+  PASS pi grep：行可以被点中
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS pi grep：展开后是按文件分组的命中卡
+  PASS pi grep：展开不显示「未找到匹配」
+  PASS pi grep：匹配行带行号
+  PASS pi grep：上下文行用「N-」区分
+  PASS pi grep：上限提示画成已截断
+  INFO 截图 pi-grep-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-pi-grep-expanded.png
+  ── 41 passed, 0 failed
+
+失败场景：task-notices（54.4s）
+单独复跑确认：node ui-harness/check.mjs task-notices

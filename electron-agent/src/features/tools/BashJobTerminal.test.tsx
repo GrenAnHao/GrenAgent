@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
+  useOptionalAgentStoreContext: () => undefined,
 }));
 vi.mock('../../lib/pi', () => ({
   pi: { jobSnapshot: mocks.jobSnapshot, jobKill: mocks.jobKill },

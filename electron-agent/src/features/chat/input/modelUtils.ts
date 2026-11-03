@@ -7,6 +7,8 @@ export interface ModelInfo {
   api?: string;
   baseUrl?: string;
   reasoning?: boolean;
+  input?: string[];
+  fast?: boolean;
   thinkingLevelMap?: ThinkingLevelMap;
 }
 

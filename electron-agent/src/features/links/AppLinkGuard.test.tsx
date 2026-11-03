@@ -93,6 +93,18 @@ describe('AppLinkGuard', () => {
     expect(mocks.warning).toHaveBeenCalledWith('无法解析这个本地链接');
   });
 
+  it('会话中 /D:/ 形式的正文和图片链接都使用真实项目根', () => {
+    useSessionStore.setState({ activeWorkspace: 'D:\\OneDrive\\Project Files\\Pi' });
+    const { getByText } = mount(<>
+      <a href="/D:/OneDrive/Project%20Files/Pi/.agents/evidence/README.md">查看验证记录</a>
+      <a href="/D:/OneDrive/Project%20Files/Pi/.agents/evidence/shot.png">查看截图</a>
+    </>);
+    navigationBlocked(getByText('查看验证记录'));
+    navigationBlocked(getByText('查看截图'));
+    expect(mocks.openWorkspaceFile).toHaveBeenNthCalledWith(1, 'D:/OneDrive/Project Files/Pi/.agents/evidence/README.md', 'D:\\OneDrive\\Project Files\\Pi');
+    expect(mocks.openWorkspaceFile).toHaveBeenNthCalledWith(2, 'D:/OneDrive/Project Files/Pi/.agents/evidence/shot.png', 'D:\\OneDrive\\Project Files\\Pi');
+  });
+
   it('锚点静默吞掉，不支持的协议提示', () => {
     const { getByText } = mount(
       <>

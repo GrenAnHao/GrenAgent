@@ -1,0 +1,5 @@
+Command: npx vitest run electron/knowledgeProcess/readTools.test.ts electron/knowledgeProcess/stageRuntime.integration.test.ts
+Working directory: D:\OneDrive\Project Files\Pi\electron-agent
+Time: 2026-11-02 14:12:20 CST
+Result: exit 0; 2 files, 15 tests passed; duration 2.74s.
+Coverage includes forbidden/missing path returned to model, actual Agent tool loop, pinned manifest traversal/symlink/snapshot protection.

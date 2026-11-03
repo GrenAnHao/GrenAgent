@@ -52,7 +52,7 @@ Status: implemented
 - 代价：同一项目的多个会话各开一个「文件」标签时，后台会话那份隐藏着继续挂着，目录监听、浏览器 webview 的开销随打开过右栏的会话数增长。没去过的会话第一次进入右栏是收起的。
 - 升级时旧版本持久化的全局右栏标签（如「文件」标签）丢一次。底部终端不受影响。
 - `ChatView` 多了一条对 dock 的跨模块约定（首发前 `adoptDraftView`）。
-- 新建草稿仍按工作区共用一个草稿 key（`d:<workspace>`），同一项目里放弃的草稿留下的右栏状态，会出现在下一个草稿里。这是原来的语义，这次没改。
+- 新草稿使用独立 draftId，右栏标签带 ownerDraftId，首发按捕获的身份过户，后台完成不抢当前面板。旧 `d:<workspace>` 规则由[会话独立记忆](../feature/2026-10-28-session-preferences-behavior.md)替代；本篇的常驻 body 与会话归属决定继续有效。
 - 与 [视觉设计跨会话](2026-10-16-visual-design-session-binding.md) 互补：那篇让视觉设计标签按发起会话归属，后台会话写 `rightOpenBySession` 的做法在这里的严格恢复下照常生效。
 
 ## 验证

@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { manifestExtensions } from "../../extensions/index.js";
 import { getConfig } from "../../extensions/_shared/runtime-config.js";
+import { readRequestedPreferences, readSessionPreferences, type SessionPreferenceEntry } from "../../extensions/_shared/session-preferences.js";
 import { installToolRefreshBatching } from "../../extensions/_shared/tool-refresh-batch.js";
 import { attachSessionCwd } from "../../extensions/_shared/session-cwd.js";
 import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
@@ -40,6 +41,39 @@ const realDeps: GrenRuntimeDeps = {
   manifestExtensions,
   getConfig,
 };
+
+/**
+ * 会话日志里保存的“请求值”恢复成会话的初始选项。
+ *
+ * SDK 从 `model_change` / `thinking_level_change` 恢复出来的是**有效值**：setModel 会追加能力钳制后的
+ * 档位（换到非推理模型就是 off），冷恢复只能看到这些。用户请求的 high 在 `session-preferences` 里，
+ * 这里把它作为显式初始值传给会话工厂，SDK 再按当前模型钳一次（钳制结果只影响有效值，不改日志里的请求值）。
+ *
+ * - 模型不在当前目录里：不传 model（不能静默改用另一个模型），保留会话自己的日志。
+ * - 没有 canonical 条目：完全交给 SDK，不干预旧会话恢复。
+ */
+type RestoredSessionOptions = Pick<Parameters<typeof createAgentSessionFromServices>[0], 'model' | 'thinkingLevel'>;
+
+function restoredSessionOptions(
+  modelRuntime: Pick<ModelRuntime, 'getModel' | 'hasConfiguredAuth'>,
+  sessionManager: { getEntries?(): unknown[] },
+): RestoredSessionOptions {
+  const entries = typeof sessionManager?.getEntries === 'function' ? sessionManager.getEntries() : [];
+  const source = (Array.isArray(entries) ? entries : []) as SessionPreferenceEntry[];
+  const preferences = readRequestedPreferences(source);
+  // 显式原生换模也必须恢复；thinking 仍保留 canonical 请求，避免 SDK 的 off/default 抹掉它。
+  const selectedModel = preferences.model ? readSessionPreferences(source).model ?? preferences.model : undefined;
+  const restored: RestoredSessionOptions = {};
+  if (selectedModel) {
+    const model = modelRuntime?.getModel?.(selectedModel.provider, selectedModel.id);
+    const authOk = typeof modelRuntime?.hasConfiguredAuth === 'function'
+      ? modelRuntime.hasConfiguredAuth(selectedModel.provider)
+      : true;
+    if (model && authOk) restored.model = model;
+  }
+  if (preferences.thinkingLevel) restored.thinkingLevel = preferences.thinkingLevel as RestoredSessionOptions['thinkingLevel'];
+  return restored;
+}
 
 export interface GrenRuntimeOptions {
   /** 进程内共享的 ModelRuntime。省略则由 createAgentSessionServices 自建（worker 场景）。 */
@@ -92,7 +126,12 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
         },
       },
     });
-    const created = await deps.createAgentSessionFromServices({ services, sessionManager, sessionStartEvent });
+    const created = await deps.createAgentSessionFromServices({
+      services,
+      sessionManager,
+      sessionStartEvent,
+      ...restoredSessionOptions(services.modelRuntime, sessionManager),
+    });
     // 绑定扩展（session_start 里 MCP 首次投影一批工具）之前装上，批量注册时工具表只刷新一次。
     installToolRefreshBatching(created.session);
     // 服务仍按原始目录建：runtime.cwd 决定之后 newSession / fork 的会话头，必须是原始目录。

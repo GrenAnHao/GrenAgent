@@ -1,3 +1,4 @@
+import { normalizeTodos } from '@extensions/_shared/todo-model';
 import type { ChatMessage } from '../stores/agentReducer';
 import { pathsEquivalent } from './pathUtils';
 
@@ -19,8 +20,21 @@ const cache = new Map<string, CacheEntry>();
 /** 缓存会话数上限：大会话的 ChatMessage[] 占内存，按 LRU 控制总量。 */
 const MAX_ENTRIES = 30;
 
-/** 计算会话内容的轻量签名（消息数 + 末条消息要点），用于「内容是否变化」的快速判断。 */
+/** 末条摘要保持既有规则，另加入最新成功 todo 的内容，避免同长度快照漏刷新。 */
 export function sessionSignature(messages: ChatMessage[]): string {
+  const tail = tailSignature(messages);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.kind !== 'tool' || message.toolName.toLowerCase() !== 'todo' || message.status !== 'done') continue;
+    const details = (message.result as { details?: { error?: unknown } } | null)?.details;
+    if (details?.error != null) continue;
+    const todo = normalizeTodos(details);
+    if (todo) return `${tail}:todo:${message.toolCallId}:${JSON.stringify(todo)}`;
+  }
+  return tail;
+}
+
+function tailSignature(messages: ChatMessage[]): string {
   const n = messages.length;
   const last = messages[n - 1];
   if (!last) return '0';

@@ -357,7 +357,7 @@ describe('createEnhancePrompt 实验路径', () => {
     expect(options.samplingParams).toEqual({ top_p: ENHANCE_TOP_P });
   });
 
-  it('只允许五个只读工具；wiki_replace / codegraph_impact 回错误字符串且不 request', async () => {
+  it('只允许四个只读工具；写工具与已移除的 memory_search 均不发请求', async () => {
     const request = vi.fn();
     let round = 0;
     async function* impl() {
@@ -369,7 +369,9 @@ describe('createEnhancePrompt 实验路径', () => {
             role: 'assistant',
             content: [
               { type: 'toolCall', id: '1', name: 'wiki_replace', arguments: { page: 'x' } },
-              { type: 'toolCall', id: '2', name: 'codegraph_impact', arguments: { symbol: 'Foo' } },            ],
+              { type: 'toolCall', id: '2', name: 'codegraph_impact', arguments: { symbol: 'Foo' } },
+              { type: 'toolCall', id: '3', name: 'memory_search', arguments: { query: '旧记忆' } },
+            ],
             stopReason: 'toolUse',
           },
         };
@@ -426,8 +428,8 @@ describe('createEnhancePrompt 实验路径', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'toolCall', id: `a${round}`, name: 'memory_search', arguments: { query: 'q' } },
-              { type: 'toolCall', id: `b${round}`, name: 'memory_search', arguments: { query: 'q' } },
+              { type: 'toolCall', id: `a${round}`, name: 'wiki_search', arguments: { query: 'q' } },
+              { type: 'toolCall', id: `b${round}`, name: 'wiki_search', arguments: { query: 'q' } },
             ],
             reason: 'toolUse',
           },
@@ -451,8 +453,8 @@ describe('createEnhancePrompt 实验路径', () => {
         message: {
           role: 'assistant',
           content: [
-            { type: 'toolCall', id: '1', name: 'memory_search', arguments: { query: 'q' } },
-            { type: 'toolCall', id: '2', name: 'memory_search', arguments: { query: 'q' } },
+            { type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: 'q' } },
+            { type: 'toolCall', id: '2', name: 'wiki_search', arguments: { query: 'q' } },
           ],
           reason: 'toolUse',
         },
@@ -600,7 +602,7 @@ describe('createEnhancePrompt 实验路径', () => {
     const { service, request: req } = projectSetup(impl, request);
     await expect(service.run({ workspace: '/ws', text: 'x' }, () => {})).resolves.toMatchObject({ ok: true });
     // 网关/上游会拒绝带 `.` 的工具名（实测 400 → 503），所以对外必须是无点号名。
-    expect(toolNames[0]!.length).toBeGreaterThan(0);
+    expect(toolNames[0]).toEqual(['wiki_search', 'wiki_read', 'codegraph_explore', 'read_recent_turn']);
     for (const name of toolNames.flat()) expect(name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     expect(req).toHaveBeenCalledWith('wiki.search', expect.objectContaining({ query: '登录' }));
   });

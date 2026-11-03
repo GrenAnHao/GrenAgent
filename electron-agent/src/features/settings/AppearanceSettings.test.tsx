@@ -1,18 +1,13 @@
 import { ThemeProvider } from '@lobehub/ui';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { FONT_SIZE_DEFAULT } from '../../theme/contentFont';
 import { useThemeStore } from '../../stores/themeStore';
 import { AppearanceSettings } from './AppearanceSettings';
 
-vi.mock('@lobehub/ui', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@lobehub/ui')>();
-  return { ...actual, ColorSwatches: () => null };
-});
-
 afterEach(() => {
   cleanup();
-  useThemeStore.setState({ fontSize: FONT_SIZE_DEFAULT });
+  useThemeStore.setState({ appearance: 'dark', fontSize: FONT_SIZE_DEFAULT });
 });
 
 function mount() {
@@ -23,7 +18,26 @@ function mount() {
   );
 }
 
-describe('AppearanceSettings font size', () => {
+describe('AppearanceSettings', () => {
+  it('only offers appearance and font size controls', () => {
+    mount();
+    expect(screen.queryByText('配色方案')).not.toBeInTheDocument();
+    expect(screen.queryByText('主题色')).not.toBeInTheDocument();
+    expect(screen.queryByText('中性色')).not.toBeInTheDocument();
+    expect(screen.getByText('对话字号')).toBeInTheDocument();
+    expect(screen.getByText('主题')).toBeInTheDocument();
+  });
+
+  it('keeps light, dark, and system appearance available', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: '浅色' }));
+    expect(useThemeStore.getState().appearance).toBe('light');
+    fireEvent.click(screen.getByRole('button', { name: '深色' }));
+    expect(useThemeStore.getState().appearance).toBe('dark');
+    fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
+    expect(useThemeStore.getState().appearance).toBe('auto');
+  });
+
   it('shows the store value', () => {
     mount();
     expect(screen.getByTestId('font-size-stepper').textContent).toContain('14');

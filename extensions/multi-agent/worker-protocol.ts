@@ -24,6 +24,8 @@ export interface SerializedPrepared {
   workspace: string;
   ctx: { origin: "subagent"; workspace: string; cwd: string; config: Record<string, string> };
   parentSessionId?: string;
+  /** 可选：旧宿主不发这一项，worker 侧按 childConfig 里的域键回退（缺省 ordinary）。 */
+  routingMode?: "ultra" | "ordinary";
 }
 
 export interface WorkerOpenRequest {
@@ -54,4 +56,6 @@ export interface WorkerResumed {
   model?: { provider?: string; id?: string };
   entries: unknown[];
   state: WorkerSessionState;
+  /** 子会话固定的路由域（会话里落的标记；旧会话 ordinary）。 */
+  routingMode: "ultra" | "ordinary";
 }

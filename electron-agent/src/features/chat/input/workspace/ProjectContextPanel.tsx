@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   agentDataApi,
   type CodeGraphStatus,
-  type MemoryOverview,
   type WikiOverview,
 } from '../../../../lib/agentData';
 import { wsStyles as s } from './styles';
@@ -11,7 +10,6 @@ import { wsStyles as s } from './styles';
 interface ProjectContextPanelProps { active: boolean; workspace: string }
 
 interface ProjectSummary {
-  memory: MemoryOverview;
   wiki: WikiOverview;
   code: CodeGraphStatus;
 }
@@ -28,12 +26,11 @@ export function ProjectContextPanel({ active, workspace }: ProjectContextPanelPr
     setLoading(true);
     setError(undefined);
     try {
-      const [memory, wiki, code] = await Promise.all([
-        agentDataApi.memory.overview({ userId: 'local', workspace }),
-        agentDataApi.wiki.overview(workspace),
+      const [wiki, code] = await Promise.all([
+        agentDataApi.wiki.overview(),
         agentDataApi.code.status(workspace),
       ]);
-      if (generation.current === current) setSummary({ memory, wiki, code });
+      if (generation.current === current) setSummary({ wiki, code });
     } catch (cause) {
       if (generation.current === current) {
         setSummary(undefined);
@@ -69,10 +66,6 @@ export function ProjectContextPanel({ active, workspace }: ProjectContextPanelPr
         ) : null}
         {!loading && summary ? (
           <div className={s.projectContextOverview}>
-            <div>
-              <strong>{summary.memory.total} 条记忆</strong>
-              <span>L0 {summary.memory.byLevel.L0} · L1 {summary.memory.byLevel.L1} · L2 {summary.memory.byLevel.L2} · L3 {summary.memory.byLevel.L3}</span>
-            </div>
             <div>
               <strong>{summary.wiki.pages} 个 Wiki 页面</strong>
               <span>{summary.wiki.latestUpdatedAt ? `最近更新 ${new Date(summary.wiki.latestUpdatedAt).toLocaleString()}` : '暂无页面'}</span>

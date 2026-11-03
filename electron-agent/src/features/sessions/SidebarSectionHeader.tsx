@@ -38,8 +38,8 @@ const styles = createStaticStyles(({ css }) => ({
   label: css`
     overflow: hidden;
     font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
+    font-weight: 500;
+    letter-spacing: 0.04em;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,

@@ -11,6 +11,9 @@ export const AGENTDATA_METHODS = [
   'agentdata.registerKnownWorkspace',
   'agentdata.plugins.load',
   'agentdata.plugins.save',
+  'agentdata.knowledge.describe',
+  'agentdata.knowledge.complete',
+  'agentdata.knowledge.cancel',
   'host.shutdown',
 ] as const;
 export type AgentDataProcessMethod = (typeof AGENTDATA_METHODS)[number];
@@ -34,8 +37,8 @@ export const AGENTDATA_DIAG_CHANNEL = 'agentdata.diag';
 
 /** 启动参数：主进程经环境变量 AGENTDATA_HOST_CONFIG（JSON）传入。 */
 export interface AgentDataHostConfig {
+  knowledgeKernelVersion?: 1;
   dataPath: string;
-  worksDir: string;
   listenPath: string;
   hostToken: string;
   /** 主进程已签发的工作区令牌（规范化工作区 → 令牌），重拉时带回去。 */

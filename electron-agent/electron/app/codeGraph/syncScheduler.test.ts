@@ -11,7 +11,7 @@ function deferred<T = unknown>() {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** 每次 run 都挂起，测试逐个放行；plan 默认 incremental。 */
-function harness(options: { plan?: (workspace: string) => SyncPlan; maxFailures?: number } = {}) {
+function harness(options: { plan?: (workspace: string) => SyncPlan; maxFailures?: number; writeStallTimeoutMs?: number; onStall?: (workspace: string) => void } = {}) {
   let clock = 1_000;
   const timers: Array<{ at: number; fn: () => void; cancelled: boolean }> = [];
   const runs: Array<SyncTask & { done: ReturnType<typeof deferred<SyncOutcome>> }> = [];
@@ -30,6 +30,8 @@ function harness(options: { plan?: (workspace: string) => SyncPlan; maxFailures?
     setTimer: (fn, ms) => { const timer = { at: clock + ms, fn, cancelled: false }; timers.push(timer); return timer; },
     clearTimer: (handle) => { (handle as { cancelled: boolean }).cancelled = true; },
     retry: { maxFailures: options.maxFailures ?? 3 },
+    ...(options.writeStallTimeoutMs !== undefined ? { writeStallTimeoutMs: options.writeStallTimeoutMs } : {}),
+    ...(options.onStall ? { onStall: options.onStall } : {}),
     onEvent: (event) => events.push(event),
   });
   const advance = async (ms: number) => {
@@ -150,6 +152,38 @@ describe('SyncScheduler', () => {
     h.runs[0].done.resolve(ok());
     await flush(); await flush();
     expect(h.runs.map((r) => r.workspace)).toEqual(['BUSY', 'B']);
+  });
+
+  it('runs a branch switch ahead of a file watch when the lane frees', async () => {
+    const h = harness();
+    h.scheduler.request('busy', 'BUSY', { trigger: 'manual', jobId: 'hold' });
+    await flush();
+    h.scheduler.request('a', 'A', { trigger: 'watch', paths: ['a.ts'] });
+    h.scheduler.request('b', 'B', { trigger: 'branch_switch' });
+    h.runs[0].done.resolve(ok());
+    await flush(); await flush();
+    expect(h.runs.map((r) => r.workspace)).toEqual(['BUSY', 'B']);
+    expect(h.runs[1].mode).toBe('incremental');
+  });
+
+  it('treats a write with no progress as a failure and reports the stall', async () => {
+    const stalls: string[] = [];
+    const h = harness({ writeStallTimeoutMs: 1_000, onStall: (workspace) => stalls.push(workspace) });
+    const job = h.scheduler.request('a', 'A', { trigger: 'manual', jobId: 'j' })!;
+    await flush();
+    expect(h.runs).toHaveLength(1);
+    h.scheduler.progress(h.runs[0].runId, { phase: 'parsing', current: 1, total: 4 });
+    await h.advance(999);
+    expect(stalls).toEqual([]);
+    const failed = job.then(
+      () => { throw new Error('sync should stall'); },
+      (caught: unknown) => { if (!(caught instanceof Error)) throw new Error('expected Error'); return caught; },
+    );
+    await h.advance(1);
+    expect((await failed).message).toMatch(/CODEGRAPH_STALL/);
+    expect(stalls).toEqual(['A']);
+    expect(h.executor.cancel).toHaveBeenCalledWith(h.runs[0].runId);
+    expect(h.scheduler.view('a').consecutiveFailures).toBe(1);
   });
 
   it('backs off exponentially after failures, keeps the paths, and opens the breaker at the limit', async () => {

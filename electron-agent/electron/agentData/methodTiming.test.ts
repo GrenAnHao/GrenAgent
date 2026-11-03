@@ -11,7 +11,7 @@ describe('AgentDataTiming', () => {
   it('returns undefined for an empty window and resets after drain', () => {
     const { timing } = fixture();
     expect(timing.drain()).toBeUndefined();
-    timing.record('memory.search', 3);
+    timing.record('wiki.search', 3);
     expect(timing.drain()?.n).toBe(1);
     expect(timing.drain()).toBeUndefined();
   });
@@ -47,9 +47,9 @@ describe('AgentDataTiming', () => {
 
   it('timeSync records when the callback throws and rethrows the error', () => {
     const { timing, advance } = fixture();
-    expect(() => timing.timeSync('task.memory_extract.complete', () => { advance(4); throw new Error('boom'); })).toThrow('boom');
+    expect(() => timing.timeSync('task.content_classify.complete', () => { advance(4); throw new Error('boom'); })).toThrow('boom');
     expect(timing.nested).toBe(false);
-    expect(timing.drain()!.methods[0]).toMatchObject({ method: 'task.memory_extract.complete', syncMs: 4 });
+    expect(timing.drain()!.methods[0]).toMatchObject({ method: 'task.content_classify.complete', syncMs: 4 });
   });
 
   it('a segment stop is idempotent so error paths cannot unbalance nesting', () => {

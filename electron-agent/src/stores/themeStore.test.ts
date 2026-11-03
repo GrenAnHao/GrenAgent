@@ -18,9 +18,6 @@ afterEach(() => {
   localStorage.removeItem('pi-theme');
   useThemeStore.setState({
     appearance: 'dark',
-    primaryColor: undefined,
-    neutralColor: undefined,
-    colorScheme: useThemeStore.getState().colorScheme,
     fontSize: FONT_SIZE_DEFAULT,
   });
 });
@@ -51,5 +48,31 @@ describe('themeStore fontSize', () => {
     );
     await useThemeStore.persist.rehydrate();
     expect(useThemeStore.getState().fontSize).toBe(17);
+  });
+});
+
+describe('themeStore appearance preferences', () => {
+  it('ignores legacy color choices while restoring appearance and font size', async () => {
+    localStorage.setItem('pi-theme', JSON.stringify({
+      state: { appearance: 'auto', fontSize: 16, colorScheme: 'nord', primaryColor: 'red', neutralColor: 'slate' },
+      version: 0,
+    }));
+    await useThemeStore.persist.rehydrate();
+    const state = useThemeStore.getState();
+    expect(state.appearance).toBe('auto');
+    expect(state.fontSize).toBe(16);
+    expect(state).not.toHaveProperty('colorScheme');
+    expect(state).not.toHaveProperty('primaryColor');
+    expect(state).not.toHaveProperty('neutralColor');
+  });
+
+  it('persists only appearance and font size after restoring a legacy theme', async () => {
+    localStorage.setItem('pi-theme', JSON.stringify({
+      state: { appearance: 'dark', fontSize: 15, colorScheme: 'solarized', primaryColor: 'red' },
+      version: 0,
+    }));
+    await useThemeStore.persist.rehydrate();
+    useThemeStore.getState().setAppearance('light');
+    expect(JSON.parse(localStorage.getItem('pi-theme')!).state).toEqual({ appearance: 'light', fontSize: 15 });
   });
 });

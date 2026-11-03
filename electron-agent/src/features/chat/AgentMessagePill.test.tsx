@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentMessagePill, agentMessageTitle } from './AgentMessagePill';
 
@@ -10,11 +10,19 @@ describe('AgentMessagePill', () => {
     expect(agentMessageTitle('something else')).toBe('something else');
   });
 
-  it('shows the readable title collapsed, not the generic injected-context label', () => {
+  it('shows the sender, recipient and full body without opening a disclosure', async () => {
     render(<AgentMessagePill content={'Agent p-9 sent a message without waking you:\nkeep the cache warm'} />);
     const el = screen.getByTestId('agent-message-pill');
-    expect(el.textContent).toContain('来自 p-9 的消息（未唤醒）');
+    expect(el.textContent).toContain('p-9');
+    expect(el.textContent).toContain('当前会话代理');
     expect(el.textContent).not.toContain('已注入上下文');
-    expect(el.textContent).not.toContain('keep the cache warm');
+    expect(await screen.findByText('keep the cache warm')).toBeTruthy();
+    const toggle = screen.getByRole('button');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('keep the cache warm')).toBeNull();
+    expect(el.textContent).toContain('p-9');
+    fireEvent.click(toggle);
+    expect(await screen.findByText('keep the cache warm')).toBeTruthy();
   });
 });

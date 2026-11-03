@@ -1,0 +1,124 @@
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\knowledgeProcess\\stageRuntime.ts" b/electron-agent/electron/knowledgeProcess/stageRuntime.ts
+index 603f01cd..8f600bfa 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\knowledgeProcess\\stageRuntime.ts"
++++ b/electron-agent/electron/knowledgeProcess/stageRuntime.ts
+@@ -30,6 +30,12 @@ function isRecoverableToolError(error: unknown): boolean {
+   return RECOVERABLE_TOOL_ERRORS.some(code => message.includes(code));
+ }
+ 
++/** Retain a status only when the provider explicitly identifies it at the start of the error. */
++function modelErrorCode(message: string): string {
++  const status = /^(?:(?:HTTP(?:\/\d(?:\.\d)?)?\s+|status(?:\s+code)?[:\s]+))?([45]\d\d)\b/i.exec(message.trim());
++  return status ? `MODEL_HTTP_${status[1]}` : 'MODEL_ERROR';
++}
++
+ /** Remaining turns at which the model starts getting an explicit budget reminder. */
+ const FINAL_TURN_WARNING = 3;
+ 
+@@ -124,7 +130,7 @@ export async function runKnowledgeStage(request: StageExecutionRequest, ports: K
+     const last = agent.state.messages.at(-1);
+     if (!last || last.role !== 'assistant' || last.stopReason !== 'stop') {
+       if (last?.role === 'assistant' && last.stopReason === 'error' && /\b(?:429|5\d\d)\b/.test(last.errorMessage ?? '')) retriable = true;
+-      throw new Error(last && last.role === 'assistant' ? last.errorMessage ?? `MODEL_${last.stopReason.toUpperCase()}` : 'MODEL_NO_RESULT');
++      throw new Error(last?.role === 'assistant' && last.stopReason === 'error' ? modelErrorCode(last.errorMessage ?? '') : last && last.role === 'assistant' ? `MODEL_${last.stopReason.toUpperCase()}` : 'MODEL_NO_RESULT');
+     }
+     const answer = (message: typeof last) => message.content.filter(part => part.type === 'text').map(part => part.text).join('');
+     try { payload = parseStageJson(answer(last)); }
+@@ -133,6 +139,7 @@ export async function runKnowledgeStage(request: StageExecutionRequest, ports: K
+       if (modelTurns >= unit.maxModelRequests) throw parseError;
+       await agent.prompt('Your last reply was not a single valid JSON object. Reply again with only that JSON object: no Markdown fences, no text before or after it.');
+       const retry = agent.state.messages.at(-1);
++      if (retry?.role === 'assistant' && retry.stopReason === 'error') throw new Error(modelErrorCode(retry.errorMessage ?? ''));
+       if (!retry || retry.role !== 'assistant' || retry.stopReason !== 'stop') throw parseError;
+       payload = parseStageJson(answer(retry));
+     }
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\knowledgeProcess\\stageRuntime.integration.test.ts" b/electron-agent/electron/knowledgeProcess/stageRuntime.integration.test.ts
+index 4f842158..560ac70d 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\knowledgeProcess\\stageRuntime.integration.test.ts"
++++ b/electron-agent/electron/knowledgeProcess/stageRuntime.integration.test.ts
+@@ -179,6 +179,20 @@ describe('knowledge stage Agent', () => {
+     } finally { rmSync(root, { recursive: true, force: true }); }
+   });
+ 
++  it('emits only stable model error codes and confirmed HTTP status, without leaking provider text', async () => {
++    const root = mkdtempSync(join(tmpdir(), 'stage-safe-model-error-'));
++    const model: any = { id: 'test', name: 'Test', api: 'openai-completions', provider: 'test', reasoning: false, input: ['text'], contextWindow: 10000, maxTokens: 1000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
++    const request: any = { version: 1, taskId: 'task', fence: { controllerEpoch: 'epoch' }, phase: 'generate', itemId: 'page', attempt: 1, inputHash: 'input', binding: { bindingId: 'binding', model }, budget: DEFAULT_KNOWLEDGE_BUDGETS, input: { root, manifest: [], systemPrompt: 'JSON', userPrompt: 'hello' } };
++    try {
++      for (const [message, code, retriable] of [['HTTP 503 unavailable https://x/?key=secret','MODEL_HTTP_503',true], ['429 Too Many Requests token=secret','MODEL_HTTP_429',true], ['HTTP 401 Unauthorized token=secret','MODEL_HTTP_401',false], ['provider rejected https://x/?key=secret','MODEL_ERROR',false], ['provider https://x/?code=503&key=secret','MODEL_ERROR',true]] as const) {
++        const result=await runKnowledgeStage(request,{reserve:async()=>{},finish:async()=>{},requestModel:async()=>({role:'assistant',api:model.api,provider:model.provider,model:model.id,content:[],stopReason:'error',errorMessage:message,usage:{input:0,output:0,totalTokens:0,cacheRead:0,cacheWrite:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},timestamp:Date.now()})});
++        expect(result.error).toEqual({code,message:code,retriable});expect(JSON.stringify(result.error)).not.toContain('secret');
++      }
++      let turn=0;const retryResult=await runKnowledgeStage(request,{reserve:async()=>{},finish:async()=>{},requestModel:async()=>({role:'assistant',api:model.api,provider:model.provider,model:model.id,content:++turn===1?[{type:'text',text:'not json'}]:[],stopReason:turn===1?'stop':'error',errorMessage:turn===1?undefined:'HTTP 503 https://x/?key=secret',usage:{input:0,output:0,totalTokens:0,cacheRead:0,cacheWrite:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},timestamp:Date.now()})});
++      expect(turn).toBe(2);expect(retryResult.error).toEqual({code:'MODEL_HTTP_503',message:'MODEL_HTTP_503',retriable:false});
++    } finally { rmSync(root, { recursive: true, force: true }); }
++  });
++
+   it('marks provider 429 and 5xx errors retriable without retrying budget failures', async () => {
+     const root = mkdtempSync(join(tmpdir(), 'stage-error-'));
+     const model: any = { id: 'test', name: 'Test', api: 'openai-completions', provider: 'test', reasoning: false, input: ['text'], contextWindow: 10000, maxTokens: 1000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.ts" b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+index 12e496d0..8d8f320e 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+@@ -55,7 +55,7 @@ export class KnowledgeKernelCoordinator {
+    const baseline=prepared.baseline;const priorSource=baseline?.sourceSnapshot;const priorPages=prepared.published.pages;
+    const delta=initial.intent==='update'&&priorSource&&baseline?.modelIdentity===initial.modelIdentity&&baseline?.pipelineConfigHash===initial.pipelineConfigHash&&baseline?.planToken===prepared.planToken?analyseKnowledgeDelta(priorSource,prepared.source,Object.values(priorPages).filter(page=>page.status!=='archived').map(page=>({id:String(page.id),sources:(page.sources??[]).map((source:{path:string})=>source.path),dependencies:Array.isArray(page.dependencies)?page.dependencies:[],scopes:[...new Set([...(page.inputManifest?.scopes??[]),...observedScopes(page.inputManifest?.evidence)])]}))):undefined;
+    if(delta?.kind==='blocked')throw new Error('SOURCE_COVERAGE_INCOMPLETE');
+-    const reusedHashes=new Map<string,string>();const failed=new Set<string>();let blockedError:StageExecutionResult['error'];let failedError:StageExecutionResult['error'];if(initial.executionPolicy){const v2=await this.runV2(taskId,fence,graph,prepared,snapshotId,binding,signal,delta,reusedHashes);graph=v2.graph;for(const id of v2.failed)failed.add(id);blockedError=v2.blockedError;failedError=v2.failedError;}else while(true){if(signal.aborted)throw new Error('INTERRUPTED');const ready=selectReadyItems(graph,[]).filter(n=>!failed.has(n.id));if(!ready.length)break;const n=ready[0];job=store.setState(taskId,fence,'running',{phase:n.phase,currentItem:n.definition?.title??({prepare:'扫描源码',overview:'项目概览',plan:'规划目录',catalogue:'规划目录',generate:'仓库综合卡',relations:'整理卡片关系',validate:'校验成果'} as Record<string,string>)[n.phase]??'处理中'});this.notify(job);let stageResult:StageExecutionResult|undefined;try{if(delta && delta.kind!=='replan' && n.phase!=='prepare'){const reused=this.reusePublished(taskId,fence,n,graph,prepared,delta.reused,reusedHashes);if(reused){graph=advanceStageGraph(graph,n.id,reused.payload as Record<string,unknown>);this.updateCounts(taskId,fence,graph);continue;}}const parentId=store.getTask(taskId)?.metadata?.retryOf;const isRepair=store.getTask(taskId)?.metadata?.repoWiki?.intent==='repair';if(parentId&&isRepair){const previous=store.listItems(parentId).find(item=>item.phase===n.phase&&item.itemId===n.id&&item.state==='prepared'&&item.inputHash===n.inputHash);if(previous){const source=store.readCheckpoint({taskId:parentId,phase:n.phase,itemId:n.id});const nextGraph=advanceStageGraph(graph,n.id,source.payload as Record<string,unknown>);store.copyRepairArtifact({taskId:parentId,phase:n.phase,itemId:n.id},taskId,fence,n.inputHash);graph=nextGraph;this.updateCounts(taskId,fence,graph);continue;}const replayed=this.reuseFailedCandidate(parentId,taskId,fence,n,graph,prepared);if(replayed){graph=replayed;this.updateCounts(taskId,fence,graph);continue;}}const payload=n.phase==='prepare'?{sourceHash:prepared.source.sourceHash}:n.phase==='catalogue'&&(n.depth??1)>=MAX_CATALOGUE_DEPTH?{children:[]}:n.phase==='validate'?{valid:true}:undefined;const result=payload?this.localResult(taskId,fence,n,store.beginAttempt(taskId,n.phase,n.id,fence,n.inputHash),payload):await this.runStage(taskId,fence,n,graph,prepared,snapshotId,binding,signal);stageResult=result;const nextGraph=result.disposition==='prepared'?advanceStageGraph(graph,n.id,result.payload as Record<string,unknown>):undefined;store.commitItem(result,result.stageAttempt);if(result.disposition!=='prepared'){if(result.disposition==='failed' && result.error?.retriable && result.stageAttempt<initial.budgets.unit.maxAttempts)continue;if(result.disposition==='blocked')blockedError??=result.error??{code:'STAGE_BLOCKED',message:'Stage blocked',retriable:false};else failedError??=result.error??{code:'STAGE_FAILED',message:'Stage failed',retriable:false};failed.add(n.id);continue;}graph=nextGraph!;this.updateCounts(taskId,fence,graph);}
++    const reusedHashes=new Map<string,string>();const failed=new Set<string>();let blockedError:StageExecutionResult['error'];let failedError:StageExecutionResult['error'];if(initial.executionPolicy){const v2=await this.runV2(taskId,fence,graph,prepared,snapshotId,binding,signal,delta,reusedHashes);graph=v2.graph;for(const id of v2.failed)failed.add(id);blockedError=v2.blockedError;failedError=v2.failedError;}else while(true){if(signal.aborted)throw new Error('INTERRUPTED');const ready=selectReadyItems(graph,[]).filter(n=>!failed.has(n.id));if(!ready.length)break;const n=ready[0];job=store.setState(taskId,fence,'running',{phase:n.phase,currentItem:n.definition?.title??({prepare:'扫描源码',overview:'项目概览',plan:'规划目录',catalogue:'规划目录',generate:'仓库综合卡',relations:'整理卡片关系',validate:'校验成果'} as Record<string,string>)[n.phase]??'处理中'});this.notify(job);let stageResult:StageExecutionResult|undefined;try{if(delta && delta.kind!=='replan' && n.phase!=='prepare'){const reused=this.reusePublished(taskId,fence,n,graph,prepared,delta.reused,reusedHashes);if(reused){graph=advanceStageGraph(graph,n.id,reused.payload as Record<string,unknown>);this.updateCounts(taskId,fence,graph);continue;}}const parentId=store.getTask(taskId)?.metadata?.retryOf;const isRepair=store.getTask(taskId)?.metadata?.repoWiki?.intent==='repair';if(parentId&&isRepair){const previous=store.listItems(parentId).find(item=>item.phase===n.phase&&item.itemId===n.id&&item.state==='prepared'&&item.inputHash===n.inputHash);if(previous){const source=store.readCheckpoint({taskId:parentId,phase:n.phase,itemId:n.id});const nextGraph=advanceStageGraph(graph,n.id,source.payload as Record<string,unknown>);store.copyRepairArtifact({taskId:parentId,phase:n.phase,itemId:n.id},taskId,fence,n.inputHash);graph=nextGraph;this.updateCounts(taskId,fence,graph);continue;}const replayed=this.reuseFailedCandidate(parentId,taskId,fence,n,graph,prepared);if(replayed){graph=replayed;this.updateCounts(taskId,fence,graph);continue;}}const payload=n.phase==='prepare'?{sourceHash:prepared.source.sourceHash}:n.phase==='catalogue'&&(n.depth??1)>=MAX_CATALOGUE_DEPTH?{children:[]}:n.phase==='validate'?{valid:true}:undefined;const result=payload?this.localResult(taskId,fence,n,store.beginAttempt(taskId,n.phase,n.id,fence,n.inputHash),payload):await this.runStage(taskId,fence,n,graph,prepared,snapshotId,binding,signal);stageResult=result;if(signal.aborted&&result.disposition!=='prepared')throw new Error('INTERRUPTED');const nextGraph=result.disposition==='prepared'?advanceStageGraph(graph,n.id,result.payload as Record<string,unknown>):undefined;store.commitItem(result,result.stageAttempt);if(result.disposition!=='prepared'){if(result.disposition==='failed' && result.error?.retriable && result.stageAttempt<initial.budgets.unit.maxAttempts)continue;if(result.disposition==='blocked')blockedError??=result.error??{code:'STAGE_BLOCKED',message:'Stage blocked',retriable:false};else failedError??=result.error??{code:'STAGE_FAILED',message:'Stage failed',retriable:false};failed.add(n.id);continue;}graph=nextGraph!;this.updateCounts(taskId,fence,graph);}
+     catch(error){if(signal.aborted)throw error;const settled=this.settleStageFailure(taskId,fence,n,error,stageResult);const detail=settled?.error??stageFailure(error);if(settled?.disposition==='blocked')blockedError??=detail;else failedError??=detail;failed.add(n.id);}}
+    if(failed.size)for(const node of graph.nodes.filter(item=>item.phase==='generate'&&!graph.completed.includes(item.id)&&!failed.has(item.id))){try{const attempt=store.beginAttempt(taskId,node.phase,node.id,fence,node.inputHash,initial.executionPolicy?{stageKind:node.kind as KnowledgeStageKind}:undefined);const payload={reason:'BLOCKED_BY_DEPENDENCY'};store.commitItem({...this.localResult(taskId,fence,node,attempt,payload),disposition:'blocked',error:{code:'BLOCKED_BY_DEPENDENCY',message:'A required dependency did not complete',retriable:true}},attempt);}catch{/* Budget or stale fence already prevents execution. */}}
+    if(failed.size||graph.total===null||!graph.completed.includes('validate')){const counts=store.getTask(taskId)!.metadata!.repoWiki!.counts;job=blockedError?store.setState(taskId,fence,'blocked',{error:blockedError,counts:{...counts,blocked:Math.max(1,counts.blocked)}}):store.setState(taskId,fence,'failed',{outcome:'partial',error:failedError,counts:{...counts,failed:Math.max(1,failed.size)}});this.notify(job);return;}
+@@ -91,7 +91,7 @@ export class KnowledgeKernelCoordinator {
+     if(restarted)continue;
+     if(!active.size)break;
+     const settled=await Promise.race(active.values());active.delete(settled.node.id);visible.delete(settled.node.id);notify();const node=settled.node;
+-    try{if(settled.error)throw settled.error;let result=settled.result!;if(result.disposition==='failed'&&(result.error?.code.includes('SNAPSHOT_CHANGED')||result.error?.code.includes('SOURCE_CHANGED')))result={...result,disposition:'blocked'};const current=graph.nodes.find(item=>item.id===node.id);if(!current||current.inputHash!==result.inputHash)throw new Error('STALE_ATTEMPT');const next=result.disposition==='prepared'?advanceStageGraph(graph,node.id,result.payload as Record<string,unknown>):undefined;store.commitItem(result,result.stageAttempt);
++    try{if(settled.error)throw settled.error;let result=settled.result!;if(signal.aborted&&result.disposition!=='prepared')throw new Error('INTERRUPTED');if(result.disposition==='failed'&&(result.error?.code.includes('SNAPSHOT_CHANGED')||result.error?.code.includes('SOURCE_CHANGED')))result={...result,disposition:'blocked'};const current=graph.nodes.find(item=>item.id===node.id);if(!current||current.inputHash!==result.inputHash)throw new Error('STALE_ATTEMPT');const next=result.disposition==='prepared'?advanceStageGraph(graph,node.id,result.payload as Record<string,unknown>):undefined;store.commitItem(result,result.stageAttempt);
+       if(result.disposition!=='prepared'){if(result.disposition==='failed'&&result.error?.retriable&&result.stageAttempt<policy.profiles[node.kind as KnowledgeStageKind].maxAttempts)continue;if(result.disposition==='blocked')blockedError??=result.error??{code:'STAGE_BLOCKED',message:'Stage blocked',retriable:false};else failedError??=result.error??{code:'STAGE_FAILED',message:'Stage failed',retriable:false};failed.add(node.id);continue;}
+       graph=next!;this.updateCounts(taskId,fence,graph);
+       }catch(error){if(signal.aborted)continue;const settledFailure=this.settleStageFailure(taskId,fence,node,error,settled.result);const detail=settledFailure?.error??stageFailure(error);if(settledFailure?.disposition==='blocked')blockedError??=detail;else failedError??=detail;failed.add(node.id);}
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.test.ts" b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+index 683084a0..37bb0689 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.test.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+@@ -34,6 +34,14 @@ it.each([[false,'failed'],[true,'failed'],[false,'blocked'],[true,'blocked']] as
+  finally{await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
+ },30000);
+ 
++it.each([[false,false],[true,false],[false,true],[true,true]])('settles pause safely (v2=%s, prepared=%s)',async (useV2,completed)=>{
++ const base=mkdtempSync(join(tmpdir(),'knowledge-pause-return-')),root=join(base,'src');mkdirSync(root);writeFileSync(join(root,'readme.md'),'# project\n');const engine=new WorkspaceEngine(join(base,'data'));const db=new DatabaseSync(':memory:');const store=new KnowledgeBuildStore(db,{controllerEpoch:'epoch'});const project=new KnowledgeProjectPort(engine);const p=engine.create_project(root,'en');const source=await project.prepare(p.id,'wiki');let waiting=false;
++ const executeStage=async(req:StageExecutionRequest,signal:AbortSignal):Promise<StageExecutionResult>=>{const sources=[{path:'readme.md',hash:source.source.hashes['readme.md'],start:1,end:1}];if(req.phase==='plan'){waiting=true;await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}));return {version:1,taskId:req.taskId,fence:req.fence,phase:req.phase,itemId:req.itemId,stageAttempt:req.attempt,sequence:1,inputHash:req.inputHash,outputHash:hashKnowledgePayload(completed?{items:[{id:'intro',title:'Intro',goal:'Explain',dependencies:[]}]}:null),payload:completed?{items:[{id:'intro',title:'Intro',goal:'Explain',dependencies:[]}]}:null,evidence:[],dependencies:[],disposition:completed?'prepared':'failed',...(completed?{}:{error:{code:'MODEL_ERROR',message:'aborted',retriable:false}})};}const payload={summary:'Project',sources};return {version:1,taskId:req.taskId,fence:req.fence,phase:req.phase,itemId:req.itemId,stageAttempt:req.attempt,sequence:1,inputHash:req.inputHash,outputHash:hashKnowledgePayload(payload),payload,evidence:[{path:'readme.md',hash:sources[0].hash,startLine:1,endLine:1,kind:'read'}],dependencies:[],disposition:'prepared'};};
++ const c=new KnowledgeKernelCoordinator({store,project,bindModel:async()=>binding,executeStage,abortStage:async()=>{},pipelineConfigHash:useV2?'knowledge-kernel-qoder-v2':'knowledge-kernel-v1'});
++ try{const started=await c.start({version:1,requestId:'pause-return',projectId:p.id,domain:'wiki',language:'en',intent:'generate',confirmExternal:true,expectedModelIdentity:knowledgeModelIdentity(binding),expectedPlanToken:source.planToken});await viWait(()=>waiting);const before=store.getTask(started.run!.taskId)!;const paused=await c.act({version:1,requestId:'pause-return-action',taskId:before.id,expectedRevision:before.metadata!.repoWiki!.revision,action:'pause'});expect(paused.run?.state).toBe('paused');const job=store.getTask(before.id)!;expect(job.metadata?.repoWiki?.counts.failed).toBe(0);expect(store.listItems(job.id).find(i=>i.phase==='plan')?.state).toBe(completed?'prepared':'running');expect(store.listCheckpoints(job.id).some(i=>i.phase==='overview')).toBe(true);}
++ finally{await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
++},30000);
++
+ it.each([false,true])('settles an interrupted stage as terminal under its active fence (v2=%s)',async useV2=>{
+  const base=mkdtempSync(join(tmpdir(),'knowledge-stage-error-')),root=join(base,'src');mkdirSync(root);writeFileSync(join(root,'readme.md'),'# project\n');const engine=new WorkspaceEngine(join(base,'data'));const db=new DatabaseSync(':memory:');const store=new KnowledgeBuildStore(db,{controllerEpoch:'epoch'});const project=new KnowledgeProjectPort(engine);const p=engine.create_project(root,'en');const source=await project.prepare(p.id,'wiki');const pipelineConfigHash=useV2?'knowledge-kernel-qoder-v2':'knowledge-kernel-v1';
+  const executeStage=async(req:StageExecutionRequest):Promise<StageExecutionResult>=>{if(req.phase==='overview')throw new Error('C:\\private\\repo\\secret.md?token=hidden');let payload:unknown={valid:true};return {version:1,taskId:req.taskId,fence:req.fence,phase:req.phase,itemId:req.itemId,stageAttempt:req.attempt,sequence:1,inputHash:req.inputHash,outputHash:hashKnowledgePayload(payload),payload,evidence:[],dependencies:[],disposition:'prepared'};};const c=new KnowledgeKernelCoordinator({store,project,bindModel:async()=>binding,executeStage,abortStage:async()=>{},pipelineConfigHash});
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\validation.test.ts" b/electron-agent/electron/agentData/knowledgeKernel/validation.test.ts
+index e66559fd..47e561f3 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\validation.test.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/validation.test.ts
+@@ -53,6 +53,7 @@ describe('rendered Markdown link validation',()=>{
+   try{validateStageResult(request,page('[missing](missing.md?token=secret#anchor)'));throw new Error('expected failure');}catch(error){
+    expect(error).toMatchObject({code:'INVALID_PAGE_LINK'});expect((error as Error).message).toContain('modules/intro');expect((error as Error).message).toContain('missing.md');expect((error as Error).message).not.toContain('secret');
+   }
++  expect(stageFailure({code:'MODEL_HTTP_503',message:'MODEL_HTTP_503',retriable:true})).toEqual({code:'MODEL_HTTP_503',message:'Stage failed (MODEL_HTTP_503)',retriable:true});
+   expect(stageFailure({code:'C:\\private\\repo\\file.md?token=secret',message:'secret',retriable:true})).toEqual({code:'STAGE_FAILED',message:'Stage failed (STAGE_FAILED)',retriable:true});
+   expect(stageFailure(new Error('C:\\private\\repo\\file.md?token=secret'))).toEqual({code:'STAGE_FAILED',message:'Stage failed (STAGE_FAILED)',retriable:false});
+  });
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\.agents\\notes\\proposed\\bug-fix\\2026-11-02-repo-wiki-generation-validation-repair.md" b/.agents/notes/proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md
+index 0ae1cd3f..a18ddd54 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\live-repair-preimage\\.agents\\notes\\proposed\\bug-fix\\2026-11-02-repo-wiki-generation-validation-repair.md"
++++ b/.agents/notes/proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md
+@@ -38,3 +38,7 @@ Status: proposed
+ ## 审查修复边界
+ 
+ 引用式链接共用 definition 时只改写该目标一次。相对来源先按当前 Wiki 页目录安全归一化，越根拒绝，匹配真实 Wiki 页优先；原有不含 `..` 的仓库根路径引用仍可按 manifest 与 Read 证据识别。模型执行返回的 failed / blocked 诊断与异常走同一安全边界，保留合法错误码、原 disposition 和 retriable，不落原始异常文字。
++
++## 真实验收后的诊断与暂停边界
++
++唯一一次真实 repair 在收到模型错误后按约定暂停，未取得该页有效正文、未完成验收；父任务的 prepared 成果仍保留。原错误已净化为 STAGE_FAILED，无法倒推当时的 HTTP 状态。后续从模型响应入口只生成稳定的模型错误码，只有能明确辨认 HTTP 状态时才记录状态，绝不落响应全文或凭据；既有重试判定和次数不变。暂停中止后返回的非 prepared 结果不应落成业务失败，已完成且通过校验的 prepared 结果仍可 ACK，未完成项沿用现有续跑路径。

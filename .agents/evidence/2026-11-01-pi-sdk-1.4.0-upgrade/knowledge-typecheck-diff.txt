@@ -1,0 +1,1 @@
+IDENTICAL: 4 existing TypeScript errors; no new knowledge-kernel errors after SDK 1.4.0.

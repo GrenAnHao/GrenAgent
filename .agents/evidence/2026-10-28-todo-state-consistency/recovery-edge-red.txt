@@ -1,0 +1,48 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:40220) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/stores/agent.test.ts (56 tests | 2 failed | 54 skipped) 22ms
+     × 后台从缓存唤起时保留旧 todo 的完成标记 18ms
+     × 截断后快照读失败不沿用旧的收尾标记，并明确提示同步失败 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/stores/agent.test.ts > createAgentStore > 后台从缓存唤起时保留旧 todo 的完成标记
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ src/stores/agent.test.ts:132:56
+    130|     flushRAF();
+    131|     expect(store.showCachedSession(path)).toBe(true);
+    132|     expect(store.useStore.getState().todoListFinished).toBe(true);
+       |                                                        ^
+    133|   });
+    134|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |renderer| src/stores/agent.test.ts > createAgentStore > 截断后快照读失败不沿用旧的收尾标记，并明确提示同步失败
+AssertionError: expected true not to be true // Object.is equality
+ ❯ src/stores/agent.test.ts:140:60
+    138|     piMock.getMessages.mockRejectedValue(new Error('snapshot unavailab…
+    139|     await store.truncateTo('not-in-local-list', 'drop-target');
+    140|     expect(store.useStore.getState().todoListFinished).not.toBe(true);
+       |                                                            ^
+    141|     expect(store.useStore.getState().assistantStop).toBeUndefined();
+    142|     expect(store.useStore.getState().lastError).toContain('截断');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 54 skipped (56)
+   Start at  14:58:12
+   Duration  18.31s (transform 2.71s, setup 9.65s, import 3.02s, tests 22ms, environment 4.53s)
+

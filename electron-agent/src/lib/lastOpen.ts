@@ -11,6 +11,8 @@ export interface LastOpen {
   workspace: string;
   /** 停在草稿（新建还没首发）时为 null。 */
   sessionPath: string | null;
+  /** 未落盘对话的稳定身份；旧存档缺省时创建新身份。 */
+  draftId?: string;
 }
 
 export function readLastOpen(): LastOpen | null {
@@ -19,9 +21,13 @@ export function readLastOpen(): LastOpen | null {
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return null;
-    const { workspace, sessionPath } = parsed as Partial<LastOpen>;
+    const { workspace, sessionPath, draftId } = parsed as Partial<LastOpen>;
     if (typeof workspace !== 'string' || !workspace) return null;
-    return { workspace, sessionPath: typeof sessionPath === 'string' && sessionPath ? sessionPath : null };
+    return {
+      workspace,
+      sessionPath: typeof sessionPath === 'string' && sessionPath ? sessionPath : null,
+      ...(typeof draftId === 'string' && draftId.startsWith('draft:') ? { draftId } : {}),
+    };
   } catch {
     return null;
   }
@@ -39,7 +45,7 @@ export function writeLastOpen(value: LastOpen | null): void {
 export function lastOpenEquals(a: LastOpen | null, b: LastOpen | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.workspace === b.workspace && a.sessionPath === b.sessionPath;
+  return a.workspace === b.workspace && a.sessionPath === b.sessionPath && a.draftId === b.draftId;
 }
 
 /** 会话 store 的当前位置 → 要记住的值；还没进任何工作区时为 null（启动过程中的空态不覆盖记忆）。 */
@@ -47,17 +53,22 @@ export function lastOpenFromState(state: {
   activeWorkspace: string;
   activeSessionPath: string | null;
   draftConversationCwd: string | null;
+  draftConversationId?: string | null;
 }): LastOpen | null {
   if (!state.activeWorkspace) return null;
   const draft = Boolean(
     state.draftConversationCwd && pathsEquivalent(state.draftConversationCwd, state.activeWorkspace),
   );
-  return { workspace: state.activeWorkspace, sessionPath: draft ? null : state.activeSessionPath || null };
+  return {
+    workspace: state.activeWorkspace,
+    sessionPath: draft ? null : state.activeSessionPath || null,
+    ...(draft && state.draftConversationId ? { draftId: state.draftConversationId } : {}),
+  };
 }
 
 export type StartupTarget =
   | { kind: 'session'; workspace: string; sessionPath: string }
-  | { kind: 'projectDraft'; workspace: string }
+  | { kind: 'projectDraft'; workspace: string; draftId?: string }
   | null;
 
 /**
@@ -77,6 +88,8 @@ export function pickStartupTarget(
     if (!hit || hit.archived) return null;
     return { kind: 'session', workspace: hit.cwd || remembered.workspace, sessionPath: hit.path };
   }
-  if (worksDir && isUnder(remembered.workspace, worksDir)) return null;
-  return { kind: 'projectDraft', workspace: remembered.workspace };
+  if (worksDir && isUnder(remembered.workspace, worksDir)) {
+    if (!remembered.draftId || sessions.some((session) => session.cwd && pathsEquivalent(session.cwd, remembered.workspace))) return null;
+  }
+  return { kind: 'projectDraft', workspace: remembered.workspace, ...(remembered.draftId ? { draftId: remembered.draftId } : {}) };
 }

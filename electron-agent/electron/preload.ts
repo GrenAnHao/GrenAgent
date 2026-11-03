@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC_CHANNELS } from './ipc/contracts';
+import type { FilePickerOptions } from './ipc/filePicker';
 
 type EventHandler = (event: { payload: unknown }) => boolean | void;
 
@@ -61,6 +62,7 @@ contextBridge.exposeInMainWorld('gren', {
     ipcRenderer.invoke(IPC_CHANNELS.invoke, { command, args }) as Promise<T>,
   subscribe,
   pickDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.pickDirectory),
+  pickFile: (options?: FilePickerOptions) => ipcRenderer.invoke(IPC_CHANNELS.pickFile, options),
   openUrl: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.openUrl, url),
   openPath: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.openPath, path),
   revealItemInDir: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.revealItem, path),

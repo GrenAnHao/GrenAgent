@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "references": [],
+  "compilerOptions": { "composite": false, "incremental": false, "types": ["vite/client", "node"] },
+  "include": [
+    "src/lib/pi.ts",
+    "src/lib/sessionPreferences.ts",
+    "src/features/chat/input/actions/composerPreferences.ts",
+    "src/features/chat/input/actions/ModelThinkingAction.tsx",
+    "src/features/chat/input/actions/FastModeToggle.tsx",
+    "ui-harness/scenarios/model-fast.tsx",
+    "ui-harness/scenarios/session-preferences.tsx"
+  ]
+}

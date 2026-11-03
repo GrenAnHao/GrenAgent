@@ -63,6 +63,31 @@ describe("fable-behavior extension", () => {
     expect(res?.message?.content?.toLowerCase()).toMatch(/explore|read-only|plan/);
   });
 
+  it("yields to gpt-with-taste when a gpt model is active", async () => {
+    const { pi, handlers } = makePi();
+    fableBehavior(pi);
+    const onGpt = {
+      ...ctxWithMode("agent"),
+      model: { provider: "custom-mvrhmv0y", id: "gpt-6.1-sol" },
+      sessionManager: {
+        getEntries: () => [{ type: "custom", customType: "agent-mode", data: { mode: "agent" } }],
+        getBranch: () => [],
+      },
+    };
+    expect(await handlers["before_agent_start"]({}, onGpt)).toBeUndefined();
+
+    // /taste off 写在分支上：fable 立刻恢复。
+    const offBranch = {
+      ...onGpt,
+      sessionManager: {
+        getEntries: onGpt.sessionManager.getEntries,
+        getBranch: () => [{ type: "custom", customType: "gpt-with-taste:state", data: { enabled: false } }],
+      },
+    };
+    const back = (await handlers["before_agent_start"]({}, offBranch)) as { message?: { customType?: string } } | undefined;
+    expect(back?.message?.customType).toBe("fable-behavior");
+  });
+
   it("FABLE_BEHAVIOR=0 skips injection", async () => {
     process.env.FABLE_BEHAVIOR = "0";
     const { pi, handlers } = makePi();

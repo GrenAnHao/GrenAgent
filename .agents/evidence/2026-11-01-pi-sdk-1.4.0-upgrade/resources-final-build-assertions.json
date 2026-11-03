@@ -1,0 +1,187 @@
+{
+  "checkedAt": "2026-11-01T12:37:25.325Z",
+  "checks": [
+    {
+      "ok": true,
+      "label": "main.js"
+    },
+    {
+      "ok": true,
+      "label": "main.jsc"
+    },
+    {
+      "ok": true,
+      "label": "pi-worker.js"
+    },
+    {
+      "ok": true,
+      "label": "pi-worker.jsc"
+    },
+    {
+      "ok": true,
+      "label": "agent-host.js"
+    },
+    {
+      "ok": true,
+      "label": "agent-host.jsc"
+    },
+    {
+      "ok": true,
+      "label": "agentdata-host.js"
+    },
+    {
+      "ok": true,
+      "label": "agentdata-host.jsc"
+    },
+    {
+      "ok": true,
+      "label": "codegraph-host.js"
+    },
+    {
+      "ok": true,
+      "label": "codegraph-host.jsc"
+    },
+    {
+      "ok": true,
+      "label": "codegraph-worker.js"
+    },
+    {
+      "ok": true,
+      "label": "codegraph-worker.jsc"
+    },
+    {
+      "ok": true,
+      "label": "chunks/worker.js"
+    },
+    {
+      "ok": true,
+      "label": "chunks/worker.jsc"
+    },
+    {
+      "ok": true,
+      "label": "package commonjs"
+    },
+    {
+      "ok": true,
+      "label": "repo-wiki-host.cjs"
+    },
+    {
+      "ok": true,
+      "label": "bytecode-loader.cjs"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/runner.py"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/runner.py"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/runner.mjs"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/runner.mjs"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/pi-sandbox-win.exe"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/pi-sandbox-win.exe"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/pi-sandbox-launch.exe"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/pi-sandbox-launch.exe"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/pi-job-guard.exe"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/pi-job-guard.exe"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/prompts"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/prompts"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/texts"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/texts"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/texts/LICENSE"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/texts/LICENSE"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main/ultra-rules.md"
+    },
+    {
+      "ok": true,
+      "label": "out-pkg\\main\\chunks/ultra-rules.md"
+    }
+  ],
+  "digests": [
+    {
+      "rel": "agent-host.jsc",
+      "sha256": "32d81db2517a32bd1ebe48a808c584e53f8e27a730ee2b98f57a1940f643948a",
+      "bytes": 18136
+    },
+    {
+      "rel": "pi-worker.jsc",
+      "sha256": "1c0806be02174c7d0e7242ea0b79335a99197a48fd51ffc1a22ce3f2b697841d",
+      "bytes": 6720
+    },
+    {
+      "rel": "agentdata-host.jsc",
+      "sha256": "bb459bd2c56901d1515d9e81de118f5aa4372eb8ccc025dc9b553a767a0c290d",
+      "bytes": 21432
+    },
+    {
+      "rel": "codegraph-host.jsc",
+      "sha256": "e14ebd14838e83abe663496e5b904ecc7df77d15747ad02105dcaa82b11b1863",
+      "bytes": 89528
+    },
+    {
+      "rel": "codegraph-worker.jsc",
+      "sha256": "e33a576ad744b0c1810581621bbb008721f4d9943bc11af1c08dddf1b6f332fe",
+      "bytes": 5592
+    },
+    {
+      "rel": "chunks/worker.jsc",
+      "sha256": "9d22e8af39e5b31b837c108982c25d37de5b3312074a0fc73caba8c8a2a92c5f",
+      "bytes": 2432
+    },
+    {
+      "rel": "repo-wiki-host.cjs",
+      "sha256": "400987ba4e54edb12a3ae68f91ee5a6dde277776edce987f701feadb74f469b6",
+      "bytes": 863735
+    },
+    {
+      "rel": "bytecode-loader.cjs",
+      "sha256": "cdcfbe2ab18e7ce3fd8c143e6183fafbcf802508465003549de0075833224c22",
+      "bytes": 2308
+    }
+  ]
+}

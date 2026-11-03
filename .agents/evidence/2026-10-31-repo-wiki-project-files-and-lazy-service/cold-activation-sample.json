@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-31T13:18:43.653Z",
+  "activationMs": 7.576400000000035,
+  "platform": "win32",
+  "node": "v25.5.0",
+  "sourceIdentity": "694c72cb01ed81c40bd46f72882346582b9f9c5459a236939adcc855b28cf775",
+  "sourceSnapshotFile": "task-5-source-snapshot.json",
+  "registrations": 7,
+  "root": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\Pi-repowiki-integration\\repo-wiki-lazy-xvFgg7",
+  "childPid": null,
+  "authorityReads": 0,
+  "modelResolutions": 0,
+  "boundary": "API only; seven newly registered temp projects and seven seeded legacy DB records; in-memory WorkspaceService snapshot primed; real production service; child build excluded from measured interval; no renderer paint or OneDrive cold filesystem measurement",
+  "oldSampleMs": 33480,
+  "oldSampleBoundary": "Earlier observed real seven-project activation; different source/data/cache state, not a matched statistical benchmark"
+}

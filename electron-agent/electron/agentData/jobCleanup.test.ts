@@ -3,7 +3,7 @@ import { AgentDataRuntime } from './runtime';
 import { AgentDataClient } from './client';
 
 describe('AgentData job cleanup RPC', () => {
-  it('removes only terminal records and preserves Wiki, memory and audit data', async () => {
+  it('removes only terminal records and preserves Wiki and audit data', async () => {
     const runtime = new AgentDataRuntime({ dataPath: ':memory:' });
     const client = new AgentDataClient(await runtime.start());
     try {
@@ -12,8 +12,7 @@ describe('AgentData job cleanup RPC', () => {
       await client.request('admin.jobs.complete', { id: done.id });
       await client.request('admin.jobs.cancel', { id: cancelled.id });
       await client.request('admin.jobs.start', { id: active.id });
-      await runtime.requestAdmin('wiki.replace', { workspace: '/repo', page: 'guide', title: 'Guide', content: '# Retained wiki' });
-      await client.request('memory.upsert', { userId: 'local', workspace: '/repo', level: 1, content: 'retained memory' });
+      const wiki = await runtime.requestAdmin<{ wikiId: string }>('wiki.create', { name: 'Retained Wiki' });
       const audit = await client.request<unknown[]>('admin.audit.list');
 
       await expect(client.request('admin.jobs.remove', { id: active.id })).rejects.toMatchObject({ code: 'JOB_ACTIVE' });
@@ -21,8 +20,7 @@ describe('AgentData job cleanup RPC', () => {
       await expect(client.request('admin.jobs.clear', { ids: [done.id, cancelled.id, active.id, waiting.id] })).resolves.toEqual({ deletedIds: [done.id] });
       const remaining = await client.request<Array<{ id: string }>>('admin.jobs.list');
       expect(remaining.map((job) => job.id).sort()).toEqual([active.id, waiting.id].sort());
-      await expect(runtime.requestAdmin('wiki.read', { workspace: '/repo', page: 'guide' })).resolves.toMatchObject({ content: '# Retained wiki' });
-      await expect(client.request('memory.search', { userId: 'local', workspace: '/repo', query: 'retained' })).resolves.toHaveLength(1);
+      await expect(runtime.requestAdmin('wiki.read', { wikiId: wiki.wikiId })).resolves.toMatchObject({ name: 'Retained Wiki' });
       await expect(client.request('admin.audit.list')).resolves.toEqual(expect.arrayContaining(audit));
     } finally { await client.close(); runtime.close(); }
   });
@@ -31,7 +29,7 @@ describe('AgentData job cleanup RPC', () => {
     const runtime = new AgentDataRuntime({ dataPath: ':memory:' });
     const client = new AgentDataClient(await runtime.start());
     try {
-      const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
+      const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'codegraph.sync', workspace: '/repo' });
       await client.request('admin.jobs.complete', { id: job.id });
       for (const params of [{}, { ids: null }, { ids: [job.id, 1] }, { ids: [''] }]) {
         await expect(client.request('admin.jobs.clear', params)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });

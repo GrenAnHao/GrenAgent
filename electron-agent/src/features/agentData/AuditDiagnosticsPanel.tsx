@@ -190,8 +190,7 @@ function AuditRecords({ visible, resourceFilter, selectionRequest, refreshToken 
         <Flex vertical gap={4}><Typography.Text type="secondary">资源类型</Typography.Text><Select aria-label="审计资源类型" value={resourceType} onChange={(value) => setResourceType(value as ResourceRef['type'] | '')} style={{ width: 160 }} options={[
           { value: '', label: '全部资源' },
           { value: 'wiki', label: '知识库' },
-          { value: 'project', label: '项目' },
-          { value: 'memory', label: '记忆' }
+          { value: 'project', label: '项目' }
         ]} /></Flex>
         <Flex vertical gap={4}><Typography.Text type="secondary">资源 ID</Typography.Text><Input aria-label="审计资源ID" value={resourceId} disabled={!resourceType} onChange={(e) => setResourceId(e.target.value)} style={{ width: 200 }} /></Flex>
         <Flex vertical gap={4}><Typography.Text type="secondary">开始日期</Typography.Text><DatePicker aria-label="开始日期" value={fromDate} onChange={(date) => setFromDate(date)} /></Flex>
@@ -259,7 +258,7 @@ function Diagnostics({ visible, refreshToken = 0, onNavigate }: Pick<Props, 'ref
     finally { if (request === openEpoch.current && current.current.visible) setOpenBusy(undefined); }
   };
   const categoryOf = (item: DiagnosticItem) => item.resource?.type === 'project' ? 'codegraph' : item.resource?.type ?? item.id.split(':')[0];
-  const categoryLabels: Record<string, string> = { codegraph: '代码索引', code: '代码索引', wiki: '知识库', memory: '记忆', runtime: '运行服务' };
+  const categoryLabels: Record<string, string> = { codegraph: '代码索引', code: '代码索引', wiki: '知识库', runtime: '运行服务' };
   const order = { action_required: 0, unchecked: 1, ok: 2 } as const;
   const bucketOf = (item: DiagnosticItem) => categoryLabels[categoryOf(item)] ? categoryOf(item) : 'other';
   const present = [...new Set((report?.items ?? []).map(bucketOf))];

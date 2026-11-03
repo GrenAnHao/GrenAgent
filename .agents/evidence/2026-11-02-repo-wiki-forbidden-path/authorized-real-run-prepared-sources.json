@@ -1,0 +1,220 @@
+[
+  {
+    "item_id": "generate:getting-started",
+    "markdown_characters": 12387,
+    "sources": [
+      {
+        "path": "README.md",
+        "start": 1,
+        "end": 103
+      },
+      {
+        "path": "install.sh",
+        "start": 1,
+        "end": 11
+      },
+      {
+        "path": "install.ps1",
+        "start": 1,
+        "end": 21
+      },
+      {
+        "path": ".gitignore",
+        "start": 1,
+        "end": 5
+      },
+      {
+        "path": ".gitattributes",
+        "start": 1,
+        "end": 4
+      },
+      {
+        "path": "scripts/install.mjs",
+        "start": 1,
+        "end": 254
+      },
+      {
+        "path": "SKILL.md",
+        "start": 1,
+        "end": 52
+      },
+      {
+        "path": "scripts/npf-cli.ts",
+        "start": 1,
+        "end": 130
+      },
+      {
+        "path": "bin/npf",
+        "start": 1,
+        "end": 8
+      },
+      {
+        "path": "VERSION",
+        "start": 1,
+        "end": 2
+      },
+      {
+        "path": "examples/README.md",
+        "start": 1,
+        "end": 151
+      },
+      {
+        "path": "npf-workflow.md",
+        "start": 1,
+        "end": 126
+      },
+      {
+        "path": "NOTE-CONTRACT.md",
+        "start": 1,
+        "end": 54
+      },
+      {
+        "path": "notes/templates/verify-notes.yml",
+        "start": 1,
+        "end": 41
+      },
+      {
+        "path": "scripts/uninstall.mjs",
+        "start": 1,
+        "end": 61
+      },
+      {
+        "path": "notes/METHOD.md",
+        "start": 1,
+        "end": 80
+      },
+      {
+        "path": "templates/AGENTS.section.md",
+        "start": 1,
+        "end": 21
+      },
+      {
+        "path": "notes/UPSTREAM.txt",
+        "start": 1,
+        "end": 9
+      },
+      {
+        "path": "notes/references/verification.md",
+        "start": 1,
+        "end": 38
+      },
+      {
+        "path": "scripts/verify-note-evidence.ts",
+        "start": 1,
+        "end": 59
+      },
+      {
+        "path": "notes/scripts/check-note-anchors.ts",
+        "start": 1,
+        "end": 40
+      },
+      {
+        "path": "notes/scripts/build-board.ts",
+        "start": 1,
+        "end": 45
+      },
+      {
+        "path": "notes/scripts/agent-note-tree.ts",
+        "start": 3,
+        "end": 3
+      },
+      {
+        "path": "notes/scripts/verify-archived-agent-notes.ts",
+        "start": 7,
+        "end": 7
+      },
+      {
+        "path": "notes/scripts/archive-agent-note.ts",
+        "start": 1,
+        "end": 40
+      },
+      {
+        "path": "notes/scripts/verify-agent-note-tree.ts",
+        "start": 1,
+        "end": 30
+      },
+      {
+        "path": "notes/scripts/verify-agent-note-format.ts",
+        "start": 1,
+        "end": 30
+      }
+    ]
+  },
+  {
+    "item_id": "generate:modules/bin",
+    "markdown_characters": 5207,
+    "sources": [
+      {
+        "path": "bin/npf",
+        "start": 1,
+        "end": 8
+      },
+      {
+        "path": "scripts/npf-cli.ts",
+        "start": 1,
+        "end": 140
+      },
+      {
+        "path": "scripts/install.mjs",
+        "start": 85,
+        "end": 85
+      },
+      {
+        "path": ".gitattributes",
+        "start": 2,
+        "end": 2
+      }
+    ]
+  },
+  {
+    "item_id": "generate:modules/templates",
+    "markdown_characters": 5630,
+    "sources": [
+      {
+        "path": "templates/AGENTS.section.md",
+        "start": 1,
+        "end": 21
+      },
+      {
+        "path": "scripts/install.mjs",
+        "start": 1,
+        "end": 254
+      },
+      {
+        "path": "NOTE-CONTRACT.md",
+        "start": 1,
+        "end": 54
+      },
+      {
+        "path": "scripts/npf-cli.ts",
+        "start": 310,
+        "end": 318
+      },
+      {
+        "path": "notes/METHOD.md",
+        "start": 31,
+        "end": 35
+      },
+      {
+        "path": "npf-workflow.md",
+        "start": 108,
+        "end": 112
+      },
+      {
+        "path": "SKILL.md",
+        "start": 1,
+        "end": 52
+      },
+      {
+        "path": "notes/templates/verify-notes.yml",
+        "start": 1,
+        "end": 41
+      },
+      {
+        "path": "VERSION",
+        "start": 1,
+        "end": 2
+      }
+    ]
+  }
+]

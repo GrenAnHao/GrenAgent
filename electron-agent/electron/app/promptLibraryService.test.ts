@@ -119,3 +119,50 @@ describe('ruleIdFromTitle', () => {
     expect(ruleIdFromTitle('pnpm', new Set(['Pnpm']))).toBe('pnpm-2');
   });
 });
+
+describe('规则模式范围', () => {
+  it('保存时写入 modes，列表读回', async () => {
+    const rule = await service.saveRule({ workspace, scope: 'global', title: 'Ultra 调度', enabled: true, body: '- 派工', modes: ['ultra'] });
+    expect(rule.modes).toEqual(['ultra']);
+    expect(await readFile(rule.path, 'utf8')).toBe('---\ntitle: "Ultra 调度"\nenabled: true\nmodes: [ultra]\n---\n- 派工\n');
+    expect((await service.listRules(workspace))[0].modes).toEqual(['ultra']);
+  });
+
+  it('没有模式范围时保持旧文件格式（不写 modes）', async () => {
+    const rule = await service.saveRule({ workspace, scope: 'global', title: '全部', enabled: true, body: 'x' });
+    expect(rule.modes).toBeUndefined();
+    expect(await readFile(rule.path, 'utf8')).toBe('---\ntitle: "全部"\nenabled: true\n---\nx\n');
+  });
+
+  it('保存时去重，空列表等同全部模式', async () => {
+    const rule = await service.saveRule({
+      workspace, scope: 'global', title: 'T', enabled: true, body: 'x', modes: ['ultra', 'ultra'],
+    });
+    expect(rule.modes).toEqual(['ultra']);
+    const all = await service.saveRule({ workspace, scope: 'global', title: 'A', enabled: true, body: 'x', modes: [] });
+    expect(all.modes).toBeUndefined();
+  });
+
+  it.each(['ultr', 'brainstorm'])('非法或已移除模式范围 %s 拒绝保存且不覆盖原规则', async (mode) => {
+    const original = await service.saveRule({ workspace, scope: 'global', title: 'Ultra only', enabled: true, body: 'keep', modes: ['ultra'] });
+    const before = await readFile(original.path, 'utf8');
+    await expect(service.saveRule({ workspace, scope: 'global', original: { scope: 'global', id: original.id }, title: 'Ultra only', enabled: true, body: 'bad', modes: [mode] })).rejects.toThrow('未知规则模式');
+    expect(await readFile(original.path, 'utf8')).toBe(before);
+  });
+
+  it('开关只改 enabled，保留 modes', async () => {
+    const rule = await service.saveRule({ workspace, scope: 'global', title: 'T', enabled: true, body: 'b', modes: ['plan'] });
+    await service.setRuleEnabled({ scope: 'global', id: rule.id }, false, workspace);
+    expect(await readFile(rule.path, 'utf8')).toBe('---\ntitle: "T"\nenabled: false\nmodes: [plan]\n---\nb\n');
+    expect((await service.listRules(workspace))[0].modes).toEqual(['plan']);
+  });
+
+  it('改范围时带上原 modes', async () => {
+    const created = await service.saveRule({ workspace, scope: 'global', title: 'T', enabled: true, body: 'b', modes: ['ultra'] });
+    const moved = await service.saveRule({
+      workspace, scope: 'project', original: { scope: 'global', id: created.id }, title: 'T', enabled: true, body: 'b', modes: ['ultra'],
+    });
+    expect((await service.listRules(workspace)).find((rule) => rule.scope === 'project')?.modes).toEqual(['ultra']);
+    expect(moved.modes).toEqual(['ultra']);
+  });
+});

@@ -3,7 +3,7 @@ import type { CodeRetrievalTool } from '../../agentData/codeRetrievalProtocol';
 import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import type { CodeGraphStatusView } from './codeGraphEngine';
 import type { CodeSearchView } from './codeGraphService';
-import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, CODEGRAPH_SYNC_EVENT_CHANNEL, type CodeGraphDiagSample, type CodeGraphHostMethod, type CodeGraphProgressEvent, type CodeGraphSyncEvent } from './hostContract';
+import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, CODEGRAPH_STATE_CHANNEL, CODEGRAPH_SYNC_EVENT_CHANNEL, type CodeGraphDiagSample, type CodeGraphHostMethod, type CodeGraphProgressEvent, type CodeGraphStateEvent, type CodeGraphSyncEvent } from './hostContract';
 import { probeProjects, type ProjectIndexState } from './indexProbe';
 
 /** 主进程只用到子进程客户端的这几样（AgentProcessClient 满足）。 */
@@ -20,6 +20,8 @@ export interface CodeGraphHostClientOptions {
   onDiag?: (sample: CodeGraphDiagSample) => void;
   /** 同步失败 / 熔断 / 长时间占锁（自动同步不建 job，靠它留痕）。 */
   onSyncEvent?: (event: CodeGraphSyncEvent) => void;
+  /** 调度阶段变化。没人订阅时面板继续轮询 status。 */
+  onState?: (event: CodeGraphStateEvent) => void;
 }
 
 /**
@@ -93,5 +95,6 @@ export class CodeGraphHostClient {
     }
     if (channel === CODEGRAPH_DIAG_CHANNEL) { this.options.onDiag?.(payload as CodeGraphDiagSample); return; }
     if (channel === CODEGRAPH_SYNC_EVENT_CHANNEL && payload && typeof payload === 'object') this.options.onSyncEvent?.(payload as CodeGraphSyncEvent);
+    if (channel === CODEGRAPH_STATE_CHANNEL && payload && typeof payload === 'object') this.options.onState?.(payload as CodeGraphStateEvent);
   }
 }

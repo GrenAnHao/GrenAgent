@@ -43,7 +43,8 @@ const styles = createStaticStyles(({ css }) => ({
     align-items: center;
     gap: 5px;
     margin: 0 6px;
-    padding: 2px 10px 4px 28px;
+    min-height: 28px;
+    padding: 2px 10px 4px 36px;
     color: ${cssVar.colorTextTertiary};
     font-size: var(--pi-font-size-secondary, 13px);
     cursor: pointer;
@@ -55,6 +56,10 @@ const styles = createStaticStyles(({ css }) => ({
   listWrap: css`
     flex: 1;
     min-height: 0;
+
+    [data-sidebar-item='session'] > div {
+      padding-inline-start: 36px;
+    }
   `,
 }));
 
@@ -326,7 +331,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
     (isLoading || allSessionsLoading) && conversations.length === 0 && items.length <= 2;
 
   return (
-    <Flexbox height="100%" style={{ minHeight: 0, background: 'var(--gren-sidebar-bg, transparent)' }}>
+    <Flexbox height="100%" style={{ minHeight: 0, background: `var(--gren-sidebar-bg, ${cssVar.colorBgLayout})` }}>
       <SidebarActions />
       <div className={styles.listWrap}>
         {showLoading ? (
@@ -340,6 +345,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
             {(item: SidebarItem) => (
               <div
                 key={item.key}
+                data-sidebar-item={item.type}
                 onPointerEnter={() => {
                   // 只有会话行预热：项目行点了只是展开。划过不预热，停住才建，见 HOVER_PREWARM_DWELL_MS。
                   const cwd = item.type === 'conversation' || item.type === 'session' ? cwdOfItem(item) : undefined;

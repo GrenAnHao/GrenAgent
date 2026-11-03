@@ -25,6 +25,13 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe('统一任务操作', () => {
+  it('shows the Repo Wiki page and task message alongside its durable progress', () => {
+    render(<JobsPanel tasks={[{ ...task, kind: 'repoWiki.generate', label: 'Repo Wiki 文档生成', status: 'running', stage: '正在生成', progress: 45, currentPage: 'architecture', message: '正在生成架构文档' }]} initialGroup="all" />);
+    const row = screen.getByRole('row', { name: /Repo Wiki 文档生成/ });
+    expect(within(row).getByText('当前文档：architecture')).toBeInTheDocument();
+    expect(within(row).getByText('正在生成架构文档')).toBeInTheDocument();
+    expect(within(row).getByText('45%')).toBeInTheDocument();
+  });
   it('collapses system tasks and distinguishes matching IDs without fabricating progress', async () => {
     const { rerender } = render(<JobsPanel tasks={[task, systemTask]} initialGroup="all" onRefresh={vi.fn()} />);
     expect(screen.queryByText('后台维护')).toBeNull();
@@ -182,11 +189,11 @@ describe('统一任务操作', () => {
   it('uniqueTaskKindOptions 用中文 label 去重 kind', () => {
     expect(uniqueTaskKindOptions([
       task,
-      { ...task, kind: 'memory_extract', label: '记忆提取' },
-      { ...task, kind: 'memory_extract', label: '记忆提取' },
+      { ...task, kind: 'codegraph.sync', label: '代码索引同步' },
+      { ...task, kind: 'codegraph.sync', label: '代码索引同步' },
     ])).toEqual([
       { value: 'wiki.ingest', label: '生成知识页面' },
-      { value: 'memory_extract', label: '记忆提取' },
+      { value: 'codegraph.sync', label: '代码索引同步' },
     ]);
   });
 
@@ -200,14 +207,14 @@ describe('统一任务操作', () => {
   it('类型和工作区筛选下拉显示可读名称，工作区选项保留完整路径', async () => {
     render(<JobsPanel tasks={[
       task,
-      { ...task, ref: { source: 'user', id: 'mem' }, key: 'user:mem', kind: 'memory_extract', label: '记忆提取', workspace: 'C:\\Users\\rxstudio\\Temp\\evox' },
+      { ...task, ref: { source: 'user', id: 'mem' }, key: 'user:mem', kind: 'codegraph.sync', label: '代码索引同步', workspace: 'C:\\Users\\rxstudio\\Temp\\evox' },
       { ...task, ref: { source: 'user', id: 'twin' }, key: 'user:twin', kind: 'wiki_page_generate', label: 'Wiki 页面生成', workspace: 'D:/other/alpha' },
     ]} initialGroup="all" />);
     await openSelect('任务类型');
     const typeTexts = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option'))
       .map((item) => item.textContent?.trim());
-    expect(typeTexts).toEqual(expect.arrayContaining(['全部类型', '记忆提取', '生成知识页面', 'Wiki 页面生成']));
-    expect(typeTexts.join('\n')).not.toMatch(/memory_extract|wiki\.ingest|wiki_page_generate/);
+    expect(typeTexts).toEqual(expect.arrayContaining(['全部类型', '代码索引同步', '生成知识页面', 'Wiki 页面生成']));
+    expect(typeTexts.join('\n')).not.toMatch(/codegraph.sync|wiki\.ingest|wiki_page_generate/);
 
     fireEvent.mouseDown(screen.getByLabelText('任务类型').closest('.ant-select')!);
     await openSelect('任务工作区');

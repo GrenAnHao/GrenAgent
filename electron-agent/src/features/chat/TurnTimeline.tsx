@@ -104,6 +104,7 @@ function SegmentItem({ segment }: { segment: TimelineSegment }) {
           streaming={segment.streaming}
           durationMs={segment.durationMs}
           startedAt={segment.startedAt}
+          viewId={segment.timestamp != null ? `thinking:${segment.timestamp}` : null}
         />
       );
     case 'text':
@@ -138,7 +139,8 @@ const MemoSegment = memo(SegmentItem, (prev, next) => {
       a.content === b.content &&
       a.streaming === b.streaming &&
       a.durationMs === b.durationMs &&
-      a.startedAt === b.startedAt
+      a.startedAt === b.startedAt &&
+      a.timestamp === b.timestamp
     );
   }
   if (a.kind === 'text' && b.kind === 'text') {

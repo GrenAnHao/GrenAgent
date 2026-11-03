@@ -1,0 +1,30 @@
+import { cpSync, copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { defineConfig } from 'electron-vite';
+import base from './electron.vite.config';
+import { PI_ADJACENT_ASSETS } from './electron/agent/copyPiAdjacentAssets';
+import { removeMainCjsPackageJson } from './electron/agent/writeMainCjsPackageJson';
+
+// Verification-only config: Windows locks a running guard executable even when
+// copying the exact same bytes. Preserve identical assets and copy every change.
+export default defineConfig((env) => {
+  const config = base(env);
+  config.main!.build = { ...config.main!.build, emptyOutDir: false };
+  config.main!.plugins = config.main!.plugins!.map((plugin) => {
+    if (!plugin || typeof plugin !== 'object' || !('name' in plugin) || plugin.name !== 'copy-pi-adjacent-assets') return plugin;
+    return { name: 'copy-pi-adjacent-assets', closeBundle() {
+      const output = resolve(__dirname, 'out/main');
+      for (const destination of [output, resolve(output, 'chunks')]) {
+        if (destination !== output && !existsSync(destination)) continue;
+        mkdirSync(destination, { recursive: true });
+        for (const asset of PI_ADJACENT_ASSETS) {
+          const source = resolve(__dirname, '..', asset.from), target = resolve(destination, asset.to);
+          if ('dir' in asset && asset.dir) cpSync(source, target, { recursive: true });
+          else if (!existsSync(target) || !readFileSync(source).equals(readFileSync(target))) copyFileSync(source, target);
+        }
+      }
+      removeMainCjsPackageJson(output);
+    } };
+  });
+  return config;
+});

@@ -33,7 +33,7 @@ Status: implemented
 
 - **codebase-memory CLI（d90d4d12 / 24f694ea）**：单文件二进制、checksums 校验。已放弃：候选都体验过，CodeGraph 技术栈融合更好（用户说明）。
 - **CodeGraph MCP 实例池（a15920c5）**：复用上游 MCP，惰性加载。被内嵌 SDK 取代：为了方便统一管理（用户说明）。
-- **启用 SDK watcher 自动增量索引**：暂未启用：还没来得及做，已列入计划（用户说明）。后续跟进：接入 SDK watcher 做自动增量索引。方案见 [CodeGraph 移出主进程并自动同步](../../proposed/architecture/2026-10-16-codegraph-host-process-auto-sync.md)；第一批已落地，见 [CodeGraph 自动同步](./2026-10-18-codegraph-auto-sync-and-stale-reads.md)。
+- **启用 SDK watcher 自动增量索引**：当时没启用。后来用 SDK 的 `FileWatcher` 做自动增量，不走 `graph.watch()`，见 [CodeGraph 自动同步](./2026-10-18-codegraph-auto-sync-and-stale-reads.md)。原方案已关闭，见 [CodeGraph 自动索引提案](../../rejected/architecture/2026-10-16-codegraph-host-process-auto-sync.md)。
 
 ## Consequences
 

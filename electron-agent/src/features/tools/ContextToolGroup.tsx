@@ -1,9 +1,10 @@
 import { Accordion, AccordionItem, Flexbox, Text } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import { StatusIndicator } from './StatusIndicator';
 import { cardStyles } from './cardStyles';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
+import { useSessionViewExpandedState } from '../chat/useSessionViewExpanded';
 import { contextToolCategory } from './toolUtils';
 import { ToolExecution } from './ToolExecution';
 import type { ToolSegment } from '../chat/groupMessages';
@@ -51,10 +52,14 @@ function summarize(tools: ToolSegment[]): string {
 /**
  * 连续查找类工具折叠：对齐 MiMo 的 ContextToolGroup —— 收起时一条「已收集上下文 · 摘要」，
  * 展开为逐工具列表（各自仍可看详情）。始终停留在时间线里的真实位置。
+ *
+ * 展开状态属于会话视图：用组内首个 toolCallId 作稳定内容 ID，切会话/重挂/页面重载都能恢复，
+ * A、B 恰好共用同一 toolCallId 也不会串（见 sessionViewStateStore）。
  */
 function ContextToolGroupInner({ tools }: { tools: ToolSegment[] }) {
   const card = cardStyles;
-  const [open, setOpen] = useState(false);
+  const viewId = tools[0] ? `context:${tools[0].toolCallId}` : null;
+  const { expanded: open, setExpanded: setOpen } = useSessionViewExpandedState(viewId);
 
   const running = tools.some((t) => t.status === 'running');
   const errorCount = tools.filter((t) => t.status === 'error').length;

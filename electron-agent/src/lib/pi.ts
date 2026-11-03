@@ -287,17 +287,28 @@ export const pi = {
    */
   cancelSteer: (workspace: string, message: string, allowSole: boolean, targetSessionPath?: string | null) =>
     invoke<{ cancelled: boolean }>('agent_cancel_steer', { workspace, message, allowSole, ...target(targetSessionPath) }),
-  setModel: (workspace: string, provider: string, modelId: string) =>
-    invoke<unknown>('agent_set_model', { workspace, provider, modelId }),
+  setModel: (workspace: string, provider: string, modelId: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_set_model', { workspace, provider, modelId, ...target(targetSessionPath) }),
   cycleModel: (workspace: string) => invoke<unknown>('agent_cycle_model', { workspace }),
   getAvailableModels: (workspace: string) => invoke<unknown>('agent_get_available_models', { workspace }),
-  setThinkingLevel: (workspace: string, level: string) =>
-    invoke<unknown>('agent_set_thinking_level', { workspace, level }),
+  setThinkingLevel: (workspace: string, level: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_set_thinking_level', { workspace, level, ...target(targetSessionPath) }),
   /** 带会话路径时只改那份会话；草稿不带，改项目默认（新会话继承）。 */
   setMode: (workspace: string, mode: string, targetSessionPath?: string | null) =>
     invoke<unknown>('agent_set_mode', { workspace, mode, ...target(targetSessionPath) }),
   setApproval: (workspace: string, level: string, targetSessionPath?: string | null) =>
     invoke<unknown>('agent_set_approval', { workspace, level, ...target(targetSessionPath) }),
+  /** 会话自己的 Fast 开关；带会话路径时只改那份会话，草稿走本地偏好不调它。 */
+  setFastMode: (workspace: string, enabled: boolean, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_set_fast_mode', { workspace, enabled, ...target(targetSessionPath) }),
+  /** 项目默认四项：只读写 workspace 默认，不改现有会话。 */
+  getSessionDefaults: (workspace: string) =>
+    invoke<unknown>('agent_get_session_defaults', { workspace }),
+  setSessionDefaults: (workspace: string, preferences: unknown) =>
+    invoke<unknown>('agent_set_session_defaults', { workspace, preferences }),
+  /** 新会话可用草稿快照初始化四项（发送瞬间的偏好，不是当前全局会话）。 */
+  newSession: (workspace: string, initialPreferences?: unknown) =>
+    invoke<unknown>('agent_new_session', { workspace, initialPreferences }),
   /** 删任意段：把某条消息（按毫秒 timestamp）移出 LLM 上下文（对模型不可见、不删盘、可恢复）。 */
   excludeEntry: (workspace: string, timestamp: number) =>
     invoke<unknown>('agent_exclude_entry', { workspace, timestamp }),
@@ -340,7 +351,6 @@ export const pi = {
   /** 按会话路径补拉 Goal 投影（和 setStatus("goal") 同一种信封）。会话跑着也立刻返回；没有返回 null。 */
   getGoal: (workspace: string, sessionPath: string) =>
     invoke<unknown>('agent_get_goal', { workspace, targetSessionPath: sessionPath }),
-  newSession: (workspace: string) => invoke<unknown>('agent_new_session', { workspace }),
   switchSession: (workspace: string, sessionPath: string) =>
     invoke<unknown>('agent_switch_session', { workspace, sessionPath }),
   listSessions: (workspace: string) => invoke<SessionInfo[]>('list_pi_sessions', { workspace }),
@@ -416,6 +426,9 @@ export const pi = {
   reloadMcpServer: (workspace: string, name: string) =>
     invoke<void>('reload_mcp_server', { workspace, name }),
   getProviderConfig: () => invoke<ProviderConfigPayload>('get_provider_config'),
+  getModelFastPreferences: () => invoke<Record<string, boolean>>('get_model_fast_preferences'),
+  setModelFastPreference: (provider: string, modelId: string, enabled: boolean) =>
+    invoke<Record<string, boolean>>('set_model_fast_preference', { provider, modelId, enabled }),
   setProviderConfig: (modelsJson: string, authJson: string) =>
     invoke<RefreshResult>('set_provider_config', { modelsJson, authJson }),
   refreshModelRegistry: () => invoke<RefreshResult>('refresh_model_registry'),

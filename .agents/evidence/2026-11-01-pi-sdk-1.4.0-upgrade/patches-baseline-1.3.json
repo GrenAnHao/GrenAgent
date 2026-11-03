@@ -1,0 +1,44 @@
+[
+  {
+    "project": "cli",
+    "version": "1.3.0",
+    "packageRoot": "D:\\OneDrive\\Project Files\\Pi\\cli\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_0f2bff78d52818cffdd01879cc3cd5de\\node_modules\\@earendil-works\\pi-coding-agent",
+    "shellSha256": "afb94a7d291da72e7103ee856bcbc06b2c498edff09eb7f53dbaaa9a2574810e",
+    "diffSha256": "9bccf8c6394b8d6aa8782c10884c876890de9d2e4c90725cff61789f81b781f7",
+    "localShellHelper": true,
+    "spawnWhereCalls": 2,
+    "defaultDiffContext": "5",
+    "diffOutput": {
+      "diff": "    ...\n  6 line-6\n  7 line-7\n  8 line-8\n  9 line-9\n 10 line-10\n-11 line-11\n+11 changed-11\n 12 line-12\n 13 line-13\n 14 line-14\n 15 line-15\n 16 line-16\n    ...",
+      "firstChangedLine": 11
+    }
+  },
+  {
+    "project": "extensions",
+    "version": "1.3.0",
+    "packageRoot": "D:\\OneDrive\\Project Files\\Pi\\extensions\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_d79a7b0be80d4d7a03b0cd368bf52eb1\\node_modules\\@earendil-works\\pi-coding-agent",
+    "shellSha256": "afb94a7d291da72e7103ee856bcbc06b2c498edff09eb7f53dbaaa9a2574810e",
+    "diffSha256": "9bccf8c6394b8d6aa8782c10884c876890de9d2e4c90725cff61789f81b781f7",
+    "localShellHelper": true,
+    "spawnWhereCalls": 2,
+    "defaultDiffContext": "5",
+    "diffOutput": {
+      "diff": "    ...\n  6 line-6\n  7 line-7\n  8 line-8\n  9 line-9\n 10 line-10\n-11 line-11\n+11 changed-11\n 12 line-12\n 13 line-13\n 14 line-14\n 15 line-15\n 16 line-16\n    ...",
+      "firstChangedLine": 11
+    }
+  },
+  {
+    "project": "electron-agent",
+    "version": "1.3.0",
+    "packageRoot": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_1b5c88ae4c57ed3bd6aad4fcb03e4690\\node_modules\\@earendil-works\\pi-coding-agent",
+    "shellSha256": "c8378f2b0566e35f90dfbb622a2214acf5cf45d15107c44b260cad897b539f72",
+    "diffSha256": "fadc87523d52babf246967a1f1b921e621eb4437e50c50f8426c46cec3f05071",
+    "localShellHelper": false,
+    "spawnWhereCalls": 0,
+    "defaultDiffContext": "4",
+    "diffOutput": {
+      "diff": "    ...\n  7 line-7\n  8 line-8\n  9 line-9\n 10 line-10\n-11 line-11\n+11 changed-11\n 12 line-12\n 13 line-13\n 14 line-14\n 15 line-15\n    ...",
+      "firstChangedLine": 11
+    }
+  }
+]

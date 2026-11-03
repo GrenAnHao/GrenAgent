@@ -8,7 +8,7 @@ Status: implemented
 
 [codegraph-host 子进程](./2026-10-16-codegraph-host-process.md)把读写分到了不同线程，但同一工作区仍然读写互斥：有同步在跑时，这个工作区的读一律返回 `CodeGraph workspace is busy indexing`。手动同步偶尔一次还能忍。改成每次保存都自动同步之后，查询会频繁撞上 busy。
 
-这篇是 [CodeGraph 自动同步提案](../../proposed/architecture/2026-10-16-codegraph-host-process-auto-sync.md)落地的第一批：给旧结果、写调度、触发器、状态字段、面板。持久化状态表、读队列与超时、资源守卫、配置项留在提案里。
+这篇是 [CodeGraph 自动同步提案](../../rejected/architecture/2026-10-16-codegraph-host-process-auto-sync.md)落地的第一批：给旧结果、写调度、触发器、状态字段、面板。持久化状态表、读队列与超时、资源守卫、配置项当时留在那篇。读队列、补同步和资源守卫后来由 [读限制、补同步与熔断任务](./2026-10-27-codegraph-catchup-and-read-limits.md) 落地。原提案已关闭；总开关仍是 `GREN_CODEGRAPH_AUTO_SYNC`，没有面板开关。
 
 ## Decision
 
@@ -81,14 +81,11 @@ Status: implemented
   - 最多常驻 3 个递归 `fs.watch`。
   - SDK 构建忽略规则时，会在写线程里调用 `git`（与原来手动同步时的行为相同，只是现在更频繁）。
 - 已知上限：
-  - 增量同步期间，读可能看到部分文件已更新、部分还没更新（SDK 按文件分批提交）。还没有用 `PRAGMA data_version` 检测这种混合读。
-  - 没有持久化：重启后，第一次查询会触发补同步，而这一次查询本身拿到的仍是补同步之前的结果。
-  - 熔断只在状态和诊断里可见，不会在任务中心建失败任务。
   - 自动同步要等所有手动同步结束才开始。
+  - 混合读检测、重启后的补同步、熔断失败任务，见 [读限制、补同步与熔断任务](./2026-10-27-codegraph-catchup-and-read-limits.md)。
 - 需要重新评估的信号：
   - `runtime-diag.jsonl` 里频繁出现 `codegraph-sync-event`（failed / breaker）。
   - `watcher.degraded` 常见（EMFILE、WSL）。
-  - 用户在任务中心找不到熔断后的失败。
 
 ## 验证
 

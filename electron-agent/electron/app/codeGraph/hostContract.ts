@@ -3,7 +3,7 @@
  * 见 .agents/notes/implemented/architecture/2026-10-16-codegraph-host-process.md。
  */
 import type { IndexProgress } from '@colbymchenry/codegraph';
-import type { SyncEvent } from './syncScheduler';
+import type { SyncEvent, SyncPhase, SyncTrigger } from './syncScheduler';
 
 export const CODEGRAPH_HOST_METHODS = [
   'codegraph.status',
@@ -33,3 +33,20 @@ export interface CodeGraphDiagSample {
  */
 export const CODEGRAPH_SYNC_EVENT_CHANNEL = 'codegraph.syncEvent';
 export type CodeGraphSyncEvent = SyncEvent;
+
+/** 子进程 → 父进程：某个工作区的调度阶段变了。面板仍用 status 轮询兜底。 */
+export const CODEGRAPH_STATE_CHANNEL = 'codegraph.state';
+export interface CodeGraphStateEvent {
+  workspace: string;
+  phase: SyncPhase;
+  servingStale: boolean;
+  autoSync: boolean;
+  generation: number;
+  consecutiveFailures: number;
+  pendingChanges: number;
+  mode?: 'incremental' | 'full';
+  trigger?: SyncTrigger;
+  nextRetryAt?: number;
+  lastError?: { message: string; at: number; code?: string };
+  watcher: { active: boolean; degraded: boolean; reason?: string };
+}

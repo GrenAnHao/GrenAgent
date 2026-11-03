@@ -35,12 +35,12 @@ function ActivePanel({ module }: { module: ModuleId }) {
  * 避免切回「对话」时重挂整棵对话树（Sidebar + ChatView 全量消息 + Markdown + Dock + 终端），
  * Agent 数据首次访问后同样保活，保留筛选与滚动位置；其它面板按需挂载/卸载。
  */
-export function ModuleContainer({ chat, onOpenSession }: { chat: ReactNode; onOpenSession?: (cwd: string, path: string) => void | Promise<void> }) {
+export function ModuleContainer({ chat }: { chat: ReactNode }) {
   const activeModule = useModuleStore((s) => s.activeModule);
   const workspace = useSessionStore((state) => state.activeWorkspace);
   const [agentData, setAgentData] = useState<{ initialProject?: string }>();
   const isChat = activeModule === 'chat';
-  const isAgentData = activeModule === 'agentData';
+  const isAgentData = activeModule === 'agentData' || activeModule === 'repoWiki';
 
   useEffect(() => {
     if (isAgentData) setAgentData((current) => current ?? { initialProject: workspace || undefined });
@@ -64,7 +64,7 @@ export function ModuleContainer({ chat, onOpenSession }: { chat: ReactNode; onOp
         style={{ display: isAgentData ? 'flex' : 'none', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
       >
         <Suspense fallback={null}>
-          <AgentDataCenter userId="local" initialProject={agentData.initialProject} visible={isAgentData} onOpenSession={onOpenSession} />
+          <AgentDataCenter userId="local" initialProject={agentData.initialProject} visible={isAgentData} requestedTab={activeModule === 'repoWiki' ? 'repoWiki' : undefined} />
         </Suspense>
       </div> : null}
       {isChat || isAgentData ? null : (

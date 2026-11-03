@@ -1,8 +1,10 @@
-import { todoListFinishedInTranscript, type TodoTranscriptMessage } from '@extensions/_shared/todo-model';
+import { normalizeTodos, todoListFinishedInTranscript, type TodoTranscriptMessage } from '@extensions/_shared/todo-model';
+import { reconcileTodoResults } from './sessionMessageSync';
 import { closedChainSteps, closedParallelTasks, closedStringField, closedTopLevelString, type NormalizedTask } from '@extensions/multi-agent/tasks';
 import { findPendingAskUser } from '../features/chat/pendingAskUser';
 import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
 import type { WaitingUiPrompt } from './waitingUiPrompt';
+import { incomingAgentMessage } from '../features/chat/agentCommunicationModel';
 
 /** 用户消息里的图片（base64），用于在气泡中回显发送的图片。 */
 export interface UserImage {
@@ -37,6 +39,8 @@ export type ChatMessage =
       text: string;
       thinking: string;
       streaming: boolean;
+      /** 保留 SDK 已有的停止原因，供缓存/截断后的 todo 派生状态重建。 */
+      stopReason?: string;
       /** pi 消息自带的 Unix ms 时间戳，用作推理时长持久化的 key。 */
       timestamp?: number;
       /** 推理开始时间戳（首个 thinking 出现时记起点），用于计算时长。 */
@@ -63,7 +67,14 @@ export type ChatMessage =
       /** 助手消息中止 / 出错时按「已中断」收掉的卡片。随后到的工具结果消息会把它换成真实结果。 */
       interrupted?: boolean;
     }
-  | { kind: 'notice'; id: string; customType: string; content: string; /** 原消息的 timestamp：同一条的 message_start / message_end 靠它认出来。 */ sourceTimestamp?: number }
+  | {
+      kind: 'notice'; id: string; customType: string; content: string;
+      /** Presentation metadata from the existing custom message; no producer protocol change. */
+      details?: Record<string, unknown>;
+      sourceTimestamp?: number;
+      /** Prevent a delayed message_start from overwriting its message_end. */
+      sourceFinal?: boolean;
+    }
   /** 一次成功的上下文压缩留在会话里的分隔。进行中只显示「正在压缩」，结束后写成这一条。 */
   | { kind: 'compaction'; id: string };
 
@@ -180,10 +191,29 @@ function todoListFinishedFromRun(
   messages: readonly TodoTranscriptMessage[] | undefined,
   previous: boolean | undefined,
 ): boolean | undefined {
-  if (!messages?.some((message) => message?.role === 'toolResult' && typeof message.toolName === 'string' && message.toolName.toLowerCase() === 'todo')) {
-    return previous;
-  }
-  return todoListFinishedInTranscript(messages);
+  const wroteTodo = messages?.some((message) => {
+    if (message?.role !== 'toolResult' || typeof message.toolName !== 'string' || message.toolName.toLowerCase() !== 'todo' || message.isError === true) return false;
+    const details = message.details as { error?: unknown } | null;
+    return details?.error == null && normalizeTodos(details) != null;
+  });
+  if (!wroteTodo) return previous;
+  return todoListFinishedInTranscript(messages ?? []);
+}
+
+export function todoLifecycleFromMessages(messages: readonly ChatMessage[]): Pick<AgentState, 'assistantStop' | 'todoListFinished'> {
+  const transcript: TodoTranscriptMessage[] = messages.map((message) => {
+    if (message.kind === 'assistant') return { role: 'assistant', stopReason: message.stopReason };
+    if (message.kind === 'tool') return { role: 'toolResult', toolName: message.toolName, isError: message.status !== 'done', details: (message.result as { details?: unknown } | null)?.details };
+    return { role: message.kind === 'user' ? 'user' : 'custom' };
+  });
+  return { assistantStop: assistantStopFromMessages(transcript), todoListFinished: todoListFinishedInTranscript(transcript) };
+}
+
+function todoResultPatch(state: AgentState, toolName: string | undefined, result: unknown, failed: boolean): AgentState {
+  if (toolName?.toLowerCase() !== 'todo' || failed) return state;
+  const details = (result as { details?: { error?: unknown } } | null)?.details;
+  if (details?.error != null || !normalizeTodos(details)) return state;
+  return { ...state, todoListFinished: todoLifecycleFromMessages(state.messages).todoListFinished };
 }
 
 export function assistantStopFromMessages(
@@ -559,7 +589,12 @@ function settleToolFromResultMessage(state: AgentState, msg: AgentMessage): Agen
   const raw = msg as { toolCallId?: unknown; isError?: unknown };
   if (typeof raw.toolCallId !== 'string' || !raw.toolCallId) return state;
   const idx = lastIndex(state.messages, (m) => m.kind === 'tool' && m.toolCallId === raw.toolCallId);
-  if (idx < 0) return state;
+  const toolName = typeof msg.toolName === 'string' ? msg.toolName : undefined;
+  if (idx < 0) {
+    if (toolName?.toLowerCase() !== 'todo') return state;
+    const messages = reconcileTodoResults(state.messages, messagesFromAgent([msg]));
+    return todoResultPatch({ ...state, messages }, toolName, toolResultPayload(msg), raw.isError === true);
+  }
   const cur = state.messages[idx];
   if (cur.kind !== 'tool' || (cur.status !== 'running' && !cur.interrupted)) return state;
   const messages = [...state.messages];
@@ -571,7 +606,7 @@ function settleToolFromResultMessage(state: AgentState, msg: AgentMessage): Agen
     argsComplete: true,
     ...(cur.startedAt != null && cur.durationMs == null ? { durationMs: Math.max(0, Date.now() - cur.startedAt) } : {}),
   };
-  return { ...state, messages };
+  return todoResultPatch({ ...state, messages }, cur.toolName, toolResultPayload(msg), raw.isError === true);
 }
 
 /**
@@ -700,32 +735,66 @@ function showsCustomMessage(msg: AgentMessage): boolean {
   return typeof customType === 'string' && SHOWN_HIDDEN_CUSTOM_TYPES.has(customType);
 }
 
-/** 把 pi 的 CustomMessage（role:'custom', display:true，或上面列出的类型）转成一条去重的 notice。 */
-function applyCustomMessage(state: AgentState, msg: AgentMessage): AgentState {
-  if (!showsCustomMessage(msg)) return state;
+/** Only these events carry agent/task identities; unrelated injection deduplication stays unchanged. */
+const AGENT_NOTICE_TYPES = new Set(['agent-message', 'subagent-settled', 'job-done']);
+
+function customNotice(msg: AgentMessage): Extract<ChatMessage, { kind: 'notice' }> | null {
+  if (!showsCustomMessage(msg)) return null;
+  const raw = msg as { customType?: unknown; details?: unknown };
+  const customType = typeof raw.customType === 'string' ? raw.customType : '';
   const content = typeof msg.content === 'string' ? msg.content : '';
-  if (!content.trim()) return state;
-  const rawCustomType = (msg as { customType?: unknown }).customType;
-  const customType = typeof rawCustomType === 'string' ? rawCustomType : '';
-  // 同一条消息的 message_start / message_end 会各来一次，要去重。agent-message（send_message wake: false）
-  // 可能真的连发两条一样的（「还在跑测试」）：按原消息的 timestamp 认同一条，正文相同不算重复。其余通知照旧按正文去重。
-  const rawTimestamp = (msg as { timestamp?: unknown }).timestamp;
-  const sourceTimestamp = typeof rawTimestamp === 'number' ? rawTimestamp : undefined;
-  if (customType === 'agent-message' && sourceTimestamp !== undefined) {
-    const same = state.messages.some(
-      (m) => m.kind === 'notice' && m.customType === customType && m.sourceTimestamp === sourceTimestamp && m.content === content,
-    );
-    if (same) return state;
-  } else if (state.messages.some((m) => m.kind === 'notice' && m.content === content)) {
-    return state;
-  }
-  return {
-    ...state,
-    messages: [
-      ...state.messages,
-      { kind: 'notice', id: nextId(), customType, content, ...(sourceTimestamp !== undefined ? { sourceTimestamp } : {}) },
-    ],
+  const details = raw.details && typeof raw.details === 'object' && !Array.isArray(raw.details)
+    ? raw.details as Record<string, unknown> : undefined;
+  if (!content.trim() && !(AGENT_NOTICE_TYPES.has(customType) && details &&
+    ['from', 'childId', 'jobId'].some((key) => typeof details[key] === 'string' && (details[key] as string).trim()))) return null;
+  return { kind: 'notice', id: nextId(), customType, content,
+    ...(details ? { details } : {}),
+    ...(messageTimestamp(msg) !== undefined ? { sourceTimestamp: messageTimestamp(msg) } : {}),
   };
+}
+
+function noticeIdentity(notice: Extract<ChatMessage, { kind: 'notice' }>): string {
+  const field = notice.customType === 'job-done' ? 'jobId' : notice.customType === 'subagent-settled' ? 'childId' : 'from';
+  const value = notice.details?.[field];
+  // A legacy message without details can still be matched to its completed envelope.
+  if (typeof value === 'string') return value;
+  if (notice.customType === 'agent-message') return incomingAgentMessage(notice.content)?.sender ?? '';
+  return '';
+}
+
+/** Project an existing custom event without dropping its metadata or duplicating start/end frames. */
+function applyCustomMessage(state: AgentState, msg: AgentMessage, final = false): AgentState {
+  const notice = customNotice(msg);
+  if (!notice) return state;
+  if (AGENT_NOTICE_TYPES.has(notice.customType)) {
+    const identity = noticeIdentity(notice);
+    const index = state.messages.findIndex((m) => m.kind === 'notice' && m.customType === notice.customType &&
+      noticeIdentity(m) === identity && (identity !== '' || m.content === notice.content) && (notice.customType !== 'agent-message' || m.content === notice.content) && (notice.sourceTimestamp !== undefined
+        ? m.sourceTimestamp === notice.sourceTimestamp
+        : m.content === notice.content));
+    if (index >= 0) {
+      const previous = state.messages[index] as Extract<ChatMessage, { kind: 'notice' }>;
+      if (previous.sourceFinal && !final) return state;
+      const messages = state.messages.slice();
+      messages[index] = { ...previous, ...notice, id: previous.id, sourceFinal: final || previous.sourceFinal };
+      return { ...state, messages };
+    }
+    return { ...state, messages: [...state.messages, { ...notice, sourceFinal: final }] };
+  }
+  if (state.messages.some((m) => m.kind === 'notice' && m.content === notice.content)) return state;
+  return { ...state, messages: [...state.messages, notice] };
+}
+
+/** Waking deliveries are existing user envelopes, but are agent communication rather than human input. */
+function applyIncomingAgentMessage(state: AgentState, msg: AgentMessage): AgentState {
+  const { text } = extractText(msg);
+  const messages = consumeSteer(state.messages, text);
+  if (!incomingAgentMessage(text)) return messages === state.messages ? state : { ...state, messages };
+  const timestamp = messageTimestamp(msg);
+  if (messages.some((m) => m.kind === 'user' && m.text === text && (timestamp === undefined || m.timestamp === timestamp))) {
+    return messages === state.messages ? state : { ...state, messages };
+  }
+  return { ...state, messages: [...messages, { kind: 'user', id: nextId(), text, timestamp }] };
 }
 
 /** 引导被注入当前回合：优先按正文对上，对不上且只剩一条未确认引导时收下那一条。 */
@@ -781,7 +850,9 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       // 收起仍在流的 assistant，并把参数没写完的工具卡标成中断（丢了 message_end 时的兜底）。
       // willRetry 时这一轮还会继续，未注入的引导先留着，等真正收尾再改成 requeued。
       const willRetry = (event as { willRetry?: boolean }).willRetry === true;
-      const settled = settleIncompleteToolCards(state.messages);
+      const runMessages = (event as { messages?: AgentMessage[] }).messages;
+      const recovered = runMessages ? reconcileTodoResults(state.messages, messagesFromAgent(runMessages)) : state.messages;
+      const settled = settleIncompleteToolCards(recovered);
       const messages = willRetry ? settled : requeuePendingSteers(settled);
       const ended = {
         awaitingResponse: false,
@@ -824,7 +895,10 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       // 避免 UI 永久停在「待停止」。参数没写完的工具卡同样收成中断。
       // runStartedAt 留着：紧接着由子代理回报、压缩续跑、推迟的跟进开启的回合要接着计时。
       const messages = requeuePendingSteers(settleIncompleteToolCards(state.messages));
+      const todoState = todoLifecycleFromMessages(messages);
       return dropDrafts(state, {
+        assistantStop: state.assistantStop ?? todoState.assistantStop,
+        todoListFinished: state.todoListFinished === true || todoState.todoListFinished === true,
         isStreaming: false,
         runActive: false,
         runOpening: false,
@@ -841,9 +915,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const ev = event as Extract<AgentEvent, { type: 'message_start' }>;
       const cleared = dropDrafts(settleRunClock(state, ev.message?.role));
       if (ev.message.role === 'custom') return applyCustomMessage(cleared, ev.message);
-      if (ev.message.role === 'user') {
-        return { ...cleared, messages: consumeSteer(cleared.messages, extractText(ev.message).text) };
-      }
+      if (ev.message.role === 'user') return applyIncomingAgentMessage(cleared, ev.message);
       if (ev.message.role !== 'assistant') return cleared;
       const { text, thinking } = extractText(ev.message);
       const messages = [...state.messages];
@@ -877,7 +949,8 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
 
     case 'message_end': {
       const ev = event as Extract<AgentEvent, { type: 'message_end' }>;
-      if (ev.message.role === 'custom') return applyCustomMessage(state, ev.message);
+      if (ev.message.role === 'custom') return applyCustomMessage(state, ev.message, true);
+      if (ev.message.role === 'user') return applyIncomingAgentMessage(state, ev.message);
       if (ev.message.role === 'toolResult') return settleToolFromResultMessage(state, ev.message);
       if (ev.message.role !== 'assistant') return state;
       const { text, thinking } = extractText(ev.message);
@@ -941,6 +1014,12 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       // 先按 contentIndex 把草稿卡改绑到终态 toolCall id，兜住没收到 toolcall_end 的情况。
       const rebound = rebindDraftsFromContent(messages, state.toolDrafts, ev.message);
       const stopReason = (ev.message as { stopReason?: unknown }).stopReason;
+      const endedIndex = idx >= 0
+        ? rebound.findIndex((message) => message.kind === 'assistant' && message.id === state.messages[idx]?.id)
+        : matchingFinishedAssistant(rebound, text, thinking);
+      if (endedIndex >= 0 && typeof stopReason === 'string') {
+        rebound[endedIndex] = { ...rebound[endedIndex], stopReason } as ChatMessage;
+      }
       if (stopReason === 'aborted' || stopReason === 'error') {
         const failText = errMsg ?? (stopReason === 'aborted' ? '已中断' : '生成失败');
         const cardIds = new Set<string>();
@@ -1067,7 +1146,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
 
     case 'tool_execution_update': {
       const ev = event as Extract<AgentEvent, { type: 'tool_execution_update' }>;
-      return updateTool(state, ev.toolCallId, (t) => ({
+      return updateTool(state, ev.toolCallId, (t) => t.toolName.toLowerCase() === 'todo' && t.status !== 'running' ? t : ({
         ...t,
         result: ev.partialResult,
         ...parentToolLink(ev.parentToolCallId),
@@ -1083,8 +1162,12 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         ...(t.startedAt != null ? { durationMs: Math.max(0, Date.now() - t.startedAt) } : {}),
         ...parentToolLink(ev.parentToolCallId),
       }));
-      if (ev.isError || ev.toolName?.toLowerCase() !== 'todo') return next;
-      return { ...next, todoListFinished: false };
+      const existing = next.messages.find((message) => message.kind === 'tool' && message.toolCallId === ev.toolCallId);
+      const toolName = ev.toolName || (existing?.kind === 'tool' ? existing.toolName : undefined);
+      const recovered = !existing && toolName?.toLowerCase() === 'todo'
+        ? { ...next, messages: reconcileTodoResults(next.messages, messagesFromAgent([{ role: 'toolResult', toolName, toolCallId: ev.toolCallId, isError: ev.isError, content: [], ...(ev.result as object) } as AgentMessage])) }
+        : next;
+      return todoResultPatch(recovered, toolName, ev.result, ev.isError === true);
     }
 
     case 'queue_update': {
@@ -1231,12 +1314,8 @@ export function messagesFromAgent(
 
   for (const msg of msgs) {
     if (msg.role === 'custom') {
-      const content = typeof msg.content === 'string' ? msg.content : '';
-      if (showsCustomMessage(msg) && content.trim()) {
-        const rawCustomType = (msg as { customType?: unknown }).customType;
-        const customType = typeof rawCustomType === 'string' ? rawCustomType : '';
-        out.push({ kind: 'notice', id: nextId(), customType, content });
-      }
+      const notice = customNotice(msg);
+      if (notice) out.push(AGENT_NOTICE_TYPES.has(notice.customType) ? { ...notice, sourceFinal: true } : notice);
       continue;
     }
     if (msg.role === 'user') {
@@ -1269,6 +1348,7 @@ export function messagesFromAgent(
           text,
           thinking,
           streaming: false,
+          ...(typeof msg.stopReason === 'string' ? { stopReason: msg.stopReason } : {}),
           timestamp,
           thinkingDuration: thinking.trim() ? getDuration?.(timestamp) : undefined,
         });

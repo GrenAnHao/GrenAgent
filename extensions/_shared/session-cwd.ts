@@ -6,7 +6,7 @@
 // custom entry `working_directory`，会话打开时按最后一条恢复。
 //
 // 不变的：会话头里的 cwd（原始目录，会话归属与会话目录都按它）、process.cwd()、已经起来的进程。
-// 权限根与项目身份（审批、沙箱、注册表、记忆……）按 projectCwd(ctx) 取原始目录，不跟着切换。
+// 权限根与项目身份（审批、沙箱、注册表）按 projectCwd(ctx) 取原始目录，不跟着切换。
 
 import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";

@@ -2,9 +2,9 @@ import { create } from 'zustand';
 import { useSessionStore } from '../store/session';
 import { pathsEquivalent } from '../lib/pathUtils';
 
-export type AgentMode = 'agent' | 'ask' | 'debug' | 'plan' | 'brainstorm';
+export type AgentMode = 'agent' | 'ask' | 'debug' | 'plan' | 'ultra';
 
-export const AGENT_MODES: AgentMode[] = ['agent', 'ask', 'debug', 'plan', 'brainstorm'];
+export const AGENT_MODES: AgentMode[] = ['agent', 'ask', 'debug', 'plan', 'ultra'];
 
 /** 模式显示名（选择器选项用）。 */
 export const MODE_LABELS: Record<AgentMode, string> = {
@@ -12,11 +12,11 @@ export const MODE_LABELS: Record<AgentMode, string> = {
   ask: 'Ask',
   debug: 'Debug',
   plan: 'Plan',
-  brainstorm: 'Brainstorm',
+  ultra: 'Ultra',
 };
 
 export function isAgentMode(v: unknown): v is AgentMode {
-  return v === 'agent' || v === 'ask' || v === 'debug' || v === 'plan' || v === 'brainstorm';
+  return v === 'agent' || v === 'ask' || v === 'debug' || v === 'plan' || v === 'ultra';
 }
 
 /** 会话路径归一化后作键：分隔符 / 大小写差异不拆成两份。 */

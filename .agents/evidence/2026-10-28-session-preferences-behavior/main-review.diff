@@ -1,0 +1,690 @@
+diff --git a/electron-agent/src/App.tsx b/electron-agent/src/App.tsx
+index 94b5e372..8c00818b 100644
+--- a/electron-agent/src/App.tsx
++++ b/electron-agent/src/App.tsx
+@@ -45,6 +45,10 @@ import { isUnder, pathsEquivalent } from './lib/pathUtils';
+ import { useStableCallback } from './lib/structuralShare';
+ import { applyOpenedProject, enterPendingNewSession } from './lib/pendingSession';
+ import { canReuseScratch, readRememberedScratch, rememberScratch } from './lib/startupConversation';
++import { useChatDraftStore } from './stores/chatDraftStore';
++import { useComposerFilesStore } from './features/chat/input/composerFiles';
++import { useSessionPreferencesStore } from './stores/sessionPreferencesStore';
++import { useSessionViewStateStore } from './stores/sessionViewStateStore';
+ import { lastOpenEquals, lastOpenFromState, pickStartupTarget, readLastOpen, writeLastOpen } from './lib/lastOpen';
+ import {
+   bumpSessionMutationEpoch,
+@@ -608,6 +612,11 @@ const Workspace = memo(function Workspace() {
+     }
+     try {
+       await pi.deleteSession(cwd, path);
++      // 删除成功才清该会话的偏好/输入/视图；墓碑阻止在途保存把它复活。
++      useSessionPreferencesStore.getState().remove(path);
++      useChatDraftStore.getState().remove(path);
++      useComposerFilesStore.getState().remove(path);
++      useSessionViewStateStore.getState().remove(path);
+       // 主进程已经停掉并摘下这份会话；停靠的 handle 被拆时不再发 agent_end，这里自己熄灭运行态。
+       forgetRunningSession(path);
+       forgetSessionAttention(path);
+@@ -1116,7 +1125,7 @@ export default function App() {
+       }
+ 
+       if (ws) {
+-        useSessionStore.getState().setDraftConversation(ws);
++        useSessionStore.getState().setDraftConversation(ws, target?.kind === 'projectDraft' ? target.draftId : undefined);
+         useSessionStore.getState().setActiveSession('');
+         useSessionStore.getState().setActiveWorkspace(ws);
+       }
+diff --git a/electron-agent/src/features/chat/ChatInput.tsx b/electron-agent/src/features/chat/ChatInput.tsx
+index 1fb9e80f..e72cc08b 100644
+--- a/electron-agent/src/features/chat/ChatInput.tsx
++++ b/electron-agent/src/features/chat/ChatInput.tsx
+@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ import { App } from 'antd';
+ import { useEditor } from '@lobehub/editor/react';
+ import { useAgentStore, useAgentStoreContext } from '../../stores/AgentStoreContext';
+-import { useSessionStore } from '../../store';
++import { useComposerOwnerKey } from './input/composerOwner';
+ import { useChatDraftStore } from '../../stores/chatDraftStore';
+ import {
+   ChatInputProvider,
+@@ -58,9 +58,10 @@ export function ChatInput({
+   const { useStore } = useAgentStore();
+   const { workspace } = useAgentStoreContext();
+   const { message } = App.useApp();
+-  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
+-  // 草稿按会话隔离：优先用会话文件路径（每会话独立），新建/草稿对话还没落盘 session 时回退到 workspace(cwd)。
+-  const draftKey = activeSessionPath || workspace;
++  const draftKey = useComposerOwnerKey(workspace);
++  // 异步发送/取消返回时仍用最初的 key 写存档，只在原视图还可见时操作编辑器。
++  const displayedKey = useRef(draftKey);
++  displayedKey.current = draftKey;
+ 
+   const isStreaming = useStore((s) => s.isStreaming);
+   // 「正在生成」：存在流式中的 assistant 消息。回合文字完成后的收尾窗口里，
+@@ -180,6 +181,17 @@ export function ChatInput({
+       pastedTexts: pastedTexts.slice(),
+       attachments: attachments.slice(),
+     };
++    const restoreSnapshot = () => {
++      const drafts = useChatDraftStore.getState();
++      const target = drafts.resolveKey(draftKey);
++      if (!target) return;
++      useComposerFilesStore.getState().restore(draftKey, snapshot);
++      drafts.setDraft(draftKey, snapshot.draft);
++      if (drafts.resolveKey(displayedKey.current) !== target) return;
++      writeComposerText(editor, snapshot.draft);
++      setEmpty(!snapshot.draft);
++      requestAnimationFrame(() => editor.focus());
++    };
+     try {
+       if (!hasDraft && dispatchSingle) {
+         const id = useStore.getState().composerQueue?.[0]?.id;
+@@ -196,13 +208,17 @@ export function ChatInput({
+         message.error('取消当前提问失败，请重试');
+         return;
+       }
+-      editor.cleanDocument();
++      const visible = useChatDraftStore.getState().resolveKey(displayedKey.current) ===
++        useChatDraftStore.getState().resolveKey(draftKey);
++      if (visible) {
++        editor.cleanDocument();
++        setEmpty(true);
++        requestAnimationFrame(() => editor.focus());
++      }
+       useComposerFilesStore.getState().clear(draftKey);
+-      setEmpty(true);
+-      // 已发送：清掉该会话草稿（debounce 也一并取消，避免随后把空内容当草稿又写回）。
+-      if (saveTimer.current) clearTimeout(saveTimer.current);
++      // 已发送：清掉发起会话的存档，不清掉后来切到的会话。
++      if (visible && saveTimer.current) clearTimeout(saveTimer.current);
+       if (draftKey) useChatDraftStore.getState().clearDraft(draftKey);
+-      requestAnimationFrame(() => editor.focus());
+ 
+       if (interrupt && hasDraft) {
+         await onAbort();
+@@ -225,18 +241,9 @@ export function ChatInput({
+       // 草稿已经清掉，这里放开，让下一条能挂成跟进。
+       sendingRef.current = false;
+       const outcome = await onSend(text, images.length ? images : undefined, behavior);
+-      if (outcome === 'failed') {
+-        useComposerFilesStore.getState().restore(draftKey, snapshot);
+-        writeComposerText(editor, snapshot.draft);
+-        setEmpty(!snapshot.draft);
+-        if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.draft);
+-        requestAnimationFrame(() => editor.focus());
+-      }
++      if (outcome === 'failed') restoreSnapshot();
+     } catch {
+-      useComposerFilesStore.getState().restore(draftKey, snapshot);
+-      writeComposerText(editor, snapshot.draft);
+-      setEmpty(!snapshot.draft);
+-      if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.draft);
++      restoreSnapshot();
+     } finally {
+       sendingRef.current = false;
+     }
+@@ -321,6 +328,11 @@ export function ChatInput({
+     if (!draftKey) return;
+     const prev = prevKeyRef.current;
+     if (prev === draftKey) return;
++    // 旧版本未落盘草稿以 workspace 存档；只在首次挂载迁入当前独立身份。
++    if (prev === null && draftKey.startsWith('draft:')) {
++      useChatDraftStore.getState().adopt(workspace, draftKey);
++      useComposerFilesStore.getState().adopt(workspace, draftKey);
++    }
+     // 关键：清掉上一个会话 pending 的 debounce save，否则它会在切换后用「新会话内容」覆盖「旧会话草稿」。
+     if (saveTimer.current) clearTimeout(saveTimer.current);
+     if (prev !== null) {
+@@ -331,7 +343,7 @@ export function ChatInput({
+     writeComposerDraft(editor, draft);
+     setEmpty(!draft.text);
+     requestAnimationFrame(() => editor.focus());
+-  }, [draftKey, editor, readStoredDraft]);
++  }, [draftKey, editor, readStoredDraft, workspace]);
+ 
+   // 卸载时把当前草稿同步落盘（debounce 可能还没触发）。
+   useEffect(() => {
+diff --git a/electron-agent/src/features/chat/ChatView.tsx b/electron-agent/src/features/chat/ChatView.tsx
+index f3cca46e..2a00ea9a 100644
+--- a/electron-agent/src/features/chat/ChatView.tsx
++++ b/electron-agent/src/features/chat/ChatView.tsx
+@@ -29,11 +29,15 @@ import {
+ import { setComposerValue } from './input/composerBridge';
+ import { isExecutiveCommandMessage } from './input/commandClassification';
+ import { parseCommandToken } from './input/editor/commandPaste';
+-import { commitComposerModelToSession, peekComposerLevel, peekComposerModel } from './input/actions/ModelThinkingAction';
++import { readComposerOwnerKey, useComposerOwnerKey } from './input/composerOwner';
++import { canonicalOwnerKey, sessionPathFromOwnerKey, type SessionPreferences } from '../../lib/sessionPreferences';
++import { useSessionPreferencesStore } from '../../stores/sessionPreferencesStore';
++import { useChatDraftStore } from '../../stores/chatDraftStore';
++import { useComposerFilesStore } from './input/composerFiles';
++import { useSessionViewStateStore } from '../../stores/sessionViewStateStore';
+ import { useCommandInputStore } from '../../stores/commandInputStore';
+ import { pi } from '../../lib/pi';
+ import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
+-import { needsSessionCreateOnSend } from '../../lib/pendingSession';
+ import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
+ import { fallbackSessionTitle } from '@extensions/_shared/session-title';
+ import { markScratchUsed } from '../../lib/startupConversation';
+@@ -130,11 +134,15 @@ function toPromptImages(images?: UserImage[]): PromptImage[] | undefined {
+ }
+ 
+ export function ChatView() {
+-  const { workspace, store, workspaceReady } = useAgentStoreContext();
++  const agentContext = useAgentStoreContext();
++  const { workspace, store, workspaceReady } = agentContext;
++  const ownerKey = useComposerOwnerKey(workspace);
++  const ownerScope = agentContext.sessionPath !== undefined || agentContext.draftId !== undefined
++    ? { sessionPath: agentContext.sessionPath, draftId: agentContext.draftId }
++    : undefined;
+   const { message: messageApi } = App.useApp();
+   const worksDir = useSessionStore((s) => s.worksDir);
+-  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
+-  const draftConversationCwd = useSessionStore((s) => s.draftConversationCwd);
++  const activeSessionPath = sessionPathFromOwnerKey(ownerKey);
+   const messages = store.useStore((s) => s.messages);
+   const lastError = store.useStore((s) => s.lastError);
+   const retrying = store.useStore((s) => s.retrying);
+@@ -143,7 +151,6 @@ export function ChatView() {
+   const composerQueue = store.useStore((s) => s.composerQueue) ?? [];
+   const isEmpty = messages.length === 0;
+   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
+-  const isDraftConversation = Boolean(draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace));
+   const showEmptyLayout = isEmpty && workspaceReady;
+   const findOpen = useFindScope(CHAT_FIND_SCOPE).open && !showEmptyLayout;
+   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
+@@ -269,6 +276,66 @@ export function ChatView() {
+     const text = message.trim();
+     const hasContent = Boolean(text || images?.length);
+     if (!hasContent && behavior !== 'followUp') return;
++    const sourcePath = sessionPathFromOwnerKey(ownerKey);
++    const captured = useSessionPreferencesStore.getState().peek(ownerKey);
++    if ((!captured || !captured.model) && !text.startsWith('/')) {
++      messageApi.error('模型选项尚未加载或不可用，请先选择模型');
++      return 'failed';
++    }
++    // 所有 await 之前捕获身份和四项偏好，不能等创建完再读全局当前会话。
++    const initialPreferences: SessionPreferences = {
++      revision: 0,
++      ...captured,
++      ...(captured?.model ? { model: { ...captured.model } } : {}),
++    };
++    const draftId = ownerKey.startsWith('draft:') ? ownerKey : undefined;
++    const stillViewingSource = () => canonicalOwnerKey(readComposerOwnerKey(workspace, ownerScope)) === canonicalOwnerKey(ownerKey);
++    const sendPerf = createStartupPerf(`send:${workspace}`);
++    let createdPath: string | undefined;
++    const createOwnedSession = async () => {
++      sendPerf.start('openWorkspace');
++      await pi.openWorkspace(workspace);
++      sendPerf.end('openWorkspace');
++      sendPerf.start('newSession');
++      const result = await pi.newSession(workspace, initialPreferences) as {
++        cancelled?: boolean; sessionFile?: string; sessionPath?: string; preferences?: SessionPreferences;
++      };
++      sendPerf.end('newSession');
++      if (result?.cancelled) throw new Error('新建会话已取消');
++      const path = result?.sessionPath || result?.sessionFile;
++      if (!path) throw new Error('新建会话没有返回会话标识，请重试');
++      createdPath = path;
++      // 过户只作用于发起草稿；迟到回执不能把 B 的编辑器、右栏或选项搬走。
++      useSessionPreferencesStore.getState().adopt(ownerKey, path, result.preferences ?? initialPreferences);
++      useChatDraftStore.getState().adopt(ownerKey, path);
++      useComposerFilesStore.getState().adopt(ownerKey, path);
++      useSessionViewStateStore.getState().adopt(ownerKey, path);
++      const st = useSessionStore.getState();
++      const activate = stillViewingSource();
++      useDockStore.getState().adoptDraftView(workspace, path, draftId);
++      if (activate) {
++        store.bindSessionPath(path);
++        st.setActiveSession(path);
++        st.setWorkspaceSessionPath(workspace, path);
++        st.clearDraftConversation(workspace, draftId);
++      }
++      st.upsertOptimisticSession({
++        id: `opt-${path}`, path, cwd: workspace, timestamp: new Date().toISOString(),
++        name: fallbackSessionTitle(text, images?.length ?? 0),
++      });
++      markScratchUsed(workspace);
++      return path;
++    };
++    // 输入框等待取消弹层时也可能切走：依然发送给原会话，不在新画面插气泡或清草稿。
++    if (!stillViewingSource()) {
++      try {
++        const path = sourcePath ?? await createOwnedSession();
++        await pi.prompt(workspace, text, behavior, images, path);
++      } catch {
++        return 'failed';
++      }
++      return;
++    }
+     // 新一轮发送：清掉上一轮可能遗留的「用户中断」标记。
+     userAbortedRef.current = false;
+ 
+@@ -382,68 +449,10 @@ export function ChatView() {
+       awaitingResponse: true,
+       ...pinRunClock(store.useStore.getState()),
+     });
+-    // 发送路径性能埋点：拆出 openWorkspace / newSession / getState / promptToStream 各耗时
+-    //（DEV 控制台 [PERF-startup] send:<ws>），用于定位「新对话/久置后发送」的延迟究竟卡在哪。
+-    const sendPerf = createStartupPerf(`send:${workspace}`);
+-
+-    let createdPath: string | undefined;
+-    // 草稿首发前画面绑定的路径（通常为 undefined）。落盘期间切到别的会话时，失败也不能写到新画面上。
++    // 首发创建以回执里的新身份为准，不在 await 后读取 workspace 的可变前景。
+     const pathBeforeSend = store.getLoadedSessionPath();
+     const ensureSessionForSend = async () => {
+-      const needsCreate = needsSessionCreateOnSend({ workspace, activeSessionPath, draftConversationCwd });
+-      const peekBefore = peekComposerModel(workspace);
+-      const levelBefore = needsCreate ? peekComposerLevel(workspace) : null;
+-      if (!needsCreate) return;
+-      const st = useSessionStore.getState();
+-      sendPerf.start('openWorkspace');
+-      const openResult = await pi.openWorkspace(workspace);
+-      sendPerf.end('openWorkspace');
+-      // 项目草稿的 openWorkspace 会带回 last_session；必须新建，不能把首发写进上一会话。
+-      if (isDraftConversation || !openResult.sessionFile) {
+-        sendPerf.start('newSession');
+-        await pi.newSession(workspace);
+-        sendPerf.end('newSession');
+-      }
+-      sendPerf.start('getState');
+-      let state: { sessionFile?: string };
+-      try {
+-        state = (await pi.getState(workspace)) as { sessionFile?: string };
+-      } catch (error) {
+-        // 草稿 worker 仍可能短暂带着外工作区 last_session；归属失败时新建本对话会话再读一次。
+-        if (!String(error).includes('SESSION_WORKSPACE_MISMATCH')) throw error;
+-        sendPerf.start('newSession');
+-        await pi.newSession(workspace);
+-        sendPerf.end('newSession');
+-        state = (await pi.getState(workspace)) as { sessionFile?: string };
+-      }
+-      sendPerf.end('getState');
+-      const path = state.sessionFile ?? openResult.sessionFile;
+-      if (path) {
+-        // 画面立刻绑到新会话：否则它的流和另一个在跑的会话分不开，切来切去都是最后那一份。
+-        store.bindSessionPath(path);
+-        createdPath = path;
+-        // 必须先于 setActiveSession：否则 loadState 会读到 SDK 默认模型并盖掉输入栏点选。
+-        // 用发送瞬间的 peek，不用 await 之后再读：openWorkspace/newSession 期间草稿 loadState
+-        // 可能把缓存套回设置默认。
+-        commitComposerModelToSession(workspace, path, peekBefore, levelBefore);
+-        // 右侧边栏按会话走：草稿里打开的标签和面板状态过户给刚落盘的会话，必须在 setActiveSession 之前。
+-        useDockStore.getState().adoptDraftView(workspace, path);
+-        st.setActiveSession(path);
+-        st.setWorkspaceSessionPath(workspace, path);
+-        st.upsertOptimisticSession({
+-          id: `opt-${path}`,
+-          path,
+-          cwd: workspace,
+-          timestamp: new Date().toISOString(),
+-          // 和主进程列会话时同一套兑底：粘贴块、/skill: 调用不原样当标题。
+-          name: fallbackSessionTitle(text, images?.length ?? 0),
+-        });
+-      }
+-      st.clearDraftConversation(workspace);
+-      if (peekBefore) await pi.setModel(workspace, peekBefore.provider, peekBefore.id);
+-      if (levelBefore) await pi.setThinkingLevel(workspace, levelBefore);
+-      // 该空白对话已被使用（已落盘会话）→ 清除复用记忆，下次「新建对话」改为新建而非复用它。
+-      markScratchUsed(workspace);
++      if (!sourcePath) await createOwnedSession();
+     };
+ 
+     try {
+@@ -466,7 +475,7 @@ export function ChatView() {
+ 
+     // 这一轮属于哪个会话在这里定下来。之后用户切到别的会话，本轮的提示、重试、回滚都不能落到新画面上。
+     // 刚新建的会话优先：落盘期间切到了别的会话时 loadedSessionPath 已是那份，不能把首发打过去。
+-    const sendPath = createdPath ?? store.getLoadedSessionPath() ?? null;
++    const sendPath = createdPath ?? sourcePath ?? store.getLoadedSessionPath() ?? null;
+     const stillHere = () => samePath(store.getLoadedSessionPath(), sendPath);
+     if (!stillHere()) {
+       // 落盘期间就切走了：消息照常发给它自己的会话，界面不再管这一轮。
+@@ -534,7 +543,8 @@ export function ChatView() {
+         if (userAbortedRef.current || /abort/i.test(msg)) {
+           return { ok: false, error: msg, aborted: true, retryable: false };
+         }
+-        return { ok: false, error: msg, retryable };
++        const permanent = /PREFERENCES_|MODEL_UNAVAILABLE|SESSION_NOT_LOADED|SESSION_WORKSPACE_MISMATCH/.test(msg);
++        return { ok: false, error: msg, retryable: retryable && !permanent };
+       } finally {
+         unsub();
+       }
+diff --git a/electron-agent/src/features/chat/input/composerFiles.ts b/electron-agent/src/features/chat/input/composerFiles.ts
+index 9be78d28..092e6fc4 100644
+--- a/electron-agent/src/features/chat/input/composerFiles.ts
++++ b/electron-agent/src/features/chat/input/composerFiles.ts
+@@ -24,6 +24,11 @@ interface ComposerFilesState {
+    * 见 .agents/notes/implemented/feature/2026-10-19-composer-draft-full-restore.md
+    */
+   byKey: Record<string, ComposerFiles>;
++  adoptions: Record<string, string>;
++  removed: Record<string, true>;
++  resolveKey: (key: string) => string | null;
++  adopt: (from: string, to: string) => void;
++  remove: (key: string) => void;
+   addAttachments: (key: string, items: ImageAttachment[]) => void;
+   removeAttachment: (key: string, index: number) => void;
+   addPastedText: (key: string, text: PastedText) => void;
+@@ -95,16 +100,42 @@ export function mergeComposerFiles(
+ 
+ export const useComposerFilesStore = create<ComposerFilesState>()(
+   persist(
+-    (set) => ({
++    (set, get) => ({
+       byKey: {},
++      adoptions: {},
++      removed: {},
++      resolveKey: (key) => {
++        const s = get();
++        const target = s.adoptions[key] ?? key;
++        return s.removed[target] ? null : target;
++      },
++      adopt: (from, to) => set((s) => {
++        if (!from || !to || from === to || s.removed[to]) return s;
++        const byKey = { ...s.byKey };
++        if (!(to in byKey) && from in byKey) byKey[to] = byKey[from];
++        delete byKey[from];
++        return { byKey, adoptions: { ...s.adoptions, [from]: to } };
++      }),
++      remove: (key) => set((s) => {
++        const target = s.adoptions[key] ?? key;
++        const byKey = { ...s.byKey };
++        delete byKey[target];
++        delete byKey[key];
++        return { byKey, removed: { ...s.removed, [target]: true } };
++      }),
+       addAttachments: (key, items) =>
+         set((s) => {
+-          if (items.length === 0) return s;
++          const target = s.resolveKey(key);
++          if (!target || items.length === 0) return s;
++          key = target;
+           const cur = s.byKey[key] ?? EMPTY_COMPOSER_FILES;
+           return { byKey: withBucket(s.byKey, key, { ...cur, attachments: [...cur.attachments, ...items] }) };
+         }),
+       removeAttachment: (key, index) =>
+         set((s) => {
++          const target = s.resolveKey(key);
++          if (!target) return s;
++          key = target;
+           const cur = s.byKey[key];
+           if (!cur) return s;
+           return {
+@@ -113,21 +144,33 @@ export const useComposerFilesStore = create<ComposerFilesState>()(
+         }),
+       addPastedText: (key, text) =>
+         set((s) => {
++          const target = s.resolveKey(key);
++          if (!target) return s;
++          key = target;
+           const cur = s.byKey[key] ?? EMPTY_COMPOSER_FILES;
+           return { byKey: withBucket(s.byKey, key, { ...cur, pastedTexts: [...cur.pastedTexts, text] }) };
+         }),
+       removePastedText: (key, id) =>
+         set((s) => {
++          const target = s.resolveKey(key);
++          if (!target) return s;
++          key = target;
+           const cur = s.byKey[key];
+           if (!cur) return s;
+           return { byKey: withBucket(s.byKey, key, { ...cur, pastedTexts: cur.pastedTexts.filter((p) => p.id !== id) }) };
+         }),
+       restore: (key, files) =>
+-        set((s) => ({
+-          byKey: withBucket(s.byKey, key, { attachments: files.attachments.slice(), pastedTexts: files.pastedTexts.slice() }),
+-        })),
++        set((s) => {
++          const target = s.resolveKey(key);
++          return target ? {
++            byKey: withBucket(s.byKey, target, { attachments: files.attachments.slice(), pastedTexts: files.pastedTexts.slice() }),
++          } : s;
++        }),
+       clear: (key) =>
+         set((s) => {
++          const target = s.resolveKey(key);
++          if (!target) return s;
++          key = target;
+           if (!(key in s.byKey)) return s;
+           const rest = { ...s.byKey };
+           delete rest[key];
+@@ -138,13 +181,15 @@ export const useComposerFilesStore = create<ComposerFilesState>()(
+       name: 'pi-composer-files',
+       storage: createJSONStorage(() => createIdbStorage('pi-composer-files')),
+       partialize: (s) => ({ byKey: stripAttachmentUrls(s.byKey) }),
+-      merge: (persisted, current) => ({
+-        ...current,
+-        byKey: mergeComposerFiles(
+-          reviveComposerFiles((persisted as { byKey?: unknown } | undefined)?.byKey),
+-          current.byKey,
+-        ),
+-      }),
++      merge: (persisted, current) => {
++        const saved = reviveComposerFiles((persisted as { byKey?: unknown } | undefined)?.byKey);
++        const restored: Record<string, ComposerFiles> = {};
++        for (const [key, files] of Object.entries(saved)) {
++          const target = current.adoptions[key] ?? key;
++          if (!current.removed[target]) restored[target] = files;
++        }
++        return { ...current, byKey: mergeComposerFiles(restored, current.byKey) };
++      },
+     },
+   ),
+ );
+diff --git a/electron-agent/src/lib/lastOpen.ts b/electron-agent/src/lib/lastOpen.ts
+index 2d4ab410..0235f0af 100644
+--- a/electron-agent/src/lib/lastOpen.ts
++++ b/electron-agent/src/lib/lastOpen.ts
+@@ -11,6 +11,8 @@ export interface LastOpen {
+   workspace: string;
+   /** 停在草稿（新建还没首发）时为 null。 */
+   sessionPath: string | null;
++  /** 未落盘对话的稳定身份；旧存档缺省时创建新身份。 */
++  draftId?: string;
+ }
+ 
+ export function readLastOpen(): LastOpen | null {
+@@ -19,9 +21,13 @@ export function readLastOpen(): LastOpen | null {
+     if (!raw) return null;
+     const parsed: unknown = JSON.parse(raw);
+     if (typeof parsed !== 'object' || parsed === null) return null;
+-    const { workspace, sessionPath } = parsed as Partial<LastOpen>;
++    const { workspace, sessionPath, draftId } = parsed as Partial<LastOpen>;
+     if (typeof workspace !== 'string' || !workspace) return null;
+-    return { workspace, sessionPath: typeof sessionPath === 'string' && sessionPath ? sessionPath : null };
++    return {
++      workspace,
++      sessionPath: typeof sessionPath === 'string' && sessionPath ? sessionPath : null,
++      ...(typeof draftId === 'string' && draftId.startsWith('draft:') ? { draftId } : {}),
++    };
+   } catch {
+     return null;
+   }
+@@ -39,7 +45,7 @@ export function writeLastOpen(value: LastOpen | null): void {
+ export function lastOpenEquals(a: LastOpen | null, b: LastOpen | null): boolean {
+   if (a === b) return true;
+   if (!a || !b) return false;
+-  return a.workspace === b.workspace && a.sessionPath === b.sessionPath;
++  return a.workspace === b.workspace && a.sessionPath === b.sessionPath && a.draftId === b.draftId;
+ }
+ 
+ /** 会话 store 的当前位置 → 要记住的值；还没进任何工作区时为 null（启动过程中的空态不覆盖记忆）。 */
+@@ -47,17 +53,22 @@ export function lastOpenFromState(state: {
+   activeWorkspace: string;
+   activeSessionPath: string | null;
+   draftConversationCwd: string | null;
++  draftConversationId?: string | null;
+ }): LastOpen | null {
+   if (!state.activeWorkspace) return null;
+   const draft = Boolean(
+     state.draftConversationCwd && pathsEquivalent(state.draftConversationCwd, state.activeWorkspace),
+   );
+-  return { workspace: state.activeWorkspace, sessionPath: draft ? null : state.activeSessionPath || null };
++  return {
++    workspace: state.activeWorkspace,
++    sessionPath: draft ? null : state.activeSessionPath || null,
++    ...(draft && state.draftConversationId ? { draftId: state.draftConversationId } : {}),
++  };
+ }
+ 
+ export type StartupTarget =
+   | { kind: 'session'; workspace: string; sessionPath: string }
+-  | { kind: 'projectDraft'; workspace: string }
++  | { kind: 'projectDraft'; workspace: string; draftId?: string }
+   | null;
+ 
+ /**
+@@ -77,6 +88,6 @@ export function pickStartupTarget(
+     if (!hit || hit.archived) return null;
+     return { kind: 'session', workspace: hit.cwd || remembered.workspace, sessionPath: hit.path };
+   }
+-  if (worksDir && isUnder(remembered.workspace, worksDir)) return null;
+-  return { kind: 'projectDraft', workspace: remembered.workspace };
++  if (worksDir && isUnder(remembered.workspace, worksDir) && !remembered.draftId) return null;
++  return { kind: 'projectDraft', workspace: remembered.workspace, ...(remembered.draftId ? { draftId: remembered.draftId } : {}) };
+ }
+diff --git a/electron-agent/src/lib/pendingSession.ts b/electron-agent/src/lib/pendingSession.ts
+index d054fd1d..5b251143 100644
+--- a/electron-agent/src/lib/pendingSession.ts
++++ b/electron-agent/src/lib/pendingSession.ts
+@@ -1,4 +1,3 @@
+-import { clearComposerUserPick } from '../features/chat/input/actions/ModelThinkingAction';
+ import { useSessionStore } from '../store/session';
+ import { pathsEquivalent } from './pathUtils';
+ 
+@@ -19,10 +18,9 @@ export function needsSessionCreateOnSend(input: {
+  * 同工作区时 reset 当前消息区；切工作区只改 activeWorkspace，交给 Workspace effect。
+  */
+ export function enterPendingNewSession(cwd: string, onSameWorkspace?: () => void): void {
+-  clearComposerUserPick(cwd);
+   const st = useSessionStore.getState();
+-  st.setActiveSession('');
+   st.setDraftConversation(cwd);
++  st.setActiveSession('');
+   if (st.activeWorkspace && pathsEquivalent(st.activeWorkspace, cwd)) {
+     onSameWorkspace?.();
+     return;
+diff --git a/electron-agent/src/store/session.ts b/electron-agent/src/store/session.ts
+index 32cce972..4b9bf1f6 100644
+--- a/electron-agent/src/store/session.ts
++++ b/electron-agent/src/store/session.ts
+@@ -13,6 +13,8 @@ interface SessionStore {
+   worksDir: string; // ~/.pi/agent/works 的 canonical 前缀（区分对话/项目）
+   activeWorkspace: string; // 当前选中项目 cwd（替代常量 WORKSPACE，默认 '.'）
+   draftConversationCwd: string | null; // 点了新建但尚未首发落盘的 cwd（对话 scratch 或项目）
++  /** 未落盘草稿的独立身份；不能用 cwd 代替，否则同项目两份草稿互相覆盖。 */
++  draftConversationId: string | null;
+   activeSessionPath: string | null;
+   workspaceSessionPaths: Record<string, string>; // workspace(cwd) → 该 ws 当前活跃 sessionPath
+   searchKeyword: string;
+@@ -39,8 +41,8 @@ interface SessionStore {
+   getMergedSessions: () => SessionInfo[];
+   setWorksDir: (dir: string) => void;
+   setActiveWorkspace: (cwd: string) => void;
+-  setDraftConversation: (cwd: string | null) => void;
+-  clearDraftConversation: (cwd?: string) => void;
++  setDraftConversation: (cwd: string | null, draftId?: string) => void;
++  clearDraftConversation: (cwd?: string, draftId?: string) => void;
+   setActiveSession: (path: string) => void;
+   setWorkspaceSessionPath: (workspace: string, path: string) => void;
+   setSearchKeyword: (kw: string) => void;
+@@ -59,6 +61,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
+   worksDir: '',
+   activeWorkspace: '',
+   draftConversationCwd: null,
++  draftConversationId: null,
+   activeSessionPath: null,
+   workspaceSessionPaths: {},
+   searchKeyword: '',
+@@ -123,11 +126,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
+   getMergedSessions: () => mergeAllSessions(get().allSessions, get().optimisticSessions),
+   setWorksDir: (worksDir) => set({ worksDir }),
+   setActiveWorkspace: (activeWorkspace) => set({ activeWorkspace }),
+-  setDraftConversation: (draftConversationCwd) => set({ draftConversationCwd }),
+-  clearDraftConversation: (cwd) =>
++  setDraftConversation: (draftConversationCwd, draftId) => set({
++    draftConversationCwd,
++    draftConversationId: draftConversationCwd ? draftId || `draft:${crypto.randomUUID()}` : null,
++  }),
++  clearDraftConversation: (cwd, draftId) =>
+     set((s) =>
+-      !cwd || (s.draftConversationCwd && pathsEquivalent(s.draftConversationCwd, cwd))
+-        ? { draftConversationCwd: null }
++      (!cwd || (s.draftConversationCwd && pathsEquivalent(s.draftConversationCwd, cwd))) &&
++      (!draftId || s.draftConversationId === draftId)
++        ? { draftConversationCwd: null, draftConversationId: null }
+         : s,
+     ),
+   setActiveSession: (path) => set({ activeSessionPath: path }),
+diff --git a/electron-agent/src/stores/chatDraftStore.ts b/electron-agent/src/stores/chatDraftStore.ts
+index c408849c..980cb893 100644
+--- a/electron-agent/src/stores/chatDraftStore.ts
++++ b/electron-agent/src/stores/chatDraftStore.ts
+@@ -17,6 +17,12 @@ interface ChatDraftState {
+    * 见 .agents/notes/implemented/feature/2026-10-19-composer-draft-full-restore.md
+    */
+   drafts: Record<string, StoredDraft>;
++  /** 仅运行期：首发后的旧回调仍归新会话；删除墓碑拒绝迟到保存。 */
++  adoptions: Record<string, string>;
++  removed: Record<string, true>;
++  resolveKey: (key: string) => string | null;
++  adopt: (from: string, to: string) => void;
++  remove: (key: string) => void;
+   getDraft: (key: string) => ComposerDraft;
+   setDraft: (key: string, draft: ComposerDraft | string) => void;
+   clearDraft: (key: string) => void;
+@@ -26,9 +32,36 @@ export const useChatDraftStore = create<ChatDraftState>()(
+   persist(
+     (set, get) => ({
+       drafts: {},
+-      getDraft: (key) => normalizeComposerDraft(get().drafts[key]),
++      adoptions: {},
++      removed: {},
++      resolveKey: (key) => {
++        const s = get();
++        const target = s.adoptions[key] ?? key;
++        return s.removed[target] ? null : target;
++      },
++      adopt: (from, to) => set((s) => {
++        if (!from || !to || from === to || s.removed[to]) return s;
++        const drafts = { ...s.drafts };
++        if (!(to in drafts) && from in drafts) drafts[to] = drafts[from];
++        delete drafts[from];
++        return { drafts, adoptions: { ...s.adoptions, [from]: to } };
++      }),
++      remove: (key) => set((s) => {
++        const target = s.adoptions[key] ?? key;
++        const drafts = { ...s.drafts };
++        delete drafts[target];
++        delete drafts[key];
++        return { drafts, removed: { ...s.removed, [target]: true } };
++      }),
++      getDraft: (key) => {
++        const target = get().resolveKey(key);
++        return normalizeComposerDraft(target ? get().drafts[target] : undefined);
++      },
+       setDraft: (key, draft) =>
+         set((s) => {
++          const target = s.resolveKey(key);
++          if (!target) return s;
++          key = target;
+           const next = normalizeComposerDraft(draft);
+           const cur = normalizeComposerDraft(s.drafts[key]);
+           if (composerDraftEquals(cur, next)) return s;
+@@ -43,12 +76,15 @@ export const useChatDraftStore = create<ChatDraftState>()(
+         }),
+       clearDraft: (key) =>
+         set((s) => {
++          const target = s.resolveKey(key);
++          if (!target) return s;
++          key = target;
+           if (!(key in s.drafts)) return s;
+           const next = { ...s.drafts };
+           delete next[key];
+           return { drafts: next };
+         }),
+     }),
+-    { name: 'pi-chat-drafts' },
++    { name: 'pi-chat-drafts', partialize: (s) => ({ drafts: s.drafts }) },
+   ),
+ );

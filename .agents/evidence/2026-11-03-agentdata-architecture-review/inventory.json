@@ -1,0 +1,432 @@
+{
+  "observedAt": "2026-11-03T06:25:04.508Z",
+  "root": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent",
+  "files": [
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\.pi\\subagents\\registry.db",
+      "bytes": 16384
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\agent-data.db",
+      "bytes": 886951936
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\9b6d873fc50edb81de4658c3ecf399d8c65da9edb2db9a9c1cbb514cc009d5a9\\wiki.sqlite",
+      "bytes": 90112
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\a0247816205e9a4033f6d60ba3df08b5314457dce45d3468379d6c56bb3ad312\\wiki.sqlite",
+      "bytes": 4096
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\a0247816205e9a4033f6d60ba3df08b5314457dce45d3468379d6c56bb3ad312\\wiki.sqlite-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\a0247816205e9a4033f6d60ba3df08b5314457dce45d3468379d6c56bb3ad312\\wiki.sqlite-wal",
+      "bytes": 127752
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\ab4c5edb1cc969b35485e104bf5ec2b0a7427479480f31be6e9164bd4132296c\\wiki.sqlite",
+      "bytes": 90112
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\ab4c5edb1cc969b35485e104bf5ec2b0a7427479480f31be6e9164bd4132296c\\wiki.sqlite-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\ab4c5edb1cc969b35485e104bf5ec2b0a7427479480f31be6e9164bd4132296c\\wiki.sqlite-wal",
+      "bytes": 189552
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\wiki\\f670b4f4-497e-493f-a5eb-a449e6e0dfe3\\index.db",
+      "bytes": 49152
+    }
+  ],
+  "databases": [
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\agent-data.db",
+      "bytes": 886951936,
+      "journalMode": {
+        "journal_mode": "delete"
+      },
+      "tables": [
+        "agent_audit",
+        "agent_config",
+        "agent_job_leases",
+        "agent_jobs",
+        "app_events",
+        "audit_events",
+        "items",
+        "knowledge_build_items",
+        "knowledge_execution_requests",
+        "knowledge_source_snapshots",
+        "native_wiki_events",
+        "native_wiki_projection",
+        "permission_rules",
+        "plugin_state",
+        "schema_version",
+        "service_tasks",
+        "threads",
+        "tool_audit",
+        "turns",
+        "wiki_assets",
+        "wiki_documents",
+        "wiki_documents_before_libraries",
+        "wiki_fts",
+        "wiki_fts_before_libraries",
+        "wiki_fts_before_libraries_config",
+        "wiki_fts_before_libraries_content",
+        "wiki_fts_before_libraries_data",
+        "wiki_fts_before_libraries_docsize",
+        "wiki_fts_before_libraries_idx",
+        "wiki_fts_config",
+        "wiki_fts_content",
+        "wiki_fts_data",
+        "wiki_fts_docsize",
+        "wiki_fts_idx",
+        "wiki_ingest_runs",
+        "wiki_legacy_library_map",
+        "wiki_legacy_source_map",
+        "wiki_libraries",
+        "wiki_page_state",
+        "wiki_pages",
+        "wiki_schema_migrations",
+        "wiki_source_revisions",
+        "wiki_sources",
+        "wiki_task_targets"
+      ],
+      "counts": {
+        "schema_version": 1,
+        "agent_jobs": 22,
+        "service_tasks": 1,
+        "agent_audit": 8766,
+        "audit_events": 0,
+        "threads": 617,
+        "turns": 1602,
+        "items": 94842,
+        "app_events": 354,
+        "tool_audit": 97213,
+        "permission_rules": 17,
+        "plugin_state": 5,
+        "knowledge_build_items": 242,
+        "agent_job_leases": 1,
+        "native_wiki_projection": 1,
+        "native_wiki_events": 0
+      },
+      "groups": {
+        "jobs": [
+          {
+            "kind": "codegraph.sync",
+            "state": "completed",
+            "count": 5
+          },
+          {
+            "kind": "repoWiki.generate",
+            "state": "cancelled",
+            "count": 7
+          },
+          {
+            "kind": "repoWiki.generate",
+            "state": "failed",
+            "count": 9
+          },
+          {
+            "kind": "repoWiki.native",
+            "state": "failed",
+            "count": 1
+          }
+        ],
+        "serviceTasks": [
+          {
+            "kind": "wiki_page_generate",
+            "status": "completed",
+            "count": 1
+          }
+        ]
+      },
+      "schema": [
+        {
+          "version": 7
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\9b6d873fc50edb81de4658c3ecf399d8c65da9edb2db9a9c1cbb514cc009d5a9\\wiki.sqlite",
+      "bytes": 90112,
+      "journalMode": {
+        "journal_mode": "wal"
+      },
+      "tables": [
+        "checkpoint_history",
+        "checkpoints",
+        "leases",
+        "operations",
+        "outbox",
+        "partitions",
+        "publications",
+        "runs",
+        "session_events",
+        "usage"
+      ],
+      "counts": {
+        "operations": 0,
+        "runs": 0,
+        "publications": 0
+      },
+      "groups": {
+        "operations": []
+      }
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\a0247816205e9a4033f6d60ba3df08b5314457dce45d3468379d6c56bb3ad312\\wiki.sqlite",
+      "bytes": 4096,
+      "journalMode": {
+        "journal_mode": "wal"
+      },
+      "tables": [
+        "checkpoint_history",
+        "checkpoints",
+        "leases",
+        "operations",
+        "outbox",
+        "partitions",
+        "publications",
+        "runs",
+        "session_events",
+        "usage"
+      ],
+      "counts": {
+        "operations": 0,
+        "runs": 0,
+        "publications": 0
+      },
+      "groups": {
+        "operations": []
+      }
+    },
+    {
+      "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\repo-wiki\\native\\ab4c5edb1cc969b35485e104bf5ec2b0a7427479480f31be6e9164bd4132296c\\wiki.sqlite",
+      "bytes": 90112,
+      "journalMode": {
+        "journal_mode": "wal"
+      },
+      "tables": [
+        "checkpoint_history",
+        "checkpoints",
+        "leases",
+        "operations",
+        "outbox",
+        "partitions",
+        "publications",
+        "runs",
+        "session_events",
+        "usage"
+      ],
+      "counts": {
+        "operations": 1,
+        "runs": 1,
+        "publications": 0
+      },
+      "groups": {
+        "operations": [
+          {
+            "state": "failed",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ],
+  "processes": [
+    {
+      "name": "node.exe",
+      "pid": 29084,
+      "parentPid": 10516,
+      "role": "electron-agent",
+      "rssBytes": 330526720
+    },
+    {
+      "name": "electron.exe",
+      "pid": 32756,
+      "parentPid": 29084,
+      "role": "electron-agent",
+      "rssBytes": 216657920
+    },
+    {
+      "name": "electron.exe",
+      "pid": 62732,
+      "parentPid": 32756,
+      "role": "electron-agent",
+      "rssBytes": 171483136
+    },
+    {
+      "name": "electron.exe",
+      "pid": 59244,
+      "parentPid": 32756,
+      "role": "agentdata-host",
+      "rssBytes": 70926336
+    },
+    {
+      "name": "electron.exe",
+      "pid": 27828,
+      "parentPid": 32756,
+      "role": "electron-agent",
+      "rssBytes": 61251584
+    },
+    {
+      "name": "electron.exe",
+      "pid": 46616,
+      "parentPid": 32756,
+      "role": "agent-host",
+      "rssBytes": 232583168
+    },
+    {
+      "name": "electron.exe",
+      "pid": 65464,
+      "parentPid": 32756,
+      "role": "electron-agent",
+      "rssBytes": 1069056000
+    },
+    {
+      "name": "electron.exe",
+      "pid": 44452,
+      "parentPid": 32756,
+      "role": "repo-wiki-host",
+      "rssBytes": 108630016
+    },
+    {
+      "name": "electron.exe",
+      "pid": 22504,
+      "parentPid": 59244,
+      "role": "codegraph-host",
+      "rssBytes": 390680576
+    }
+  ],
+  "diagnostics": {
+    "path": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\logs\\runtime-diag.jsonl",
+    "bytes": 11444474,
+    "modifiedAt": "2026-11-03T06:25:06.041Z",
+    "tailRows": 5921,
+    "kinds": {
+      "agentdata-host-sample": 1592,
+      "agent-host-sample": 1591,
+      "sample": 1593,
+      "start": 3,
+      "codegraph-host-sample": 1138,
+      "agent-host-exit": 1,
+      "agent-host-sweep": 1,
+      "agentdata-host-exit": 1,
+      "agentdata-host-sweep": 1
+    },
+    "sampleFieldNames": [
+      "t",
+      "kind",
+      "memory",
+      "lag",
+      "syncing"
+    ],
+    "latestSamples": [
+      {
+        "t": "2026-11-03T06:24:46.560Z",
+        "kind": "agentdata-host-sample",
+        "memory": {
+          "rss": 67.4,
+          "heapUsed": 9.2,
+          "heapTotal": 10.6,
+          "heapLimit": 4095.8
+        },
+        "lag": {
+          "maxMs": 33,
+          "p99Ms": 32,
+          "meanMs": 31
+        },
+        "agentData": {
+          "syncMs": 40.5,
+          "n": 8,
+          "methods": [
+            {
+              "method": "permission.tool.evaluate",
+              "n": 8,
+              "syncMs": 40.5,
+              "syncMaxMs": 7.7,
+              "totalMs": 40.8,
+              "totalMaxMs": 7.7
+            }
+          ],
+          "slow": []
+        }
+      },
+      {
+        "t": "2026-11-03T06:24:51.431Z",
+        "kind": "codegraph-host-sample",
+        "memory": {
+          "rss": 372.3,
+          "heapUsed": 4.2,
+          "heapTotal": 5.2,
+          "heapLimit": 4095.8
+        },
+        "lag": {
+          "maxMs": 33,
+          "p99Ms": 32,
+          "meanMs": 31
+        },
+        "syncing": 0
+      },
+      {
+        "t": "2026-11-03T06:24:56.573Z",
+        "kind": "agentdata-host-sample",
+        "memory": {
+          "rss": 67.7,
+          "heapUsed": 8.9,
+          "heapTotal": 10.3,
+          "heapLimit": 4095.8
+        },
+        "lag": {
+          "maxMs": 35,
+          "p99Ms": 32,
+          "meanMs": 31
+        },
+        "agentData": {
+          "syncMs": 88.7,
+          "n": 14,
+          "methods": [
+            {
+              "method": "permission.tool.evaluate",
+              "n": 11,
+              "syncMs": 58.9,
+              "syncMaxMs": 7.4,
+              "totalMs": 59.3,
+              "totalMaxMs": 7.4
+            },
+            {
+              "method": "item.upsert",
+              "n": 3,
+              "syncMs": 29.9,
+              "syncMaxMs": 10.7,
+              "totalMs": 30,
+              "totalMaxMs": 10.7
+            }
+          ],
+          "slow": []
+        }
+      },
+      {
+        "t": "2026-11-03T06:25:01.438Z",
+        "kind": "codegraph-host-sample",
+        "memory": {
+          "rss": 371.9,
+          "heapUsed": 4.3,
+          "heapTotal": 5.2,
+          "heapLimit": 4095.8
+        },
+        "lag": {
+          "maxMs": 40,
+          "p99Ms": 32,
+          "meanMs": 31
+        },
+        "syncing": 0
+      }
+    ]
+  }
+}

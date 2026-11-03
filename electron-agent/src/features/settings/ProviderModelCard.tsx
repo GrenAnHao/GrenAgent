@@ -1,5 +1,7 @@
 import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core';
 import { Icon } from '@lobehub/ui';
+import { fastApiSupported } from '../../../../extensions/_shared/fast-mode';
+import { useModelMessages } from '../../lib/modelMessages';
 import { Checkbox, Collapse, Input, InputNumber, Select } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react';
@@ -32,10 +34,11 @@ const styles = createStaticStyles(({ css }) => ({
   row: css`
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
   `,
   grow: css`
-    flex: 1 1 0;
+    flex: 1 1 150px;
     min-width: 0;
   `,
   chk: css`
@@ -411,6 +414,7 @@ export interface ProviderModelCardProps {
 }
 
 export function ProviderModelCard({ model, index, api, expanded, markEmptyId = false, onToggle, onChange, onRemove, dragHandle }: ProviderModelCardProps) {
+  const messages = useModelMessages();
   const formatChip = thinkingFormatChip(model.thinkingFormat);
   const groups = groupsForEditor(api);
   const showFormat = showsThinkingFormat(api);
@@ -489,6 +493,16 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
           onChange={(e) => onChange({ input: e.target.checked ? ['text', 'image'] : ['text'] })}
         >
           图片
+        </Checkbox>
+        <Checkbox
+          className={styles.chk}
+          data-testid={`prov-model-fast-${index}`}
+          checked={model.fast === true && fastApiSupported(api)}
+          disabled={!fastApiSupported(api)}
+          title={fastApiSupported(api) ? messages.fastCapability : messages.fastUnsupported}
+          onChange={(e) => onChange({ fast: e.target.checked })}
+        >
+          {messages.fastCheckbox}
         </Checkbox>
         {formatChip ? <span className={styles.chip}>{formatChip}</span> : null}
         <InputNumber

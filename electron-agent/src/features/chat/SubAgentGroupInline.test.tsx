@@ -34,6 +34,21 @@ function row(no: number, unit: Omit<SubAgentUnit, 'key' | 'subIndex'>): Numbered
 }
 
 describe('SubAgentGroupInline chain status', () => {
+  it.each([{ units: [] }, { units: [row(1, { task: 'A', status: 'error' }), row(2, { task: 'B', status: 'error' })] }])('调用级错误原文可见，不依赖是否已有任务行 (%#)', ({ units }) => {
+    wrap(<SubAgentGroupInline messageId="rejected" toolCallId="reject-c" mode="parallel" status="error" units={units}
+      result={{ isError: true, content: [{ type: 'text', text: '子代理已被禁用：请检查模型策略' }] }} />);
+    expect(screen.getByTestId('subagent-group-error')).toHaveTextContent('子代理已被禁用：请检查模型策略');
+  });
+
+  it('部分任务失败时仍保留成功项，不把整个批次结果当调用级错误', () => {
+    wrap(<SubAgentGroupInline messageId="partial" toolCallId="partial-c" mode="parallel" status="done"
+      units={[row(1, { task: 'A', status: 'done' }), row(2, { task: 'B', status: 'error' })]}
+      result={{ content: [{ type: 'text', text: 'A 的成功输出与 B 的错误' }], details: { failed: 1 } }} />);
+    expect(screen.getByText('已完成')).toBeTruthy();
+    expect(screen.getByText('出错')).toBeTruthy();
+    expect(screen.queryByTestId('subagent-group-error')).toBeNull();
+  });
+
   it('shows the model on a finished step and waits on the steps that have not started', () => {
     wrap(
       <SubAgentGroupInline

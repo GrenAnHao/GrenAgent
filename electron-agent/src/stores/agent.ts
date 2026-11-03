@@ -4,6 +4,7 @@ import {
   addUserMessage,
   excludedFromAgent,
   assistantStopFromMessages,
+  todoLifecycleFromMessages,
   interruptPendingToolCards,
   type AgentState,
   type ChatMessage,
@@ -295,7 +296,8 @@ export function createAgentStore(workspace: string): AgentStoreApi {
         partialShadows.add(sessionPath);
         needsBackfill = true;
       }
-      state = { ...initialAgentState(), messages: cached?.messages ?? [] };
+      const cachedMessages = cached?.messages ?? [];
+      state = { ...initialAgentState(), messages: cachedMessages, ...todoLifecycleFromMessages(cachedMessages) };
       shadows.set(sessionPath, state);
     }
     let background = shadowStreams.get(sessionPath);
@@ -355,12 +357,11 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   };
 
   /**
-   * 画面要换成另一个会话前调用。已绑定路径时按它停靠；还没绑定（草稿首发刚落盘、
-   * bindSessionPath 尚未赶上）时用调用方给的上一会话路径兜底。都没有就只能丢弃画面态。
+   * 只停靠已经绑定稳定会话路径的画面。未绑定是尚在创建的新草稿，
+   * 调用方的 fromPath 可能是这个项目上次打开的旧会话，不能拿来归属乐观气泡/等待态。
    */
-  const leaveView = (fromPath?: string | null) => {
-    const path = loadedSessionPath ?? (liveActivity ? fromPath ?? undefined : undefined);
-    if (path) parkCurrent(path);
+  const leaveView = (_fromPath?: string | null) => {
+    if (loadedSessionPath) parkCurrent(loadedSessionPath);
     liveActivity = false;
   };
 
@@ -368,9 +369,12 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   const takeShadowRunState = (path: string): Partial<AgentState> => {
     const shadow = getShadow(path);
     dropShadow(path);
-    if (!shadow || !(shadow.isStreaming || shadow.awaitingResponse)) return {};
+    if (!shadow) return {};
+    const todoState = { assistantStop: shadow.assistantStop, todoListFinished: shadow.todoListFinished };
+    if (!(shadow.isStreaming || shadow.awaitingResponse)) return todoState;
     liveActivity = true;
     return {
+      ...todoState,
       isStreaming: Boolean(shadow.isStreaming),
       runActive: Boolean(shadow.runActive ?? shadow.isStreaming),
       awaitingResponse: Boolean(shadow.awaitingResponse),
@@ -403,7 +407,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
             interruptPendingToolCards(snapshot, shadowRunning ? pendingCallIds : undefined),
             shadow.messages,
           );
-          shadows.set(key, { ...shadow, messages: merged, excluded: excludedFromAgent(res.messages) });
+          shadows.set(key, { ...shadow, messages: merged, excluded: excludedFromAgent(res.messages), ...todoLifecycleFromMessages(merged) });
           partialShadows.delete(key);
           setCachedSession(key, merged, sessionSignature(merged));
           return;
@@ -506,7 +510,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       useStore.setState({
         messages: merged,
         excluded: excludedFromAgent(msgs),
-        todoListFinished: liveState.todoListFinished ?? todoListFinishedInTranscript(msgs),
+        ...todoLifecycleFromMessages(merged),
       });
       restoreInlineQuestionOnLoad(workspace, msgs, sessionPath);
       return;
@@ -518,7 +522,11 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     // 后台刷新命中「同一会话 + 内容未变」→ 跳过 setState：缓存已秒显，无谓重渲染会让整列闪一下。
     if (sessionPath != null && samePath(sessionPath, loadedSessionPath) && sig === currentSig) {
       const runState = takeShadowRunState(sessionPath);
-      if (Object.keys(runState).length) useStore.setState(runState);
+      useStore.setState({
+        ...runState,
+        assistantStop: assistantStopFromMessages(msgs),
+        todoListFinished: todoListFinishedInTranscript(msgs),
+      });
       liveActivity = Boolean(liveState.isStreaming || liveState.awaitingResponse || runState.isStreaming || runState.awaitingResponse);
       if (detachedPath && pathsEquivalent(detachedPath, sessionPath)) detachedPath = undefined;
       viewHasHistory = true;
@@ -648,14 +656,19 @@ export function createAgentStore(workspace: string): AgentStoreApi {
         const res = await pi.getMessages(workspace);
         // 必须带 sessionPath：否则短列表只进内存，磁盘上更长的 ui-history 仍会在下次加载盖回已删消息。
         loadMessages(res.messages, { force: true, sessionPath: loadedSessionPath });
-      } catch {
+      } catch (error) {
         await deleteUiHistoryFailClosed();
+        useStore.setState({
+          assistantStop: undefined,
+          todoListFinished: false,
+          lastError: `会话已截断，但读取最新任务状态失败，请重新打开会话：${error instanceof Error ? error.message : String(error)}`,
+        });
       }
       return;
     }
     currentSig = sessionSignature(cut);
     if (loadedSessionPath != null) setCachedSession(loadedSessionPath, cut, currentSig);
-    useStore.setState({ messages: cut });
+    useStore.setState({ messages: cut, ...todoLifecycleFromMessages(cut) });
     await persistUiHistoryAfterCut(cut);
   };
 
@@ -805,7 +818,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       ? { ...targetShadow, retrying: undefined }
       : tail && live
         ? { ...tail, retrying: undefined, messages }
-        : { ...initialAgentState(), messages };
+        : { ...initialAgentState(), messages, ...todoLifecycleFromMessages(messages) };
     setFullState({ ...base, composerQueue, ...runState });
     viewHasHistory = true;
     // 同项目切会话：消息已是目标会话，浮层必须立刻对齐，否则用户会点到上一会话的卡。

@@ -1,0 +1,10 @@
+.repo-wiki-root .markdown .diagram-frame { border: 1px solid var(--rw-border, #e8e5df); border-radius: 12px; overflow: hidden; background: #eeede8; }
+.repo-wiki-root .markdown .diagram-toolbar { background: #f7f6f2; color: #6c6f65; border-bottom: 1px solid #e4e2da; }
+.repo-wiki-root .markdown .diagram-toolbar button { color: #61665c; border-color: #deded6; background: transparent; min-height: 26px; padding: 3px 7px; font-size: 11px; }
+.repo-wiki-root .markdown .diagram-toolbar button:hover,
+.repo-wiki-root .markdown .diagram-toolbar button[aria-pressed="true"] { color: #333a2e; background: #e8e7e1; }
+.repo-wiki-root .markdown .diagram-toolbar button:disabled { opacity: .4; }
+.repo-wiki-root .markdown .mermaid-box { display: block; overflow: auto; max-height: 680px; padding: 20px; background: #eeede8; }
+.repo-wiki-root .markdown .mermaid-box > .diagram-canvas { margin: 0 auto; max-width: none; flex-shrink: 0; }
+.repo-wiki-root .markdown .mermaid-box svg { display: block; width: 100% !important; max-width: none !important; height: auto !important; }
+.repo-wiki-root .markdown .diagram-fallback { color: #474c41; background: #f7f6f2; overflow: auto; max-height: 560px; }

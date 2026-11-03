@@ -204,4 +204,18 @@ describe('JobStore', () => {
     expect(store.hasActive('codegraph.sync', '/repo')).toBe(false);
     db.close();
   });
+
+  it('records one retryable failed sync when auto-sync breaks, and refreshes it instead of stacking jobs', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new JobStore(db);
+    const running = store.create({ kind: 'codegraph.sync', workspace: '/busy' });
+    expect(store.recordBreaker('/busy', 'still running')).toMatchObject({ id: running.id, state: 'pending' });
+    const first = store.recordBreaker('/repo', 'boom');
+    expect(first).toMatchObject({ kind: 'codegraph.sync', workspace: '/repo', state: 'failed', error: 'boom', metadata: { origin: 'breaker', target: { type: 'project', id: '/repo' } } });
+    const again = store.recordBreaker('/repo', 'boom again');
+    expect(again.id).toBe(first.id);
+    expect(again.error).toBe('boom again');
+    expect(store.list().filter((job) => job.workspace === '/repo')).toHaveLength(1);
+    db.close();
+  });
 });

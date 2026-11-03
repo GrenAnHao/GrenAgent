@@ -57,10 +57,6 @@ export function modelWithThinking(
   return lv ? `${name} · ${levelDisplayLabel(lv)}` : name;
 }
 
-export function argsLookParallel(args: unknown): boolean {
-  return Array.isArray((args as { tasks?: unknown } | null)?.tasks);
-}
-
 export function taskLabel(args: unknown): string {
   const a = (args ?? {}) as {
     task?: string;
@@ -342,17 +338,7 @@ function argAgentId(args: unknown): string | null {
 }
 
 function taskAt(args: unknown, index: number): string | null {
-  const a = (args ?? {}) as SpawnArgs;
-  if (index === 0) {
-    const single = a.task?.trim();
-    if (single) return single;
-  }
-  const chained = a.chain?.[index]?.task?.trim();
-  if (chained) return chained;
-  const item = a.tasks?.[index];
-  if (typeof item === 'string' && item.trim()) return item.trim();
-  if (item && typeof item === 'object' && typeof item.task === 'string' && item.task.trim()) return item.task.trim();
-  return null;
+  return explicitWorks(args)[index]?.task ?? null;
 }
 
 /** 这次调用自己带的任务。wait/status/cancel/remove 只带 agentId，这里返回空。 */
@@ -556,19 +542,8 @@ function cleanTitle(value: unknown): string | undefined {
 
 /** 单任务用顶层 title；并行/链式用对应下标那一项的 title。 */
 export function spawnUnitTitle(args: unknown, subIndex: number | null): string | undefined {
-  const a = (args ?? {}) as SpawnArgs;
-  if (subIndex == null) {
-    const top = cleanTitle(a.title);
-    if (top) return top;
-    const only = a.tasks?.length === 1 ? a.tasks[0] : undefined;
-    if (only && typeof only === 'object') return cleanTitle(only.title);
-    return undefined;
-  }
-  const step = a.chain?.[subIndex];
-  if (step) return cleanTitle(step.title);
-  const item = a.tasks?.[subIndex];
-  if (item && typeof item === 'object') return cleanTitle(item.title);
-  return undefined;
+  const work = explicitWorks(args)[subIndex ?? 0];
+  return subIndex == null ? cleanTitle((args as SpawnArgs | null)?.title) ?? work?.title : work?.title;
 }
 
 interface UnitResult {
@@ -595,47 +570,38 @@ export function isDetachedRow(row: { status?: string; detached?: boolean } | und
 interface UnitWork {
   task: string;
   title?: string;
+  model?: string;
 }
 
-function withTitle(task: string, title: string | undefined): UnitWork {
-  return title ? { task, title } : { task };
+function withTitle(task: string, title: string | undefined, model?: string): UnitWork {
+  return { task, ...(title ? { title } : {}), ...(model ? { model } : {}) };
 }
 
-/** 一次 spawn_agent 调用展开出的逐个子代理任务（单任务 1 条；并行/链式 N 条）。 */
+/** 没有任务的旧结果仍可显示占位；显式序列和分组判定都不计入这个占位。 */
 function unitWorks(args: unknown): UnitWork[] {
-  const a = (args ?? {}) as SpawnArgs;
-  if (Array.isArray(a.chain) && a.chain.length > 0) {
-    return a.chain.map((s) => withTitle(s?.task?.trim() || '子代理任务', cleanTitle(s?.title)));
-  }
-  const out: UnitWork[] = [];
-  const single = a.task?.trim();
-  if (single) out.push(withTitle(single, cleanTitle(a.title)));
-  for (const t of a.tasks ?? []) {
-    if (typeof t === 'string') {
-      const v = t.trim();
-      if (v) out.push({ task: v });
-    } else if (t && typeof t.task === 'string' && t.task.trim()) {
-      out.push(withTitle(t.task.trim(), cleanTitle(t.title)));
-    }
-  }
-  if (out.length === 0) out.push({ task: '子代理任务' });
-  return out;
+  const works = explicitWorks(args);
+  return works.length > 0 ? works : [{ task: '子代理任务' }];
 }
 
 function unitTasks(args: unknown): string[] {
   return unitWorks(args).map((item) => item.task);
 }
 
-/** 并行组在参数还没写完时不要补一条假任务。 */
+/** 与后端相同的顺序：非空 chain 优先，否则顶层 task 加有效 tasks；空数组没有模式含义。 */
 function explicitWorks(args: unknown): UnitWork[] {
   const a = (args ?? {}) as SpawnArgs;
+  if (Array.isArray(a.chain) && a.chain.length > 0) {
+    return a.chain.map((s) => withTitle(cleanTitle(s?.task) ?? '子代理任务', cleanTitle(s?.title), cleanTitle(s?.model)));
+  }
   const out: UnitWork[] = [];
-  for (const t of a.tasks ?? []) {
+  const single = cleanTitle(a.task);
+  if (single) out.push(withTitle(single, cleanTitle(a.title), cleanTitle(a.model)));
+  for (const t of Array.isArray(a.tasks) ? a.tasks : []) {
     if (typeof t === 'string') {
-      const v = t.trim();
-      if (v) out.push({ task: v });
+      const task = t.trim();
+      if (task) out.push({ task });
     } else if (t && typeof t.task === 'string' && t.task.trim()) {
-      out.push(withTitle(t.task.trim(), cleanTitle(t.title)));
+      out.push(withTitle(t.task.trim(), cleanTitle(t.title), cleanTitle(t.model)));
     }
   }
   return out;
@@ -656,21 +622,9 @@ function thinkingLevelOf(row: UnitResult | undefined, args: unknown): string | u
   return cleanLevel(row?.thinkingLevel) ?? cleanLevel((args as { thinking_level?: unknown } | null)?.thinking_level);
 }
 
-/** 任务对象里写明的模型。启动阶段结果还没回来时，行上先用这个。 */
-function modelFromTaskArgs(args: unknown, index: number): string | undefined {
-  const tasks = (args as SpawnArgs | null)?.tasks;
-  const item = tasks?.[index];
-  if (!item || typeof item === 'string') return undefined;
-  const model = item.model?.trim();
-  return model || undefined;
-}
-
-/** 参数里已经写明的模型：链式看 chain[i].model，并行看 tasks[i].model。 */
+/** 参数模型和任务使用相同的归一化下标，混合 task/tasks 时不会错位。 */
 function modelFromUnitArgs(args: unknown, index: number): string | undefined {
-  const step = (args as SpawnArgs | null)?.chain?.[index];
-  const fromChain = step?.model?.trim();
-  if (fromChain) return fromChain;
-  return modelFromTaskArgs(args, index);
+  return explicitWorks(args)[index]?.model;
 }
 
 function rowTerminal(row: UnitResult | undefined): boolean {
@@ -690,11 +644,11 @@ function chainStepWaiting(args: unknown, results: UnitResult[] | null, index: nu
 
 export type SubAgentMode = 'single' | 'parallel' | 'chain';
 
-/** 调用模式：单任务 / 并行 / 链式（按 args 判断）。 */
-export function subAgentMode(args: unknown): SubAgentMode {
+/** 调用模式由有效任务及历史逐项结果决定，空数组不触发分组。 */
+export function subAgentMode(args: unknown, result?: unknown): SubAgentMode {
   const a = (args ?? {}) as SpawnArgs;
-  if (Array.isArray(a.chain) && a.chain.length > 0) return 'chain';
-  if (unitTasks(args).length > 1) return 'parallel';
+  if ((Array.isArray(a.chain) && a.chain.length > 0) || detailsOf(result)?.mode === 'chain') return 'chain';
+  if (explicitWorks(args).length > 1 || (resultsOf(result)?.length ?? 0) > 1) return 'parallel';
   return 'single';
 }
 
@@ -727,7 +681,6 @@ export function expandSubAgents(
   args: unknown,
   result: unknown,
   status: 'running' | 'done' | 'error',
-  asGroup = false,
 ): SubAgentUnit[] {
   const results = resultsOf(result);
   const tasks = taskAt(args, 0)
@@ -735,7 +688,7 @@ export function expandSubAgents(
     : results?.length
       ? results.map((row) => withTitle(row.task?.trim() || '子代理任务', cleanTitle(row.title)))
       : [withTitle(taskFromAgentResult(result) ?? '子代理任务', spawnUnitTitle(args, null) ?? cleanTitle(detailsOf(result)?.title))];
-  if (tasks.length <= 1 && !asGroup) {
+  if (tasks.length <= 1 && subAgentMode(args, result) === 'single') {
     const only = tasks[0] ?? { task: '子代理任务' };
     const agentId = subAgentId(result);
     const model = modelFromResult(result) ?? cleanTitle((args as SpawnArgs | null)?.model) ?? modelFromUnitArgs(args, 0);
@@ -745,9 +698,7 @@ export function expandSubAgents(
       ...(agentId ? { agentId } : {}), ...(model ? { model } : {}), ...(thinkingLevel ? { thinkingLevel } : {}),
     }];
   }
-  const grouped = asGroup ? explicitWorks(args) : tasks;
-  if (grouped.length === 0) return [];
-  return grouped.map((work, i) => {
+  return tasks.map((work, i) => {
     const row = results?.[i];
     const agentId = cleanTitle(row?.agentId);
     const model = modelOf(row) ?? modelFromUnitArgs(args, i);

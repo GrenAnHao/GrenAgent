@@ -1,0 +1,28 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "files": [
+    "../../../electron-agent/node_modules/vite/client.d.ts"
+  ],
+  "references": [],
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "../../../electron-agent/src/features/chat/AgentCommunicationCard.tsx",
+    "../../../electron-agent/src/features/chat/MessageTimelineContext.ts",
+    "../../../electron-agent/src/features/chat/AgentMessagePill.tsx",
+    "../../../electron-agent/src/features/chat/agentCommunicationModel.ts",
+    "../../../electron-agent/src/features/chat/JobDonePill.tsx",
+    "../../../electron-agent/src/features/chat/SubagentSettledPill.tsx",
+    "../../../electron-agent/src/features/chat/ChatMessageItems.tsx",
+    "../../../electron-agent/src/features/chat/groupMessages.ts",
+    "../../../electron-agent/src/features/tools/ToolExecution.tsx",
+    "../../../electron-agent/src/features/tools/SendMessageCard.tsx",
+    "../../../electron-agent/src/features/tools/CodemodeCard.tsx",
+    "../../../electron-agent/src/features/panels/SubAgentConversation.tsx",
+    "../../../electron-agent/src/stores/agentReducer.ts",
+    "../../../electron-agent/src/stores/sessionMessageSync.ts",
+    "../../../electron-agent/ui-harness/scenarios/agent-message.tsx",
+    "../../../electron-agent/ui-harness/scenarios/task-notices.tsx"
+  ]
+}

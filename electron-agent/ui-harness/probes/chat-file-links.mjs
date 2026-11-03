@@ -1,0 +1,52 @@
+const ACTIVE = '[data-testid="file-tab-pane"][data-active="true"]'
+async function clickLink(t, text, scope = '#conversation-links') {
+  const found = await t.js(`(() => {
+    document.querySelectorAll('[data-link-probe]').forEach((el) => el.removeAttribute('data-link-probe'))
+    const link = [...document.querySelectorAll(${JSON.stringify(scope)} + ' a')].find((el) => el.textContent === ${JSON.stringify(text)})
+    if (!link) return false
+    link.setAttribute('data-link-probe', '1')
+    return true
+  })()`)
+  t.ok(`链接存在：${text}`, found)
+  if (found) await t.click('[data-link-probe="1"]', 20)
+}
+export default async function (t) {
+  const expected = await t.data()
+  await t.waitFor('#conversation-links a')
+  const originalUrl = await t.js('location.href')
+  await clickLink(t, '查看验证记录')
+  await t.waitFor('[data-testid="file-explorer"]')
+  await t.waitUntil(`document.querySelector('[data-testid="file-tree-error"]') || document.querySelector('${ACTIVE} [data-testid="file-markdown-preview"] h1')`)
+  t.check('会话链接：工作区根没有错误的 /D:/ 前缀', (await t.data()).roots, [expected.root])
+  t.check('会话链接：文件树没有 workspace path does not exist', await t.count('[data-testid="file-tree-error"]'), 0)
+  const opened = (await t.text('#linked-file-manager')).includes('链接打开成功')
+  t.ok('会话原始 /D:/ 链接打开 Markdown 正文', opened)
+  if (!opened) { await t.shot('chat-link-broken'); return }
+  await clickLink(t, '预览里的绝对链接', `${ACTIVE} [data-testid="file-markdown-preview"]`)
+  t.ok('文件预览：同形状 Windows 链接也能打开', await t.waitForText(`${ACTIVE} h1`, '第二个文件'))
+  await clickLink(t, '查看编码盘符')
+  t.ok('编码盘符：激活正确文件', await t.waitForText(`${ACTIVE} h1`, '第二个文件'))
+  await clickLink(t, '查看验证记录')
+  t.ok('重复点击：回到原文件', await t.waitForText(`${ACTIVE} h1`, '链接打开成功'))
+  t.check('重复点击：不重复创建文件管理器', (await t.data()).roots, [expected.root])
+  t.check('不同链接：只保留两个文件标签', await t.count('[data-testid="file-tab"]'), 2)
+  await clickLink(t, '查看截图')
+  t.ok('图片链接：进入图片预览', await t.waitFor(`${ACTIVE} [data-testid="file-image-preview"] img`))
+  t.ok('图片链接：图片解码完成', await t.waitUntil(`(() => { const img=document.querySelector('${ACTIVE} img'); return img?.complete && img.naturalWidth === 80 })()`))
+  await clickLink(t, '普通相对链接')
+  t.ok('兼容：普通相对链接仍能打开', await t.waitForText(`${ACTIVE} h1`, '链接打开成功'))
+  await t.click('#remount-manager')
+  t.ok('恢复：重挂载后文件和工作区仍正确', await t.waitForText(`${ACTIVE} h1`, '链接打开成功'))
+  t.check('恢复：没有异常工作区', await t.count('[data-testid="file-tree-error"]'), 0)
+  t.check('导航：应用页面没有被链接跳走', await t.js('location.href'), originalUrl)
+  await t.shot('chat-link-opened')
+  await clickLink(t, '缺失文件')
+  t.ok('缺失文件：错误只落在目标文件，不破坏文件树', await t.waitForText('[data-testid="file-viewer-error"]', 'File does not exist'))
+  t.check('缺失文件：文件树仍然可用', await t.count('[data-testid="file-tree-error"]'), 0)
+  await t.setTheme('light')
+  await clickLink(t, '查看验证记录')
+  t.ok('浅色：错误后仍可打开正确文件', await t.waitForText(`${ACTIVE} h1`, '链接打开成功'))
+  const requests = await t.events()
+  t.ok('所有文件 IPC 使用真实项目根', requests.every((entry) => entry.split(':D:/Link Workspace/Pi:').length === 2))
+  await t.shot('chat-link-light')
+}

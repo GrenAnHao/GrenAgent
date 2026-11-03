@@ -1,4 +1,4 @@
-import { PiBrandLogo } from '../../../components/PiBrandLogo';
+import { GrenAgentIcon } from '../../../components/GrenAgentLogo';
 
 export function BrowserErrorState({
   title,
@@ -20,7 +20,7 @@ export function BrowserErrorState({
     <div className="gren-browser-error-overlay" role="alert">
       <div className="gren-browser-error-sheet">
         <span className="gren-browser-error-icon" aria-hidden="true">
-          <PiBrandLogo size={28} tight />
+          <GrenAgentIcon size={28} aria-hidden="true" />
         </span>
         <h1 className="gren-browser-error-title">{title}</h1>
         <p className="gren-browser-error-summary">{summary}</p>

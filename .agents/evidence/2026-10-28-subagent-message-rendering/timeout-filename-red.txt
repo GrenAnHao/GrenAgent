@@ -1,0 +1,27 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:9236) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/features/chat/taskNoticeModel.test.ts (28 tests | 1 failed | 27 skipped) 18ms
+     × does not classify timeout file names in diagnostics as task deadlines 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/features/chat/taskNoticeModel.test.ts > parseJobNotice > does not classify timeout file names in diagnostics as task deadlines
+AssertionError: expected 'timeout' to be 'failed' // Object.is equality
+
+Expected: "failed"
+Received: "timeout"
+
+ ❯ src/features/chat/taskNoticeModel.test.ts:103:31
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 27 skipped (28)
+   Start at  15:49:13
+   Duration  15.20s (transform 631ms, setup 9.19s, import 709ms, tests 18ms, environment 4.13s)
+

@@ -4,6 +4,7 @@ import { MutedLine } from './conv/MutedLine';
 import { Disclosure } from './conv/Disclosure';
 import { LazyMarkdown } from './LazyMarkdown';
 import { cardStyles } from '../tools/cardStyles';
+import { useSessionViewExpandedState } from './useSessionViewExpanded';
 
 /** 展开后的推理窗口最大高度（px）。流式和完成态共用，默认收起。 */
 const REASONING_MAX_HEIGHT = 160;
@@ -107,6 +108,11 @@ interface ReasoningInlineProps {
   durationMs?: number;
   /** 流式计时起点。缺省时从本组件开始流式的时刻算。 */
   startedAt?: number;
+  /**
+   * 展开状态的会话内稳定内容 ID（通常是 `thinking:<消息 timestamp>`）。
+   * 缺省时展开状态只活在组件本地，不落盘（合成消息没有稳定身份）。
+   */
+  viewId?: string | null;
 }
 
 /** 流式中按整秒推进。对齐起点的整秒边界，避免定时器相位把 1 秒显示成 1.1 秒。 */
@@ -139,10 +145,17 @@ function useLiveElapsed(startedAt: number | undefined, streaming: boolean): numb
  * - 流式默认收起。一行「正在深度思考 · 整秒 > 最后一行」，新字匀速从右侧进入。
  * - 结束后单行消失，只留「已深度思考」。点开才看全文。
  */
-function ReasoningInlineInner({ content, streaming, durationMs, startedAt }: ReasoningInlineProps) {
+function ReasoningInlineInner({
+  content,
+  streaming,
+  durationMs,
+  startedAt,
+  viewId = null,
+}: ReasoningInlineProps) {
   const text = content.trim();
   const line = latestThinkingLine(text);
-  const [expanded, setExpanded] = useState(false);
+  // 展开状态归会话视图：重挂/切回/页面重载都恢复；流式结束的自动收起仍保留（会记成用户收起）。
+  const { expanded, setExpanded } = useSessionViewExpandedState(viewId);
   const summaryRef = useRef<HTMLSpanElement>(null);
   const summaryTextRef = useRef<HTMLSpanElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);

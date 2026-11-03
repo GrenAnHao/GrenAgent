@@ -1,0 +1,23 @@
+diff --git a/.tmp-pi-sdk-1.4/baseline-files/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.ts b/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.ts
+index 4ac3819d..3f6a2004 100644
+--- a/.tmp-pi-sdk-1.4/baseline-files/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.ts
+@@ -1,6 +1,7 @@
+ import type { DatabaseSync } from 'node:sqlite';
+ import type { AssistantMessage } from '@earendil-works/pi-ai';
+ import type { ExecutionFence, KnowledgeMessageInput, KnowledgeModelBinding, KnowledgeUsage, RepoWikiKnowledgeSnapshot, StageExecutionRequest, StageExecutionResult } from '../../../shared/knowledgeKernelContracts';
++import { TRANSCRIPT_BYTES_PER_TOKEN } from '../../../shared/knowledgeKernelContracts';
+ import type { KnowledgeUsageReport } from '../../agent/knowledgeModelTurn';
+ import { KnowledgeBuildStore } from './store';
+ import { KnowledgeKernelCoordinator, type AsyncKnowledgeProjectPort } from './coordinator';
+@@ -100,7 +101,9 @@ export function createKnowledgeKernelRuntime(db: DatabaseSync, ports: KnowledgeK
+         scope(input);
+         const remaining = store.budgetRemaining(input.taskId, input.phase, input.itemId);
+         const limit = Math.min(remaining.unit.maxTotalTokens, remaining.run.maxTotalTokens);
+-        const estimatedInput = Math.min(binding.model.contextWindow, Buffer.byteLength(JSON.stringify(input.transcript), 'utf8') + 1024);
++        // Bytes are not tokens: counting each byte as a token reserved ~10x the real input and
++        // exhausted the unit budget after three turns.
++        const estimatedInput = Math.min(binding.model.contextWindow, Math.ceil(Buffer.byteLength(JSON.stringify(input.transcript), 'utf8') / TRANSCRIPT_BYTES_PER_TOKEN) + 1024);
+         const maxTokens = Math.min(input.options.maxTokens, binding.model.maxTokens, remaining.unit.maxOutputTokens, limit - estimatedInput, binding.model.contextWindow - estimatedInput);
+         if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) throw new Error('BUDGET_EXHAUSTED');
+         modelInput.options.maxTokens = maxTokens; tokenReservation = estimatedInput + maxTokens;

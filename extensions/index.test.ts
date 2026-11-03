@@ -4,12 +4,12 @@ import {
   approval,
   diagramHint,
   fableBehavior,
+  gptWithTaste,
   multiAgent,
   namedExtensions,
   manifestExtensions,
   selectAllowedExtensions,
   safety,
-  memory,
 } from "./index.js";
 
 // allExtensions 是 cli/src/main.ts 编译进 sidecar 二进制的整包扩展（既喂给 RPC 运行时，也喂给
@@ -27,6 +27,8 @@ describe("allExtensions bundle (compiled into the sidecar)", () => {
   it("loads fable-behavior immediately after diagram-hint in the bundle", () => {
     expect(allExtensions.indexOf(diagramHint)).toBeGreaterThan(-1);
     expect(allExtensions.indexOf(fableBehavior)).toBe(allExtensions.indexOf(diagramHint) + 1);
+    // 行为层紧跟在 fable 后面，让位判据和 fable 的注入顺序在一起才好读。
+    expect(allExtensions.indexOf(gptWithTaste)).toBe(allExtensions.indexOf(fableBehavior) + 1);
   });
 
   it("registers safety first so its tool_call guard intercepts earliest", () => {
@@ -38,9 +40,11 @@ describe("allExtensions bundle (compiled into the sidecar)", () => {
     for (const ext of allExtensions) expect(typeof ext).toBe("function");
   });
 
-  it("registers the local memory extension", () => {
-    expect(allExtensions).toContain(memory);
-    expect(namedExtensions.map((entry) => entry.name)).toContain("memory");
+  it("omits long-term memory while retaining Wiki, code retrieval and session state", () => {
+    const names = namedExtensions.map((entry) => entry.name);
+    expect(names).not.toContain("memory");
+    expect(names).toEqual(expect.arrayContaining(["wiki-rag", "code-retrieval", "session-memory"]));
+    expect(selectAllowedExtensions(["memory"])).toEqual([]);
   });
 
   it("adapts managed manifests without changing the static factory order", () => {

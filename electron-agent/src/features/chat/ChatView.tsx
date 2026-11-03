@@ -11,9 +11,9 @@ import { useFindScope } from '../find/findStore';
 import { CHAT_FIND_SCOPE } from '../find/useSessionFind';
 import { ChatListSkeleton } from './ChatListSkeleton';
 import { ChatInput } from './ChatInput';
+import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { ComposerOverlayRegistration, useComposerClearance } from './composerClearance';
 import { scrollerKeepsWheel } from './composerWheel';
-import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
 import type { TranscriptScrollHandle } from './VirtualizedMessageList';
 import type { PromptImage } from './input/ChatInputContext';
@@ -29,11 +29,15 @@ import {
 import { setComposerValue } from './input/composerBridge';
 import { isExecutiveCommandMessage } from './input/commandClassification';
 import { parseCommandToken } from './input/editor/commandPaste';
-import { commitComposerModelToSession, peekComposerLevel, peekComposerModel } from './input/actions/ModelThinkingAction';
+import { readComposerOwnerKey, useComposerOwnerKey } from './input/composerOwner';
+import { canonicalOwnerKey, sessionPathFromOwnerKey, type SessionPreferences } from '../../lib/sessionPreferences';
+import { useSessionPreferencesStore } from '../../stores/sessionPreferencesStore';
+import { useChatDraftStore } from '../../stores/chatDraftStore';
+import { useComposerFilesStore } from './input/composerFiles';
+import { useSessionViewStateStore } from '../../stores/sessionViewStateStore';
 import { useCommandInputStore } from '../../stores/commandInputStore';
 import { pi } from '../../lib/pi';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
-import { needsSessionCreateOnSend } from '../../lib/pendingSession';
 import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
 import { fallbackSessionTitle } from '@extensions/_shared/session-title';
 import { markScratchUsed } from '../../lib/startupConversation';
@@ -47,7 +51,8 @@ import { refreshGoalStatus } from '../extensionUi/goalStatus';
 import { awaitStreamingEnd } from '../../lib/streamingGate';
 
 const COMPOSE_COLUMN: CSSProperties = {
-  width: CHAT_CONTENT_WIDTH,
+  // 空态按聊天列留白，扣除 padding 与编辑器 margin 后卡片最大为 880px。
+  width: 'min(calc(100% - clamp(16px, 4cqw, 40px)), 928px)',
   marginInline: 'auto',
   paddingInline: 8,
 };
@@ -130,11 +135,15 @@ function toPromptImages(images?: UserImage[]): PromptImage[] | undefined {
 }
 
 export function ChatView() {
-  const { workspace, store, workspaceReady } = useAgentStoreContext();
+  const agentContext = useAgentStoreContext();
+  const { workspace, store, workspaceReady } = agentContext;
+  const ownerKey = useComposerOwnerKey(workspace);
+  const ownerScope = agentContext.sessionPath !== undefined || agentContext.draftId !== undefined
+    ? { sessionPath: agentContext.sessionPath, draftId: agentContext.draftId }
+    : undefined;
   const { message: messageApi } = App.useApp();
   const worksDir = useSessionStore((s) => s.worksDir);
-  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
-  const draftConversationCwd = useSessionStore((s) => s.draftConversationCwd);
+  const activeSessionPath = sessionPathFromOwnerKey(ownerKey);
   const messages = store.useStore((s) => s.messages);
   const lastError = store.useStore((s) => s.lastError);
   const retrying = store.useStore((s) => s.retrying);
@@ -143,7 +152,6 @@ export function ChatView() {
   const composerQueue = store.useStore((s) => s.composerQueue) ?? [];
   const isEmpty = messages.length === 0;
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
-  const isDraftConversation = Boolean(draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace));
   const showEmptyLayout = isEmpty && workspaceReady;
   const findOpen = useFindScope(CHAT_FIND_SCOPE).open && !showEmptyLayout;
   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
@@ -269,16 +277,65 @@ export function ChatView() {
     const text = message.trim();
     const hasContent = Boolean(text || images?.length);
     if (!hasContent && behavior !== 'followUp') return;
-    // 新一轮发送：清掉上一轮可能遗留的「用户中断」标记。
-    userAbortedRef.current = false;
-
-    // 执行性命令（/dream 等）：不产生对话轮次。跳过乐观气泡与 awaitingResponse，
+    const sourcePath = sessionPathFromOwnerKey(ownerKey);
+    const captured = useSessionPreferencesStore.getState().peek(ownerKey);
+    if ((!captured || !captured.model) && !text.startsWith('/')) {
+      messageApi.error('模型选项尚未加载或不可用，请先选择模型');
+      return 'failed';
+    }
+    // 所有 await 之前捕获身份和四项偏好，不能等创建完再读全局当前会话。
+    const initialPreferences: SessionPreferences = {
+      ...captured,
+      ...(captured?.model ? { model: { ...captured.model } } : {}),
+      revision: 0,
+    };
+    const draftId = ownerKey.startsWith('draft:') ? ownerKey : undefined;
+    const stillViewingSource = () => canonicalOwnerKey(readComposerOwnerKey(workspace, ownerScope)) === canonicalOwnerKey(ownerKey);
+    const sendPerf = createStartupPerf(`send:${workspace}`);
+    let createdPath: string | undefined;
+    const createOwnedSession = async () => {
+      sendPerf.start('openWorkspace');
+      await pi.openWorkspace(workspace);
+      sendPerf.end('openWorkspace');
+      sendPerf.start('newSession');
+      const result = await pi.newSession(workspace, initialPreferences) as {
+        cancelled?: boolean; sessionFile?: string; sessionPath?: string; preferences?: SessionPreferences; unavailable?: string[];
+      };
+      sendPerf.end('newSession');
+      if (result?.cancelled) throw new Error('新建会话已取消');
+      if (result?.unavailable?.includes('model')) throw new Error('已保存的模型当前不可用，请先选择其它模型');
+      const path = result?.sessionPath || result?.sessionFile;
+      if (!path) throw new Error('新建会话没有返回会话标识，请重试');
+      createdPath = path;
+      // 过户只作用于发起草稿；迟到回执不能把 B 的编辑器、右栏或选项搬走。
+      useSessionPreferencesStore.getState().adopt(ownerKey, path, result.preferences ?? initialPreferences);
+      useChatDraftStore.getState().adopt(ownerKey, path);
+      useComposerFilesStore.getState().adopt(ownerKey, path);
+      useSessionViewStateStore.getState().adopt(ownerKey, path);
+      const st = useSessionStore.getState();
+      const activate = stillViewingSource();
+      useDockStore.getState().adoptDraftView(workspace, path, draftId);
+      if (activate) {
+        store.bindSessionPath(path);
+        st.setActiveSession(path);
+        st.setWorkspaceSessionPath(workspace, path);
+        st.clearDraftConversation(workspace, draftId);
+      }
+      st.upsertOptimisticSession({
+        id: `opt-${path}`, path, cwd: workspace, timestamp: new Date().toISOString(),
+        name: fallbackSessionTitle(text, images?.length ?? 0),
+      });
+      markScratchUsed(workspace);
+      return path;
+    };
+    // 执行性命令（/compact 等）：不产生对话轮次。跳过乐观气泡与 awaitingResponse，
     // 改瞬态 toast，仍 pi.prompt 让 Pi 执行——切换/重载后不再有幽灵气泡。
     if (text && isExecutiveCommandMessage(text)) {
       const cmd = text.split(/\s/, 1)[0];
       try {
-        const commandPath = store.getLoadedSessionPath();
-        await pi.prompt(workspace, text, undefined, images, commandPath);
+        const commandPath = sourcePath ?? await createOwnedSession();
+        const beforeCount = stillViewingSource() ? store.useStore.getState().messages.length : messages.length;
+        await commandLanes.run(laneKey(workspace, commandPath), () => pi.prompt(workspace, text, undefined, images, commandPath));
         // /goal 只在输入栏上方出 Goal 条，对话里不留命令行、也不弹「已执行」：条本身就是回执。
         // 回合跑着时也立刻生效；推送之外再按路径补拉一次，Goal 条不用等切换会话。
         if (cmd.toLowerCase() === '/goal') {
@@ -286,12 +343,12 @@ export function ChatView() {
           return;
         }
         messageApi.info(`已执行 ${cmd}`);
-        const sessionPath = useSessionStore.getState().activeSessionPath;
-        if (sessionPath) {
+        if (commandPath) {
           const parsed = parseCommandToken(text);
-          useCommandInputStore.getState().append(sessionPath, {
+          useCommandInputStore.getState().append(commandPath, {
             command: cmd,
             rest: parsed?.rest ?? text.slice(cmd.length).trim(),
+            beforeCount,
           });
         }
       } catch (e) {
@@ -300,6 +357,20 @@ export function ChatView() {
       }
       return;
     }
+
+    // 输入框等待取消弹层时也可能切走：仍使用原会话 lane、后台队列和侧栏归属。
+    if (!stillViewingSource()) {
+      try {
+        const path = sourcePath ?? await createOwnedSession();
+        if (hasContent) void syncSidebarOnSend(workspace, text, images?.length ?? 0, path);
+        await commandLanes.run(laneKey(workspace, path), () => pi.prompt(workspace, text, behavior, images, path));
+      } catch {
+        return 'failed';
+      }
+      return;
+    }
+    // 新一轮发送：清掉上一轮可能遗留的「用户中断」标记。
+    userAbortedRef.current = false;
 
     // 执行中发送：先落成跟进条。点条上的引导才注入当前回合；否则本轮结束后自动跟进。
     if (behavior === 'followUp' && hasContent) {
@@ -382,68 +453,10 @@ export function ChatView() {
       awaitingResponse: true,
       ...pinRunClock(store.useStore.getState()),
     });
-    // 发送路径性能埋点：拆出 openWorkspace / newSession / getState / promptToStream 各耗时
-    //（DEV 控制台 [PERF-startup] send:<ws>），用于定位「新对话/久置后发送」的延迟究竟卡在哪。
-    const sendPerf = createStartupPerf(`send:${workspace}`);
-
-    let createdPath: string | undefined;
-    // 草稿首发前画面绑定的路径（通常为 undefined）。落盘期间切到别的会话时，失败也不能写到新画面上。
+    // 首发创建以回执里的新身份为准，不在 await 后读取 workspace 的可变前景。
     const pathBeforeSend = store.getLoadedSessionPath();
     const ensureSessionForSend = async () => {
-      const needsCreate = needsSessionCreateOnSend({ workspace, activeSessionPath, draftConversationCwd });
-      const peekBefore = peekComposerModel(workspace);
-      const levelBefore = needsCreate ? peekComposerLevel(workspace) : null;
-      if (!needsCreate) return;
-      const st = useSessionStore.getState();
-      sendPerf.start('openWorkspace');
-      const openResult = await pi.openWorkspace(workspace);
-      sendPerf.end('openWorkspace');
-      // 项目草稿的 openWorkspace 会带回 last_session；必须新建，不能把首发写进上一会话。
-      if (isDraftConversation || !openResult.sessionFile) {
-        sendPerf.start('newSession');
-        await pi.newSession(workspace);
-        sendPerf.end('newSession');
-      }
-      sendPerf.start('getState');
-      let state: { sessionFile?: string };
-      try {
-        state = (await pi.getState(workspace)) as { sessionFile?: string };
-      } catch (error) {
-        // 草稿 worker 仍可能短暂带着外工作区 last_session；归属失败时新建本对话会话再读一次。
-        if (!String(error).includes('SESSION_WORKSPACE_MISMATCH')) throw error;
-        sendPerf.start('newSession');
-        await pi.newSession(workspace);
-        sendPerf.end('newSession');
-        state = (await pi.getState(workspace)) as { sessionFile?: string };
-      }
-      sendPerf.end('getState');
-      const path = state.sessionFile ?? openResult.sessionFile;
-      if (path) {
-        // 画面立刻绑到新会话：否则它的流和另一个在跑的会话分不开，切来切去都是最后那一份。
-        store.bindSessionPath(path);
-        createdPath = path;
-        // 必须先于 setActiveSession：否则 loadState 会读到 SDK 默认模型并盖掉输入栏点选。
-        // 用发送瞬间的 peek，不用 await 之后再读：openWorkspace/newSession 期间草稿 loadState
-        // 可能把缓存套回设置默认。
-        commitComposerModelToSession(workspace, path, peekBefore, levelBefore);
-        // 右侧边栏按会话走：草稿里打开的标签和面板状态过户给刚落盘的会话，必须在 setActiveSession 之前。
-        useDockStore.getState().adoptDraftView(workspace, path);
-        st.setActiveSession(path);
-        st.setWorkspaceSessionPath(workspace, path);
-        st.upsertOptimisticSession({
-          id: `opt-${path}`,
-          path,
-          cwd: workspace,
-          timestamp: new Date().toISOString(),
-          // 和主进程列会话时同一套兑底：粘贴块、/skill: 调用不原样当标题。
-          name: fallbackSessionTitle(text, images?.length ?? 0),
-        });
-      }
-      st.clearDraftConversation(workspace);
-      if (peekBefore) await pi.setModel(workspace, peekBefore.provider, peekBefore.id);
-      if (levelBefore) await pi.setThinkingLevel(workspace, levelBefore);
-      // 该空白对话已被使用（已落盘会话）→ 清除复用记忆，下次「新建对话」改为新建而非复用它。
-      markScratchUsed(workspace);
+      if (!sourcePath) await createOwnedSession();
     };
 
     try {
@@ -455,23 +468,27 @@ export function ChatView() {
       const loadedNow = store.getLoadedSessionPath();
       if (!samePath(loadedNow, pathBeforeSend) && !samePath(loadedNow, createdPath)) {
         sendPerf.report();
-        return;
+        // 输入框按捕获的 owner 回填原草稿，不能因切走而把失败误报成已发出。
+        return 'failed';
       }
       rollbackUnsent(text);
       store.useStore.setState({ lastError: msg, isStreaming: false, awaitingResponse: false, runOriginPinned: false });
       sendPerf.report();
       return 'failed';
     }
-    if (text || images?.length) void syncSidebarOnSend(workspace, text, images?.length ?? 0);
-
     // 这一轮属于哪个会话在这里定下来。之后用户切到别的会话，本轮的提示、重试、回滚都不能落到新画面上。
     // 刚新建的会话优先：落盘期间切到了别的会话时 loadedSessionPath 已是那份，不能把首发打过去。
-    const sendPath = createdPath ?? store.getLoadedSessionPath() ?? null;
+    const sendPath = createdPath ?? sourcePath ?? store.getLoadedSessionPath() ?? null;
+    if (text || images?.length) void syncSidebarOnSend(workspace, text, images?.length ?? 0, sendPath);
     const stillHere = () => samePath(store.getLoadedSessionPath(), sendPath);
     if (!stillHere()) {
-      // 落盘期间就切走了：消息照常发给它自己的会话，界面不再管这一轮。
-      if (createdPath) void pi.prompt(workspace, text, undefined, images, createdPath).catch(() => {});
-      sendPerf.report();
+      try {
+        if (sendPath) await commandLanes.run(laneKey(workspace, sendPath), () => pi.prompt(workspace, text, undefined, images, sendPath));
+      } catch {
+        return 'failed';
+      } finally {
+        sendPerf.report();
+      }
       return;
     }
 
@@ -534,7 +551,8 @@ export function ChatView() {
         if (userAbortedRef.current || /abort/i.test(msg)) {
           return { ok: false, error: msg, aborted: true, retryable: false };
         }
-        return { ok: false, error: msg, retryable };
+        const permanent = /PREFERENCES_|MODEL_UNAVAILABLE|SESSION_NOT_LOADED|SESSION_WORKSPACE_MISMATCH/.test(msg);
+        return { ok: false, error: msg, retryable: retryable && !permanent };
       } finally {
         unsub();
       }
@@ -685,24 +703,29 @@ export function ChatView() {
     <div
       ref={viewportRef}
       data-find-scope={CHAT_FIND_SCOPE}
+      data-chat-empty={showEmptyLayout ? 'true' : undefined}
       style={{
         height: '100%',
         position: 'relative',
         minHeight: 0,
-        overflow: 'hidden',
+        overflowX: 'hidden',
+        overflowY: showEmptyLayout ? 'auto' : 'hidden',
         display: 'flex',
         flexDirection: 'column',
+        containerType: showEmptyLayout ? 'inline-size' : undefined,
+        containerName: showEmptyLayout ? 'empty-chat' : undefined,
+        paddingBlock: showEmptyLayout ? 24 : 0,
       }}
     >
       {showEmptyLayout ? (
         <div
+          data-testid="chat-empty-layout"
           style={{
-            flex: 1,
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            paddingBottom: seatHeight,
+            flexShrink: 0,
+            width: COMPOSE_COLUMN.width,
+            marginInline: 'auto',
+            marginTop: 'auto',
+            marginBottom: 'clamp(8px, 2.4cqw, 20px)',
           }}
         >
           <AnimatePresence>
@@ -740,16 +763,22 @@ export function ChatView() {
         ref={seatRef}
         data-testid="composer-seat"
         style={{
-          position: 'absolute',
-          left: 0,
-          right: gutter,
-          bottom: 0,
+          position: showEmptyLayout ? 'relative' : 'absolute',
+          left: showEmptyLayout ? undefined : 0,
+          right: showEmptyLayout ? undefined : gutter,
+          bottom: showEmptyLayout ? undefined : 0,
+          flexShrink: 0,
+          marginBottom: showEmptyLayout ? 'auto' : undefined,
           zIndex: 3,
           paddingBottom: 0,
           background: `var(--gren-content-bg, ${cssVar.colorBgContainer})`,
         }}
       >
-        <div style={COMPOSE_COLUMN}>
+        <div style={{
+          ...COMPOSE_COLUMN,
+          // 8px 列 padding + 16px 编辑器 margin 对齐消息列的 24px padding。
+          width: showEmptyLayout ? COMPOSE_COLUMN.width : CHAT_CONTENT_WIDTH,
+        }}>
           {retryIndicator}
           {errorBanner}
           <div style={{ width: '100%' }} data-testid="chat-input-region">

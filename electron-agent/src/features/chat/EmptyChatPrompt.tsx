@@ -1,38 +1,44 @@
 import { createStaticStyles, cssVar } from 'antd-style';
-import { PiBrandLogo } from '../../components/PiBrandLogo';
+import { GrenAgentIcon } from '../../components/GrenAgentLogo';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
 
-export const EMPTY_CHAT_BRAND_SIZE = 23;
-export const EMPTY_CHAT_BRAND_GAP = 9;
+export const EMPTY_CHAT_BRAND_SIZE = 18;
+export const EMPTY_CHAT_BRAND_GAP = 8;
 
 const styles = createStaticStyles(({ css }) => ({
   wrap: css`
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 24px;
-    padding: 0 32px 16px;
-    text-align: center;
+    align-items: flex-start;
+    gap: clamp(9px, 1.8cqw, 14px);
+    padding-inline: 24px;
+    text-align: left;
   `,
   lockup: css`
     display: flex;
     align-items: center;
-    justify-content: center;
     width: 100%;
+    min-width: 0;
     gap: ${EMPTY_CHAT_BRAND_GAP}px;
+    color: ${cssVar.colorTextSecondary};
+    font-size: 12px;
+
+    > span:last-child {
+      overflow-wrap: anywhere;
+      min-width: 0;
+    }
   `,
   logo: css`
     flex: 0 0 auto;
-    color: ${cssVar.colorText};
+    color: var(--gren-fg, ${cssVar.colorText});
     line-height: 1;
   `,
   title: css`
     margin: 0;
     min-width: 0;
-    /* 跟输入列同宽，只扣掉 π 和间距。固定 520px 会在宽画布上把长项目名提前折成两行。 */
-    max-width: calc(100% - ${EMPTY_CHAT_BRAND_SIZE + EMPTY_CHAT_BRAND_GAP}px);
+    max-width: 100%;
     color: ${cssVar.colorText};
-    font-size: 28px;
+    font-size: clamp(20px, 3.8cqw, 30px);
     font-weight: 500;
     line-height: 1.35;
     letter-spacing: -0.02em;
@@ -52,18 +58,15 @@ export function EmptyChatPrompt({ workspace, isConversation }: EmptyChatPromptPr
   const alias = useSidebarPrefsStore((s) => s.aliases[workspace]);
   const projectName = alias || basename(workspace);
 
-  const title = isConversation
-    ? '我们该做什么？'
-    : `我们应该在 ${projectName} 中构建什么？`;
-
   return (
     <div className={styles.wrap} data-testid="empty-chat-prompt">
       <div className={styles.lockup} data-testid="empty-chat-lockup" style={{ gap: EMPTY_CHAT_BRAND_GAP }}>
         <span className={styles.logo}>
-          <PiBrandLogo size={EMPTY_CHAT_BRAND_SIZE} tight data-testid="empty-chat-brand" />
+          <GrenAgentIcon size={EMPTY_CHAT_BRAND_SIZE} aria-hidden="true" data-testid="empty-chat-brand" />
         </span>
-        <h1 className={styles.title}>{title}</h1>
+        <span>{isConversation ? '新对话' : projectName}</span>
       </div>
+      <h1 className={styles.title}>想在这里完成什么？</h1>
     </div>
   );
 }

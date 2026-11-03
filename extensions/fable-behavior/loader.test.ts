@@ -7,7 +7,7 @@ describe("buildFableBehaviorPrompt", () => {
     expect(p).toContain("[Fable Behavior]");
     expect(p).toContain("GrenAgent");
     expect(p).toContain("Autonomy");
-    expect(p).toContain("Refusal");
+    expect(p).not.toContain("Refusal");
     expect(p).toContain("index check");
     expect(p).toContain("Current date: 2026-06-20");
     expect(p).not.toContain("Tool discipline");
@@ -58,6 +58,10 @@ describe("buildFableBehaviorPrompt", () => {
     expect(p).not.toContain("## Agent mode");
   });
 
+  it("legacy brainstorm does not inject a mode slice", () => {
+    expect(buildFableBehaviorPrompt({ mode: "brainstorm" as never })).toBe(buildFableBehaviorPrompt({ mode: "agent" }));
+  });
+
   it("adds tier3 summary only when explicitly enabled", () => {
     const p = buildFableBehaviorPrompt({ tier3Guidelines: true });
     expect(p).toContain("Quick reference");
@@ -89,12 +93,13 @@ describe("resolveAgentModeFromEntries", () => {
   });
 });
 
-describe("resolveAgentModeFromEntries — brainstorm", () => {
-  it("returns brainstorm when last agent-mode entry has mode=brainstorm", () => {
+describe("resolveAgentModeFromEntries — removed brainstorm", () => {
+  it.each(["agent-mode", "session-controls"])("restores Agent when latest %s entry was brainstorm", (customType) => {
     const entries = [
-      { type: "custom", customType: "agent-mode", data: { mode: "brainstorm" } },
+      { type: "custom", customType: "agent-mode", data: { mode: "plan" } },
+      { type: "custom", customType, data: { mode: "brainstorm" } },
     ];
-    expect(resolveAgentModeFromEntries(entries)).toBe("brainstorm");
+    expect(resolveAgentModeFromEntries(entries)).toBe("agent");
   });
 
   it("falls back to agent for unknown mode", () => {
@@ -102,5 +107,44 @@ describe("resolveAgentModeFromEntries — brainstorm", () => {
       { type: "custom", customType: "agent-mode", data: { mode: "unknown" } },
     ];
     expect(resolveAgentModeFromEntries(entries)).toBe("agent");
+  });
+});
+
+describe("resolveAgentModeFromEntries — ultra", () => {
+  it("recognizes ultra from the agent-mode entry", () => {
+    expect(resolveAgentModeFromEntries([
+      { type: "custom", customType: "agent-mode", data: { mode: "ultra" } },
+    ])).toBe("ultra");
+  });
+
+  it("recognizes ultra from a host-written session-controls entry", () => {
+    expect(resolveAgentModeFromEntries([
+      { type: "custom", customType: "session-controls", data: { mode: "ultra" } },
+    ])).toBe("ultra");
+  });
+
+  it("takes the latest known entry across both sources", () => {
+    expect(resolveAgentModeFromEntries([
+      { type: "custom", customType: "agent-mode", data: { mode: "ultra" } },
+      { type: "custom", customType: "session-controls", data: { mode: "plan" } },
+    ])).toBe("plan");
+    expect(resolveAgentModeFromEntries([
+      { type: "custom", customType: "session-controls", data: { mode: "plan" } },
+      { type: "custom", customType: "agent-mode", data: { mode: "ultra" } },
+    ])).toBe("ultra");
+  });
+
+  it("falls back to agent when the only entries are stale/unknown", () => {
+    expect(resolveAgentModeFromEntries([
+      { type: "custom", customType: "agent-mode", data: { mode: "hyper" } },
+    ])).toBe("agent");
+  });
+});
+
+describe("buildFableBehaviorPrompt — ultra", () => {
+  it("adds an ultra mode slice that defers scheduling rules to the runtime", () => {
+    const p = buildFableBehaviorPrompt({ mode: "ultra" });
+    expect(p).toContain("Ultra");
+    expect(p).toMatch(/spawn_agent|sub-agent/i);
   });
 });

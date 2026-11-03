@@ -7,6 +7,29 @@ afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 function fixture() { const f = taskFixture(); cleanups.push(f.cleanup); return { ...f, views: new TaskViewStore(f.db) }; }
 
 describe('TaskViewStore', () => {
+  it('keeps a persisted Repo Wiki language on the navigation resource', () => {
+    const f = fixture();
+    const job = f.jobs.create({ kind: 'repoWiki.generate', workspace: '/repo', metadata: {
+      target: { type: 'repoWiki', id: '/repo', language: 'zh-Hant' },
+      payload: { projectId: 'project', language: 'zh-Hant', target: 'wiki', force: false, confirmExternal: true },
+    } });
+    expect(f.jobs.get(job.id)?.metadata?.target).toEqual({ type: 'repoWiki', id: '/repo', language: 'zh-Hant' });
+    expect(f.views.read({ source: 'user', id: job.id })?.resource).toEqual({ type: 'repoWiki', id: '/repo', language: 'zh-Hant' });
+  });
+
+  it('derives legacy Repo Wiki navigation language from the confirmed payload and discards invalid target languages', () => {
+    const f = fixture();
+    for (const target of [{ type: 'repoWiki' as const, id: '/repo' }, { type: 'repoWiki' as const, id: '/repo', language: 'en/../zh' }]) {
+      const job = f.jobs.create({ kind: 'repoWiki.generate', workspace: '/repo', metadata: {
+        target, payload: { projectId: 'project', language: 'en', target: 'wiki', force: false, confirmExternal: true },
+      } });
+      expect(f.jobs.get(job.id)?.metadata?.target).toEqual({ type: 'repoWiki', id: '/repo' });
+      expect(f.views.read({ source: 'user', id: job.id })?.resource).toEqual({ type: 'repoWiki', id: '/repo', language: 'en' });
+    }
+    const ordinary = f.jobs.create({ kind: 'codegraph.sync', workspace: '/repo', metadata: { target: { type: 'project', id: '/repo', language: 'en' } } });
+    expect(f.views.read({ source: 'user', id: ordinary.id })?.resource).toEqual({ type: 'project', id: '/repo' });
+  });
+
   it('shows "cancelling" only while the job is still active; a settled cancel is removable', () => {
     const f = fixture(); const job = f.jobs.create({ kind: 'codegraph.sync', workspace: '/repo' });
     f.jobs.start(job.id); f.jobs.requestCancellation(job.id);
@@ -15,18 +38,6 @@ describe('TaskViewStore', () => {
     // 库里的标记还在，但任务已经落定：不能再显示「正在取消，等待确认」，也要能删。
     expect(f.jobs.get(job.id)?.metadata?.cancellationRequested).toBe(true);
     expect(f.views.read({ source: 'user', id: job.id })).toMatchObject({ status: 'cancelled', cancellationRequested: false, capabilities: { remove: true } });
-  });
-
-  it('lists memory tasks without parsing their payload, while Wiki tasks still resolve kbId', () => {
-    const f = fixture();
-    f.system('wiki', 'completed', 10, { kbId: 'kb-1' });
-    const insert = f.db.prepare('INSERT INTO service_tasks(id,kind,source_project_id,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)');
-    insert.run('mem-object', 'memory_extract', '/repo', 'completed', JSON.stringify({ kbId: 'never-a-wiki', delta: 'x'.repeat(10_000) }), 1, 1, 9);
-    insert.run('mem-broken', 'memory_scene', '/repo', 'failed', '{not json', 2, 1, 8);
-    const items = f.views.list().items;
-    expect(items.find((item) => item.ref.id === 'wiki')?.resource).toEqual({ type: 'wiki', id: 'kb-1' });
-    expect(items.find((item) => item.ref.id === 'mem-object')?.resource).toEqual({ type: 'project', id: '/repo' });
-    expect(items.find((item) => item.ref.id === 'mem-broken')).toMatchObject({ status: 'failed', resource: { type: 'project', id: '/repo' } });
   });
 
   it('keeps identical IDs separate and preserves system queued/blocked without progress or capabilities', () => {
@@ -136,51 +147,14 @@ describe('TaskViewStore', () => {
     expect(f.views.readDetail({ source: 'user', id: job.id })).toMatchObject({ resource: { type: 'project', id: 'D:/项目 Files/源码' }, resourceName: '索引：研发 Wiki / 说明' });
   });
 
-  it('summarizes completed memory_scene with status stage and counts, never scene or transcript bodies', () => {
-    const f = fixture();
-    f.db.prepare('INSERT INTO service_tasks(id,kind,source_project_id,status,input,output,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(
-      'scene-1', 'memory_scene', 'D:/System Dir/Downloads/Python代码', 'completed',
-      JSON.stringify({
-        mode: 'work', source: 'session:s1', sessionId: 's1', userId: 'local', maxScenes: 15,
-        memories: [{ content: 'SECRET_L1', type: 'work_method' }],
-        scenes: [{ filename: 'sop.md', content: 'SECRET_SCENE' }],
-        sceneSummaries: 'SECRET_SUMMARIES',
-      }),
-      JSON.stringify({
-        scenes: [
-          { filename: 'sop.md', action: 'write', content: 'SECRET_OUT' },
-          { filename: 'old.md', action: 'delete' },
-        ],
-        persona_update_request: 'SECRET_HINT',
-      }),
-      1, 1, 10,
-    );
-    const detail = f.views.readDetail({ source: 'system', id: 'scene-1' })!;
-    expect(detail).toMatchObject({
-      status: 'completed',
-      stage: '已完成',
-      progress: 100,
-      processed: 2,
-      total: 2,
-      resource: { type: 'project', id: 'D:/System Dir/Downloads/Python代码' },
-      inputSummary: { mode: 'work', source: 'session:s1', sessionId: 's1', userId: 'local', maxScenes: 15, memoryCount: 1, sceneCount: 1 },
-      outputSummary: { written: 1, deleted: 1, personaUpdateRequested: true },
-    });
-    expect(JSON.stringify(detail)).not.toMatch(/SECRET/);
-    expect(detail.inputSummary).not.toHaveProperty('memories');
-    expect(detail.outputSummary).not.toHaveProperty('scenes');
-  });
+});
 
-  it('marks running memory extract as generating without leaking the transcript delta', () => {
-    const f = fixture();
-    f.db.prepare('INSERT INTO service_tasks(id,kind,source_project_id,status,input,output,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(
-      'extract-1', 'memory_extract', '/repo', 'running',
-      JSON.stringify({ mode: 'work', delta: 'SECRET_DELTA', previousSceneName: 'sop.md', userId: 'local' }),
-      '{}', 0, 1, 10,
-    );
-    const detail = f.views.readDetail({ source: 'system', id: 'extract-1' })!;
-    expect(detail).toMatchObject({ status: 'running', stage: '正在生成', progress: undefined, inputSummary: { mode: 'work', userId: 'local' }, outputSummary: {} });
-    expect(JSON.stringify(detail)).not.toMatch(/SECRET/);
-    expect(detail.inputSummary).not.toHaveProperty('delta');
-  });
+it('includes paused kernel tasks as active without polling paused or blocked kernel tasks',()=>{
+ const f=fixture();const base={version:1,key:{workspaceInstanceId:'w',projectId:'p',portableProjectId:'id',branch:'main',language:'en',domain:'cards'},intent:'generate',revision:0,phase:'prepare',pipelineConfigHash:'p',budgets:{version:1,unit:{maxModelRequests:12,maxToolCalls:40,maxAttempts:2,maxOutputTokens:8192,maxTotalTokens:120000,maxFileBytes:262144,maxReadBytes:2097152,maxReadLines:400,maxResultBytes:32768,maxSearchMatches:100,maxDirectoryEntries:200,modelTimeoutMs:120000,activeTimeMs:600000},run:{maxItems:500,maxDepth:6,maxModelRequests:1000,maxTotalTokens:2000000}},resumePolicy:'manual',counts:{planned:0,prepared:0,failed:0,blocked:0,published:0}};
+ for(const [id,state] of [['paused','paused'],['blocked','blocked'],['running','running']]) f.db.prepare('INSERT INTO agent_jobs(id,kind,workspace,state,progress,created_at,updated_at,metadata) VALUES(?,?,?,?,?,?,?,?)').run(id,'repoWiki.generate','/repo',state,0,1,1,JSON.stringify({repoWiki:base}));
+ f.system('other-blocked','blocked');const page=f.views.list({group:'active'});expect(page.items.map(x=>x.ref.id)).toEqual(expect.arrayContaining(['paused','blocked','running','other-blocked']));expect(page.activeCount).toBe(4);expect(page.pollingCount).toBe(2);expect(page.items.find(x=>x.ref.id==='paused')?.label).toBe('Repo Wiki 知识卡生成');
+});
+it('does not present unknown kernel planning progress as a percentage',()=>{
+ const f=fixture();const meta={version:1,key:{workspaceInstanceId:'w',projectId:'p',portableProjectId:'id',branch:'main',language:'en',domain:'wiki'},intent:'generate',revision:0,phase:'plan',pipelineConfigHash:'p',budgets:{version:1,unit:{maxModelRequests:12,maxToolCalls:40,maxAttempts:2,maxOutputTokens:8192,maxTotalTokens:120000,maxFileBytes:262144,maxReadBytes:2097152,maxReadLines:400,maxResultBytes:32768,maxSearchMatches:100,maxDirectoryEntries:200,modelTimeoutMs:120000,activeTimeMs:600000},run:{maxItems:500,maxDepth:6,maxModelRequests:1000,maxTotalTokens:2000000}},resumePolicy:'auto',counts:{planned:0,prepared:0,failed:0,blocked:0,published:0}};
+ f.db.prepare('INSERT INTO agent_jobs(id,kind,workspace,state,progress,created_at,updated_at,metadata) VALUES(?,?,?,?,?,?,?,?)').run('unknown','repoWiki.generate','/repo','running',100,1,1,JSON.stringify({repoWiki:meta}));expect(f.views.read({source:'user',id:'unknown'})?.progress).toBeUndefined();
 });

@@ -11,11 +11,13 @@ Status: implemented
 - 运行中：删除不可用，同一工作区再建同步报 `JOB_ALREADY_RUNNING`，重试报 `TASK_TARGET_BUSY`。
 - 已请求取消：界面一直写「等待确认」。
 
-启动时只把 `wiki_page_generate` 的未结束任务置为失败（`runtime.ts`），用户任务里有执行器的种类（`codegraph.sync`）没人收尾。[CodeGraph 自动同步方案](../../proposed/architecture/2026-10-16-codegraph-host-process-auto-sync.md)里列过这个缺口。
+启动时只把 `wiki_page_generate` 的未结束任务置为失败（`runtime.ts`），用户任务里有执行器的种类（`codegraph.sync`）没人收尾。[CodeGraph 自动同步方案](../../rejected/architecture/2026-10-16-codegraph-host-process-auto-sync.md)里列过这个缺口。
 
 排查时还发现第二个问题：任务视图只看库里的 `cancellationRequested` 标记，不看状态；`JobStore.cancel` 落定为已取消时不清这个标记。所以**正常取消成功**的任务同样会一直显示「正在取消，等待确认」、删除按钮被禁用。
 
 ## Decision
+
+可恢复的 `repoWiki.generate` 是 [AgentData 持久化任务](../architecture/2026-11-01-repo-wiki-agentdata-durable-tasks.md) 增加的例外：启动恢复原任务及检查点，保留用户取消意图；其他 kind 的孤儿任务仍按本篇落定中断。
 
 - `AgentDataRuntime.start` 在建好 `JobStore` 后调用 `settleOrphanJobs()`：执行器（`jobRunners`）都在本进程里，启动时仍是 `pending` / `running` 且该种类有执行器的任务，一定是上一个进程留下的。请求过取消的记为 `cancelled`，其余记为 `failed`，错误为 `JOB_INTERRUPTED: 应用重启时任务仍在运行，已中断`（任务视图显示 `JOB_INTERRUPTED：任务执行未完成`，可重试）。没有执行器的种类只落库、不归本进程管，不动。
 - `CodeGraphJobs.cancel` 收到本进程没在跑的任务时，直接回调 `cancelled` 落定，不再静默返回。进程内不会出现这种情况（`createUserJob` 在同一个微任务链里就调了 `run`），只用来兜住孤儿。

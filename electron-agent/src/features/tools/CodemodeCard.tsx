@@ -1,6 +1,6 @@
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Ban, Plug, Wrench } from 'lucide-react';
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import type { ToolSegment } from '../chat/groupMessages';
 import { LazyMarkdown } from '../chat/LazyMarkdown';
 import { CodeSurface } from '../chat/conv/CodeSurface';
@@ -23,6 +23,9 @@ import {
   type CodemodeCallItem,
 } from './codemodeModel';
 import { extractContentImages, extractText } from './toolUtils';
+import { useSessionViewExpandedState } from '../chat/useSessionViewExpanded';
+import { SendMessageCard } from './SendMessageCard';
+import { parsePartialArgs } from '../../lib/streamingJson';
 
 /** 收起时最多露出几条调用；运行中露最新的几条，前面的折成一行。 */
 const VISIBLE_CALLS = 6;
@@ -128,14 +131,23 @@ function convStatus(status: CodemodeCall['status']): ConvStatus {
 }
 
 /** 只有 details.calls 记录的一条调用（历史回放、models.* 调用）：不能展开看结果，失败时可以看错误。 */
-const CallRecordRow = memo(function CallRecordRow({ call }: { call: CodemodeCall }) {
-  const [open, setOpen] = useState(false);
+const CallRecordRow = memo(function CallRecordRow({ call, viewId }: { call: CodemodeCall; viewId?: string | null }) {
+  const { expanded: open, setExpanded: setOpen } = useSessionViewExpandedState(viewId);
   const meta = [
     call.status === 'cancelled' ? '已取消' : '',
     call.durationMs != null ? formatCallDuration(call.durationMs) : '',
   ]
     .filter(Boolean)
     .join(' · ');
+  if (call.name.toLowerCase() === 'send_message') {
+    return <SendMessageCard
+      args={parsePartialArgs(call.args) ?? {}}
+      preview={call.args}
+      result={call.error || call.status === 'cancelled' ? { content: [{ type: 'text', text: call.error || '发送调用已取消，是否送达未记录。' }] } : undefined}
+      status={convStatus(call.status)}
+      durationMs={call.durationMs}
+    />;
+  }
   return (
     <ConvRow
       data-testid="tool-execution"
@@ -158,19 +170,32 @@ const CallRecordRow = memo(function CallRecordRow({ call }: { call: CodemodeCall
 export function CodemodeCalls({
   items,
   renderLive,
+  viewId,
+  recordViewPrefix,
 }: {
   items: CodemodeCallItem[];
   /** durationMs：配上的 details.calls 记录里的耗时，没有就用段自己的。 */
   renderLive: (segment: ToolSegment, durationMs?: number) => ReactNode;
+  /** 「前面还有 N 次调用」的展开状态，同样归会话视图。 */
+  viewId?: string | null;
+  /** 记录行展开状态的 ID 前缀（`codemode-record:<toolCallId>`）。 */
+  recordViewPrefix?: string | null;
 }) {
-  const [showAll, setShowAll] = useState(false);
+  const { expanded: showAll, setExpanded: setShowAll } = useSessionViewExpandedState(viewId);
   if (items.length === 0) return null;
-  const hidden = showAll || items.length <= VISIBLE_CALLS ? 0 : items.length - (VISIBLE_CALLS - 1);
-  const shown = hidden > 0 ? items.slice(hidden) : items;
+  const cutoff = showAll || items.length <= VISIBLE_CALLS ? 0 : items.length - (VISIBLE_CALLS - 1);
+  // Communication is part of the conversation: it must remain visible even among many tool calls.
+  const shown = items.filter((item, index) => index >= cutoff || item.name.toLowerCase() === 'send_message');
+  const hidden = items.length - shown.length;
   return (
     <div className={styles.calls} data-testid="codemode-calls">
       {hidden > 0 ? (
-        <button type="button" className={styles.more} data-testid="codemode-calls-more" onClick={() => setShowAll(true)}>
+        <button
+          type="button"
+          className={styles.more}
+          data-testid="codemode-calls-more"
+          onClick={() => setShowAll(true)}
+        >
           前面还有 {hidden} 次调用
         </button>
       ) : null}
@@ -183,7 +208,11 @@ export function CodemodeCalls({
           data-live={item.kind === 'live' ? '1' : undefined}
           title={callLabel(item.name)}
         >
-          {item.kind === 'live' ? renderLive(item.segment, item.durationMs) : <CallRecordRow call={item.call} />}
+          {item.kind === 'live' ? (
+            renderLive(item.segment, item.durationMs)
+          ) : (
+            <CallRecordRow call={item.call} viewId={recordViewPrefix ? `${recordViewPrefix}:${item.key}` : null} />
+          )}
         </div>
       ))}
     </div>

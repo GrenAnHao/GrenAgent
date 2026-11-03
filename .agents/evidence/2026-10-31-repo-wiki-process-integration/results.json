@@ -1,0 +1,30 @@
+{
+  "sourceArchive": "Gren_RepoWiki_TypeScript_Electron.zip",
+  "sourceSha256": "899862f29c20f402e379dcab35bc2fa603f61aa4e3c52e1e015a47ac4c7988b5",
+  "electron": "38.8.6",
+  "electronNode": "22.22.0",
+  "checks": {
+    "upstreamCore": { "passed": 194, "failed": 0, "cancelled": 0, "skipped": 0 },
+    "upstreamFrontend": { "files": 9, "passed": 71, "failed": 0 },
+    "example": { "passed": 3, "failed": 0 },
+    "hostBackend": { "passed": 52, "failed": 0 },
+    "hostFrontend": { "passed": 33, "failed": 0 },
+    "buildAndLicenses": { "passed": 21, "failed": 0 },
+    "electronUi": { "scenario": "repo-wiki", "assertionsPassed": 37, "failed": 0, "scenariosRun": 1, "scenariosAvailable": 44 },
+    "productionBuild": "passed",
+    "repoWikiStrictTypecheck": "passed",
+    "verifyNotes": { "passed": true, "notes": 131, "existingWarnings": 6 },
+    "nativeWindowIpc": { "passed": true, "mainPid": 24960, "childPid": 85456, "otherWindowRejected": true, "navigationRejected": true, "childStopped": true },
+    "unpackedProductionEntry": { "passed": true, "parentPid": 30600, "childPid": 56796, "childStopped": true }
+  },
+  "productionChild": {
+    "path": "electron-agent/out-pkg/main/repo-wiki-host.cjs",
+    "bytes": 173523,
+    "sha256": "6480ff3371e8fa8bc0308404fd94202d763c64fde7ed5629dad2483a24646102"
+  },
+  "limits": [
+    "Existing full node and whole-shell typecheck diagnostics were not repaired; the new production Repo Wiki strict project passed.",
+    "No paid model request, installer release, commit, push or publication was performed.",
+    "Only the repo-wiki Electron UI scenario was run."
+  ]
+}

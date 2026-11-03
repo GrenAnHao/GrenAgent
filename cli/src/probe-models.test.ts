@@ -25,6 +25,7 @@ test("collectModels maps registry models to serializable rows", () => {
       contextWindow: 200000,
       maxTokens: 16384,
       reasoning: false,
+      fast: false,
       input: ["text", "image"],
       cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 },
     },

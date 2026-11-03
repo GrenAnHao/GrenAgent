@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { runInWorkspace } from "../_shared/workspace-context.js";
 import {
   activeToolsFor,
+  AGENT_MODES,
   agentModeConfigKey,
   type AgentMode,
   gateToolCall,
@@ -22,8 +23,9 @@ import {
 beforeEach(() => __resetAgentModeForTest());
 
 describe("isAgentMode / parseModeArg", () => {
-  it("recognizes the four valid modes", () => {
-    for (const m of ["agent", "ask", "debug", "plan"]) {
+  it("recognizes only the five current modes", () => {
+    expect(AGENT_MODES).toEqual(["agent", "ask", "debug", "plan", "ultra"]);
+    for (const m of AGENT_MODES) {
       expect(isAgentMode(m)).toBe(true);
     }
   });
@@ -93,9 +95,6 @@ describe("gateToolCall", () => {
       "write",
       "edit",
       "kb_add",
-      "memory_save",
-      "memory_update",
-      "memory_delete",
       "review_note",
       "todo",
       "generate_image",
@@ -138,8 +137,6 @@ describe("gateToolCall", () => {
       "anysearch_search",
       "anysearch_sub_domains",
       "search",
-      "memory_search",
-      "conversation_search",
       "git_diff",
       "code_explore",
       "present",
@@ -190,55 +187,14 @@ describe("modeBadge / modeLabel", () => {
   });
 });
 
-describe("brainstorm mode", () => {
-  it("isAgentMode recognizes brainstorm", () => {
-    expect(isAgentMode("brainstorm")).toBe(true);
+describe("removed brainstorm mode", () => {
+  it("rejects brainstorm as a current mode", () => {
+    expect(isAgentMode("brainstorm")).toBe(false);
   });
 
-  it("parseModeArg parses brainstorm", () => {
-    expect(parseModeArg("brainstorm")).toBe("brainstorm");
-    expect(parseModeArg("BRAINSTORM")).toBe("brainstorm");
-  });
-
-  it("toolWhitelist does NOT restrict brainstorm (full toolset)", () => {
-    expect(toolWhitelist("brainstorm")).toBeUndefined();
-  });
-
-  it("brainstorm does NOT include visual-choice in whitelist (no whitelist)", () => {
-    // brainstorm 无白名单，toolWhitelist 返回 undefined——show_visual 通过完整工具集可用
-    expect(toolWhitelist("brainstorm")).toBeUndefined();
-  });
-
-  it("brainstorm includes ask tools (read/grep)", () => {
-    // brainstorm 不限制工具集，toolWhitelist 返回 undefined
-    expect(toolWhitelist("brainstorm")).toBeUndefined();
-  });
-
-  it("brainstorm does NOT restrict write/edit (full toolset)", () => {
-    // brainstorm = 完整工具集（与 agent 相同），不限制写文件
-    const all = ["read", "grep", "write", "edit", "bash", "show_visual", "read_visual_choice"];
-    const active = activeToolsFor("brainstorm", all);
-    // 返回 undefined 表示不限制（使用全量工具集）
-    expect(active).toBeUndefined();
-  });
-
-  it("gateToolCall does NOT block write in brainstorm", () => {
-    // brainstorm 允许写文件——这是设计意图，头脑风暴可以生成文件
-    const result = gateToolCall("brainstorm", "write", {});
-    expect(result).toBeUndefined();
-  });
-
-  it("gateToolCall allows show_visual in brainstorm", () => {
-    const result = gateToolCall("brainstorm", "show_visual", {});
-    expect(result).toBeUndefined();
-  });
-
-  it("modeBadge returns Brainstorm", () => {
-    expect(modeBadge("brainstorm")).toBe("Brainstorm");
-  });
-
-  it("modeLabel returns 头脑风暴", () => {
-    expect(modeLabel("brainstorm")).toBe("头脑风暴");
+  it("rejects brainstorm in new mode commands", () => {
+    expect(parseModeArg("brainstorm")).toBeUndefined();
+    expect(parseModeArg(" BRAINSTORM ")).toBeUndefined();
   });
 });
 
@@ -289,5 +245,37 @@ describe("getAgentMode 按会话", () => {
     setAgentMode("debug", "D:/a");
     expect(getAgentMode("D:/a", "s1")).toBe("plan");
     expect(getAgentMode("D:/a", "s3")).toBe("debug");
+  });
+});
+
+describe("ultra mode", () => {
+  it("isAgentMode / parseModeArg recognize ultra", () => {
+    expect(isAgentMode("ultra")).toBe(true);
+    expect(parseModeArg(" ultra ")).toBe("ultra");
+    expect(parseModeArg("ULTRA")).toBe("ultra");
+  });
+
+  it("uses the full toolset like agent", () => {
+    expect(toolWhitelist("ultra")).toBeUndefined();
+    const all = ["read", "grep", "write", "edit", "bash", "spawn_agent", "mcp__server__do"];
+    expect(activeToolsFor("ultra", all)).toBeUndefined();
+    for (const tool of all) expect(gateToolCall("ultra", tool, { command: "rm -rf x" })).toBeUndefined();
+  });
+
+  it("still blocks plan-only tools for ultra", () => {
+    expect(gateToolCall("ultra", "upsert_plan", {})?.block).toBe(true);
+  });
+
+  it("has an Ultra badge and label", () => {
+    expect(modeBadge("ultra")).toBe("Ultra");
+    expect(modeLabel("ultra")).toBeTruthy();
+  });
+
+  it("is mutually exclusive with ask/plan by being one mode value", () => {
+    setAgentMode("ultra", "D:/a", "s1");
+    expect(getAgentMode("D:/a", "s1")).toBe("ultra");
+    setAgentMode("ask", "D:/a", "s1");
+    expect(getAgentMode("D:/a", "s1")).toBe("ask");
+    expect(getAgentMode("D:/a", "s1")).not.toBe("ultra");
   });
 });

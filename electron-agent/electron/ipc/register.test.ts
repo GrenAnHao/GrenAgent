@@ -21,6 +21,64 @@ function handler(channel: string): (...args: any[]) => any {
 }
 
 describe('registerIpcHandlers', () => {
+  it('opens a single filtered file without changing the directory picker contract', async () => {
+    electron.dialog.showOpenDialog.mockReset().mockResolvedValue({ canceled: false, filePaths: ['C:/skills/example.zip'] });
+    registerIpcHandlers();
+    await expect(handler('gren:pick-file')({}, { filters: [{ name: 'Zip', extensions: ['zip'] }] })).resolves.toBe('C:/skills/example.zip');
+    expect(electron.dialog.showOpenDialog).toHaveBeenLastCalledWith({ properties: ['openFile'], filters: [{ name: 'Zip', extensions: ['zip'] }] });
+    await handler(IPC_CHANNELS.pickDirectory)({});
+    expect(electron.dialog.showOpenDialog).toHaveBeenLastCalledWith({ properties: ['openDirectory', 'createDirectory'] });
+  });
+
+  it.each([
+    { canceled: true, filePaths: ['C:/ignored.zip'] },
+    { canceled: false, filePaths: [] },
+  ])('returns null for an unselected file ($canceled / $filePaths)', async (result) => {
+    electron.dialog.showOpenDialog.mockReset().mockResolvedValue(result);
+    registerIpcHandlers();
+    await expect(handler('gren:pick-file')({})).resolves.toBeNull();
+  });
+
+  it('agent_get_session_defaults / agent_set_session_defaults 能经 IPC invoke 到宿主', async () => {
+    const send = vi.fn(async (_workspace: string, command: string) => ({ command }));
+    registerIpcHandlers({ pi: { send } as never });
+    const invoke = handler(IPC_CHANNELS.invoke);
+    const preferences = { model: { provider: 'anthropic', id: 'claude' }, thinkingLevel: 'high', mode: 'plan' };
+    await invoke({}, { command: 'agent_get_session_defaults', args: { workspace: 'D:/p' } });
+    expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_get_session_defaults', {});
+    await invoke({}, { command: 'agent_set_session_defaults', args: { workspace: 'D:/p', preferences } });
+    expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_set_session_defaults', { preferences });
+  });
+
+  it('agent_new_session 把 initialPreferences 原样交给宿主', async () => {
+    const send = vi.fn(async (_workspace: string, command: string) => ({ command }));
+    registerIpcHandlers({ pi: { send } as never });
+    const invoke = handler(IPC_CHANNELS.invoke);
+    const initialPreferences = { thinkingLevel: 'low', approval: 'readonly' };
+    await invoke({}, { command: 'agent_new_session', args: { workspace: 'D:/p', initialPreferences } });
+    expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_new_session', { initialPreferences });
+  });
+
+  it('agent_set_fast_mode 原样透传 enabled（false 不能丢）与 targetSessionPath', async () => {
+    const send = vi.fn(async (_workspace: string, command: string) => ({ command }));
+    registerIpcHandlers({ pi: { send } as never });
+    const invoke = handler(IPC_CHANNELS.invoke);
+    await invoke({}, { command: 'agent_set_fast_mode', args: { workspace: 'D:/p', enabled: true, targetSessionPath: 'D:/p/a.jsonl' } });
+    expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_set_fast_mode', { enabled: true, targetSessionPath: 'D:/p/a.jsonl' });
+    await invoke({}, { command: 'agent_set_fast_mode', args: { workspace: 'D:/p', enabled: false, targetSessionPath: 'D:/p/a.jsonl' } });
+    expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_set_fast_mode', { enabled: false, targetSessionPath: 'D:/p/a.jsonl' });
+    expect(getRegisteredCommands()).toContain('agent_set_fast_mode');
+  });
+
+  it('agent_set_session_defaults / agent_get_session_defaults 透传 fastMode（含 false）', async () => {
+    const send = vi.fn(async (_workspace: string, command: string) => ({ command }));
+    registerIpcHandlers({ pi: { send } as never });
+    const invoke = handler(IPC_CHANNELS.invoke);
+    await invoke({}, { command: 'agent_get_session_defaults', args: { workspace: 'D:/p' } });
+    expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_get_session_defaults', {});
+    await invoke({}, { command: 'agent_set_session_defaults', args: { workspace: 'D:/p', preferences: { fastMode: false } } });
+    expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_set_session_defaults', { preferences: { fastMode: false } });
+  });
   it('dispatches operations only to fixed management methods and opens diagnostic IDs not caller paths', async () => {
     const agentData = { requestAdmin: vi.fn().mockResolvedValue({}), request: vi.fn(), resolveDiagnosticPath: vi.fn().mockResolvedValue('D:/safe/wiki/page.md') };
     registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
@@ -39,24 +97,6 @@ describe('registerIpcHandlers', () => {
     expect(agentData.resolveDiagnosticPath).toHaveBeenCalledExactlyOnceWith('known');
     expect(electron.shell.openPath).toHaveBeenCalledWith('D:/safe/wiki/page.md');
     expect(agentData.request).not.toHaveBeenCalled();
-  });
-
-  it('routes Memory management through fixed in-process methods instead of the socket', async () => {
-    const requestAdmin = vi.fn().mockResolvedValue({}), request = vi.fn();
-    registerIpcHandlers({ agentData: { requestAdmin, request } as never }); const invoke = handler(IPC_CHANNELS.invoke);
-    const draft = { content: 'manual', level: 2, owner: { scope: 'global' } };
-    const cases: Array<[string, Record<string, unknown>]> = [
-      ['list', { userId: 'u', filter: { scope: 'all' }, query: '', cursor: 'cursor', limit: 50 }], ['read', { userId: 'u', id: 'm' }],
-      ['create', { userId: 'u', draft }], ['update', { userId: 'u', id: 'm', expectedRevision: 2, draft }],
-      ['conversations.list', { userId: 'u', filter: { scope: 'project', projectId: 'D:/real' } }], ['conversations.read', { userId: 'u', id: 'capture' }],
-    ];
-    for (const [method, args] of cases) {
-      await invoke({}, { command: `agentData_memory_${method.replace('.', '_')}`, args });
-      expect(requestAdmin).toHaveBeenLastCalledWith(`memory.${method}`, args);
-    }
-    await invoke({}, { command: 'agentData_memory_delete', args: { userId: 'u', id: 'm', workspace: 'D:/current-chat' } });
-    expect(requestAdmin).toHaveBeenLastCalledWith('memory.delete', { userId: 'u', id: 'm' });
-    expect(request).not.toHaveBeenCalled();
   });
 
   it('dispatches every Wiki management operation to its fixed method with only supported fields', async () => {
@@ -280,7 +320,7 @@ describe('registerIpcHandlers', () => {
     registerIpcHandlers({ agentData } as any);
     const invoke = handler(IPC_CHANNELS.invoke);
     await expect(invoke({}, { command: 'agentData_admin_jobs_list', args: {} })).resolves.toEqual({ method: 'admin.jobs.list' });
-    await expect(invoke({}, { command: 'agentData_admin_config_update', args: { module: 'memory', value: {}, version: 0 } })).resolves.toEqual({ method: 'admin.config.update' });
+    await expect(invoke({}, { command: 'agentData_admin_config_update', args: { module: 'codeRetrieval', value: {}, version: 0 } })).resolves.toEqual({ method: 'admin.config.update' });
     await expect(invoke({}, { command: 'agentData_admin_jobs_remove', args: { id: 'job-1' } })).resolves.toEqual({ method: 'admin.jobs.remove' });
     await expect(invoke({}, { command: 'agentData_admin_jobs_clear', args: { ids: ['job-1', 'job-2'] } })).resolves.toEqual({ method: 'admin.jobs.clear' });
     expect(agentData.request).toHaveBeenCalledWith('admin.jobs.remove', { id: 'job-1' });
@@ -292,20 +332,11 @@ describe('registerIpcHandlers', () => {
     registerIpcHandlers({ agentData } as any);
     const invoke = handler(IPC_CHANNELS.invoke);
 
-    await expect(invoke({}, { command: 'agentData_memory_overview', args: { userId: 'u', workspace: '/w' } })).resolves.toEqual({
-      method: 'memory.admin.overview', params: { userId: 'u', workspace: '/w' },
-    });
     await expect(invoke({}, { command: 'agentData_code_status', args: { workspace: '/w' } })).resolves.toEqual({
       method: 'codeRetrieval.admin.status', params: { workspace: '/w' },
     });
     await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'codegraph.sync', workspace: '/w' } })).resolves.toEqual({
       method: 'admin.jobs.create', params: { kind: 'codegraph.sync', workspace: '/w' },
-    });
-    await expect(invoke({}, { command: 'agentData_memory_overview', args: { userId: 'u', includeOtherProjects: true } })).resolves.toEqual({
-      method: 'memory.admin.overview', params: { userId: 'u', includeOtherProjects: true },
-    });
-    await expect(invoke({}, { command: 'agentData_memory_search', args: { userId: 'u', projectId: '/w', query: 'x', limit: 10 } })).resolves.toEqual({
-      method: 'memory.search', params: { userId: 'u', projectId: '/w', query: 'x', limit: 10 },
     });
     await expect(invoke({}, { command: 'agentData_code_projects', args: {} })).resolves.toEqual({
       method: 'codeRetrieval.admin.projects', params: {},
@@ -451,5 +482,27 @@ describe('attention commands', () => {
   it('reports the window focus', async () => {
     const { invoke } = setup();
     await expect(invoke({}, { command: 'attention_window_focused', args: {} })).resolves.toBe(true);
+  });
+});
+
+describe('context rule mode scope IPC', () => {
+  it('passes optional modes through to saveRule and rejects non-string arrays', async () => {
+    const saveRule = vi.fn().mockResolvedValue({});
+    registerIpcHandlers({ promptLibrary: { saveRule } as never });
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await invoke({}, {
+      command: 'save_context_rule',
+      args: { workspace: '/w', scope: 'global', title: 'T', enabled: true, body: 'b', modes: ['ultra', 'plan'] },
+    });
+    expect(saveRule).toHaveBeenLastCalledWith(expect.objectContaining({ modes: ['ultra', 'plan'], title: 'T' }));
+
+    await invoke({}, { command: 'save_context_rule', args: { scope: 'global', title: 'T', enabled: true, body: 'b' } });
+    expect(saveRule).toHaveBeenLastCalledWith(expect.objectContaining({ modes: undefined }));
+
+    await expect(invoke({}, {
+      command: 'save_context_rule',
+      args: { scope: 'global', title: 'T', enabled: true, body: 'b', modes: 'ultra' },
+    })).rejects.toThrow('modes must be a string array');
   });
 });

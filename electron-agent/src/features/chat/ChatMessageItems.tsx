@@ -8,6 +8,7 @@ import { NoticePill } from './NoticePill';
 import { SubagentSettledPill } from './SubagentSettledPill';
 import { JobDonePill } from './JobDonePill';
 import { AgentMessagePill } from './AgentMessagePill';
+import { incomingAgentMessage } from './agentCommunicationModel';
 import { GoalRoundPill } from './GoalRoundPill';
 import { UiPromptReceipt } from './UiPromptReceipt';
 import { AnswerCard } from './AnswerCard';
@@ -18,10 +19,11 @@ import { VirtualizedMessageList, type MessageListViewport, type TranscriptScroll
 import { ToolExecution } from '../tools/ToolExecution';
 import { SubAgentInline } from './SubAgentInline';
 import { SubAgentGroupInline, type NumberedUnit } from './SubAgentGroupInline';
-import { argsLookParallel, subAgentMode, taskLabel } from '../panels/subagentUtils';
+import { subAgentMode, taskLabel } from '../panels/subagentUtils';
 import type { SpawnFollowOverlay } from './messagePrecompute';
 import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
 import { CompactionDivider } from './CompactionStatusRow';
+import { MessageTimelineContext } from './MessageTimelineContext';
 
 const commandInputStyles = createStaticStyles(({ css }) => ({
   row: css`
@@ -95,6 +97,9 @@ export function renderMessageBody(
 ): ReactNode {
   switch (msg.kind) {
     case 'user':
+      if (!msg.images?.length && incomingAgentMessage(msg.text)) {
+        return <AgentMessagePill content={msg.text} timestamp={msg.timestamp} />;
+      }
       return (
         <UserMessage
           id={msg.id}
@@ -120,7 +125,7 @@ export function renderMessageBody(
     case 'tool':
       if (msg.toolName === 'spawn_agent') {
         const numbered = unitsByMessage.get(msg.id) ?? [];
-        if (numbered.length <= 1 && !argsLookParallel(msg.args)) {
+        if (numbered.length <= 1 && numbered[0]?.unit.subIndex == null) {
           const only = numbered[0];
           const followed = spawnOverlay.get(msg.id);
           return (
@@ -141,7 +146,8 @@ export function renderMessageBody(
           <SubAgentGroupInline
             messageId={msg.id}
             toolCallId={msg.toolCallId}
-            mode={subAgentMode(msg.args)}
+            mode={subAgentMode(msg.args, msg.result)}
+            result={msg.result}
             status={msg.status}
             units={numbered}
           />
@@ -169,9 +175,9 @@ export function renderMessageBody(
         return <QuestionsCard answered={answeredQuestions.has(msg.id)} content={msg.content} />;
       }
       if (msg.customType === 'visual-inline') return <VisualCard content={msg.content} />;
-      if (msg.customType === 'subagent-settled') return <SubagentSettledPill content={msg.content} />;
-      if (msg.customType === 'job-done') return <JobDonePill content={msg.content} />;
-      if (msg.customType === 'agent-message') return <AgentMessagePill content={msg.content} />;
+      if (msg.customType === 'subagent-settled') return <SubagentSettledPill content={msg.content} details={msg.details} timestamp={msg.sourceTimestamp} />;
+      if (msg.customType === 'job-done') return <JobDonePill content={msg.content} details={msg.details} timestamp={msg.sourceTimestamp} />;
+      if (msg.customType === 'agent-message') return <AgentMessagePill content={msg.content} details={msg.details} timestamp={msg.sourceTimestamp} />;
       if (msg.customType === 'goal-round') return <GoalRoundPill content={msg.content} />;
       if (msg.customType === 'ui-prompt-receipt') return <UiPromptReceipt content={msg.content} />;
       return <NoticePill customType={msg.customType} content={msg.content} />;
@@ -236,6 +242,7 @@ export function ChatMessageItems({
   const last = visible[visible.length - 1];
   const followKey = last?.kind === 'user' ? last.id : null;
   return (
+    <MessageTimelineContext.Provider value={messages}>
     <VirtualizedMessageList
       display={items}
       followKey={followKey}
@@ -259,5 +266,6 @@ export function ChatMessageItems({
           spawnOverlay,
         )}
     />
+    </MessageTimelineContext.Provider>
   );
 }

@@ -1,6 +1,7 @@
 export const IPC_CHANNELS = {
   invoke: 'gren:invoke',
   pickDirectory: 'gren:pick-directory',
+  pickFile: 'gren:pick-file',
   openUrl: 'gren:open-url',
   openPath: 'gren:open-path',
   revealItem: 'gren:reveal-item',
@@ -32,7 +33,6 @@ export type { Item as ItemDto, Thread as ThreadDto, Turn as TurnDto } from '../a
 export type { PermissionAuthorization, PermissionOperation, PermissionRequest } from '../app/permissionManager';
 export type { PluginManifest as PluginManifestDto, PluginStateRecord as PluginStateDto } from '../app/plugin/pluginManager';
 export type { WikiManagementApi, WikiLibraryView, WikiSource, WikiPage, WikiVersion } from '../agentData/wikiContracts';
-export type { MemoryRecord, ManagedMemoryRecord, MemoryOwner, MemoryFilter, MemoryLevel, MemoryOrigin, MemoryListInput, MemoryPage, MemoryReadInput, MemoryDraft, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail, MemoryItem } from '../agentData/memoryContracts';
 export type { TaskRef, TaskView, TaskStatus, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceRef, ResourceNavigation, AuditQuery, AuditView, AuditPage, AuditExport, DiagnosticItem, DiagnosticReport, WorkbenchOverview } from '../agentData/operationsContracts';
 
 export function isInvokeRequest(value: unknown): value is InvokeRequest {

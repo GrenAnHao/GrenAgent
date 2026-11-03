@@ -1,0 +1,59 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs agent-message
+
+构建：10 个源文件有改动（ui-harness/scenarios/agent-message.tsx、src/features/chat/AgentCommunicationCard.tsx 等）
+场景已构建（生产模式，20.5s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[21700:1028/151927.760:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ agent-message
+  PASS 历史代理消息立即显示正文
+  PASS 接收方和发送方均有身份
+  PASS 接收状态是未唤醒
+  FAIL 收到的正文按 Markdown 渲染  got false
+  PASS 发送的正文无需点击即可读
+  PASS 发送卡写明双方和实际投递状态
+  PASS 发送消息提供折叠按钮
+  PASS 收起后保留双方和投递状态，正文不外铺
+  PASS 折叠头仍能辨认发送与接收方
+  INFO 截图 communication-collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-collapsed.png
+  PASS 再次展开恢复完整正文
+  PASS 唤醒型历史消息按代理通信展示
+  PASS 发送卡仍处在前后正文之间
+  PASS 普通注入保持原样
+  INFO 截图 communication-default  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-default.png
+  PASS 实时静默通信正文直接可见
+  PASS start/end 只产生一张接收卡
+  PASS 正文相同的独立消息保留两条
+  PASS 唤醒型实时消息不会等到刷新才出现
+  PASS 实时唤醒消息 start/end 不重复
+  PASS 超长消息首段立即显示
+  PASS 长正文限高且全文仍在滚动区
+  PASS 末段没有被截断
+  PASS 用户能滚动读取末段
+  PASS 窄屏长单词不撑破页面
+  INFO 截图 communication-long-narrow  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-long-narrow.png
+  PASS 空正文保留身份并明确缺口
+  PASS 空正文不生成空白 Markdown 容器
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 真实子代理详情显示发送正文
+  PASS 子代理发送方使用自身身份而非父会话身份
+  PASS 父代理给子代理的接收正文默认可读
+  PASS 子代理接收方也使用自身身份
+  PASS 子代理实际中间与最终输出均呈现在对话中
+  INFO 截图 communication-child-transcript  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-child-transcript.png
+  PASS 超过六条调用也不会藏起通信卡
+  PASS 完整与截短历史两张通信卡均展示
+  PASS 上游参数预览的限制写明
+  PASS 截短记录保留已有正文
+  INFO 截图 communication-codemode-history  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-codemode-history.png
+  PASS 浅色主题通信卡保持可见
+  PASS 没有渲染错误兜底
+  INFO 截图 communication-light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-communication-light.png
+  ── 35 passed, 1 failed
+
+失败场景：agent-message（7.7s）
+单独复跑确认：node ui-harness/check.mjs agent-message

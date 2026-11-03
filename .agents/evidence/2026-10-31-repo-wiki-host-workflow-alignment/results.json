@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-31",
+  "scope": "Repo Wiki host knowledge scheduler and automatic workspace integration",
+  "sourceSha256": "899862f29c20f402e379dcab35bc2fa603f61aa4e3c52e1e015a47ac4c7988b5",
+  "runtime": { "electron": "38.8.6", "node": "22.22.0" },
+  "checks": {
+    "schedulerRegression": { "files": 19, "passed": 101 },
+    "schedulerConfigurationRevision": { "files": 4, "passed": 27 },
+    "modelPortAndRuntimeHost": { "files": 3, "passed": 22 },
+    "hostBackend": { "passed": 66, "stdout": "tool execution record; summary in project-backend-alignment-report.md" },
+    "processClient": { "passed": 10 },
+    "standaloneWatcher": { "passed": 4 },
+    "hostUiAndClient": { "passed": 21 },
+    "vendorUi": { "passed": 71 },
+    "electronUi": { "scenario": "repo-wiki", "passed": 69, "failed": 0, "scenariosRun": 1, "availableScenarios": 44 },
+    "productionWorkflow": { "passed": 1, "behaviorGroups": 7, "durationSeconds": 77.49, "parentPid": 4724, "agentDataPid": 91152, "repoWikiPid": 62152, "provider": "loopback HTTP through real Pi SDK" },
+    "nativeWindowIpc": { "passed": true, "mainPid": 60972, "repoWikiPid": 70424 },
+    "repoWikiStrictTypecheck": { "exitCode": 0 },
+    "productionBuild": { "exitCode": 0 },
+    "targetedDiffCheck": { "exitCode": 0 },
+    "verifyNotes": { "exitCode": 0, "active": 132, "archived": 1, "existingWarnings": 6 },
+    "fullNodeTypecheck": { "passed": false, "existingDiagnostics": 150 }
+  },
+  "countsOverlap": true,
+  "paidModelCalls": false,
+  "committed": false,
+  "pushed": false,
+  "published": false,
+  "remainingBlockers": []
+}

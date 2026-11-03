@@ -34,6 +34,11 @@ export type ThinkingSegment = {
   durationMs?: number;
   /** 首个 thinking 出现的时刻。流式中用来显示「正在深度思考 · 时间」。 */
   startedAt?: number;
+  /**
+   * 这条 assistant 消息的 pi 时间戳：会话内稳定，用作展开状态的持久化 ID。
+   * 缺省（旧缓存 / 合成消息）时不持久化，退回组件本地状态。
+   */
+  timestamp?: number;
 };
 
 export type TextSegment = {
@@ -49,7 +54,7 @@ export type DisplayMessage =
   | { kind: 'user'; id: string; text: string; images?: UserImage[]; steering?: boolean; steerState?: SteerState; timestamp?: number; entryId?: string; promptFrame?: boolean }
   | { kind: 'turn'; id: string; segments: TimelineSegment[]; timestamp?: number }
   | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error'; argsComplete?: boolean; startedAt?: number; durationMs?: number }
-  | { kind: 'notice'; id: string; customType: string; content: string }
+  | Extract<ChatMessage, { kind: 'notice' }>
   | { kind: 'compaction'; id: string }
   | { kind: 'command-input'; id: string; command: string; rest: string; beforeCount: number };
 
@@ -97,6 +102,7 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
             streaming: msg.streaming && !text,
             durationMs: msg.thinkingDuration,
             startedAt: msg.thinkingStartedAt,
+            ...(msg.timestamp != null ? { timestamp: msg.timestamp } : {}),
           });
         }
         if (text) {

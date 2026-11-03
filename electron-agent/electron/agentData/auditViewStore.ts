@@ -43,7 +43,7 @@ function project(value: Record<string, unknown>, fields: Projection): Record<str
 
 const actionLabels: Record<string, string> = {
   'job.create': '创建任务', 'job.stage': '更新任务阶段', 'job.cancel_requested': '请求取消任务', 'job.cancel': '取消任务', 'job.complete': '任务完成', 'job.fail': '任务失败', 'job.remove': '移除任务记录', 'job.clear': '清理任务记录',
-  'config.update': '更新配置', 'data.import': '导入配置', 'memory.create': '创建记忆', 'memory.update': '更新记忆', 'memory.remove': '移除记忆',
+  'config.update': '更新配置', 'data.import': '导入配置',
 };
 
 interface AuditRow { id: string; action: string; detail: string; created_at: number; resource_type: ResourceRef['type'] | null; resource_id: string | null }
@@ -74,14 +74,13 @@ function selection(input: AuditQuery): Selection {
 // Resource inference is shared by SQL filtering and the returned projection.
 const resourceCases = [
   ...['resource', 'target', 'metadata.resource', 'metadata.target'].map((path) => ({
-    when: `json_extract(metadata,'$.${path}.type') IN ('wiki','project','memory') AND json_type(metadata,'$.${path}.id')='text' AND json_extract(metadata,'$.${path}.id')!=''`,
+    when: `json_extract(metadata,'$.${path}.type') IN ('wiki','project') AND json_type(metadata,'$.${path}.id')='text' AND json_extract(metadata,'$.${path}.id')!=''`,
     type: `json_extract(metadata,'$.${path}.type')`, id: `json_extract(metadata,'$.${path}.id')`,
   })),
   ...['kbId', 'target.kbId', 'metadata.payload.kbId'].map((path) => ({
     when: `action GLOB 'job.*' AND json_type(metadata,'$.${path}')='text' AND json_extract(metadata,'$.${path}')!=''`, type: "'wiki'", id: `json_extract(metadata,'$.${path}')`,
   })),
   { when: "(action GLOB 'job.*' OR action GLOB 'code.*' OR action GLOB 'project.*') AND json_type(metadata,'$.workspace')='text' AND json_extract(metadata,'$.workspace')!=''", type: "'project'", id: "json_extract(metadata,'$.workspace')" },
-  { when: "action GLOB 'memory.*' AND json_type(metadata,'$.id')='text' AND json_extract(metadata,'$.id')!=''", type: "'memory'", id: "json_extract(metadata,'$.id')" },
 ];
 const resourceSql = (field: 'type' | 'id') => `CASE ${resourceCases.map((entry) => `WHEN ${entry.when} THEN ${entry[field]}`).join(' ')} ELSE NULL END`;
 

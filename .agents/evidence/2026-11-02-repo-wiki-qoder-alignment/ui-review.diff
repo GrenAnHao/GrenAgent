@@ -1,0 +1,289 @@
+# UI task review diff
+
+## electron-agent/src/features/repoWiki/knowledgeProjection.ts
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts"
+index 3560cb5b..94bf9c85 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts"	
+@@ -10,12 +10,13 @@ const runLabels: Record<KnowledgeRunState, string> = { queued: '等待生成', r
+ const settledStates = new Set<KnowledgeRunState>(['completed', 'failed', 'cancelled']);
+ const activeStates = new Set<KnowledgeRunState>(['queued', 'running', 'recovering', 'pause_requested']);
+ /** Before these phases the planned total is not frozen yet, so no denominator is shown. */
+-const unplannedPhases = new Set<KnowledgePhase>(['prepare', 'change_analysis', 'overview', 'plan', 'catalogue']);
++const unplannedPhases = new Set<KnowledgePhase>(['prepare', 'change_analysis', 'readme', 'overview', 'plan', 'catalogue']);
+ 
+ type StageCopy = { title: string; description: string };
+ const stageCopy = (domain: KnowledgeDomain, phase: KnowledgePhase): StageCopy => {
+   const wiki = domain === 'wiki';
+   switch (phase) {
++    case 'readme': return { title: '读取 README 中', description: '正在整理项目说明，为源码分析准备输入' };
+     case 'change_analysis': return { title: '分析变更中', description: wiki ? '正在对比源码差异，确定需要更新的文档' : '正在对比源码差异，确定需要更新的知识卡片' };
+     case 'overview': return { title: '分析项目中', description: '正在阅读源码，梳理项目概览' };
+     case 'plan': return { title: '规划中', description: wiki ? '正在规划文档结构' : '正在规划知识卡片' };
+@@ -37,7 +38,7 @@ const errorTexts: Record<string, string> = {
+   MODEL_UNAVAILABLE: '系统知识模型不可用，请在设置中配置后重试。',
+   INVALID_MODEL_JSON: '模型没有按要求返回 JSON（已自动要求重发一次仍不合格），请重试。',
+   BUDGET_EXHAUSTED: '这一项用完了单项预算（模型轮数、工具次数或 token），已完成的部分已保留。点「重新分析」会用新的预算继续。',
+-  CATALOGUE_LIMIT: '目录超过了 500 项的上限，已完成的部分已保留。请在 Wiki 计划里缩小范围后重新分析。',
++  CATALOGUE_LIMIT: '目录达到当前任务的节点、层级或规划项上限，已完成的部分已保留。请在 Wiki 计划里缩小范围后重新分析。',
+   MODEL_CHANGED: '知识模型配置已变化，请重新确认后生成。',
+ };
+ /** Kernel errors carry stable codes; translate the known ones and keep readable server text otherwise. */
+@@ -60,6 +61,8 @@ export function projectKnowledge(snapshot: RepoWikiKnowledgeSnapshot) {
+   const progress = run?.state === 'completed' ? 100 : planKnown && run ? Math.min(99, Math.floor(run.counts.prepared / planned * 100)) : undefined;
+   const failed = run?.state === 'failed';
+   const unit = domain === 'wiki' ? '篇' : '张';
++  const activeItems = run && activeStates.has(run.state) ? run.activeItems ?? [] : [];
++  const activeLabel = activeItems.length > 1 ? `处理中 ${activeItems.length} ${run?.phase === 'generate' ? unit : '项'}` : undefined;
+ 
+   // In-progress card: title / description / progress follow the current stage.
+   let title = '', description = '';
+@@ -97,6 +100,7 @@ export function projectKnowledge(snapshot: RepoWikiKnowledgeSnapshot) {
+ 
+   return {
+     published: content.publishedCount, prepared: content.preparedCount, expected: planned, unit,
++    activeItems, activeLabel, currentItem: activeItems[0]?.title || run?.currentItem,
+     runLabel: run ? runLabels[run.state] : '未生成',
+     /** Stage the run is in (or stopped in), for task detail views. */
+     phaseLabel: run ? stageCopy(domain, run.phase).title : undefined,
+
+## electron-agent/src/features/repoWiki/knowledgeProjection.test.ts
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts"
+index ac9778aa..d1f5c50c 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts"	
+@@ -4,6 +4,31 @@ import type { RepoWikiKnowledgeSnapshot } from '../../../shared/knowledgeKernelC
+ export function knowledgeFixture(state: RepoWikiKnowledgeSnapshot['run'] extends infer _ ? string : never = 'running'): RepoWikiKnowledgeSnapshot { return { version: 1, key: { workspaceInstanceId: 'i', portableProjectId: 'p', projectId: 'p', branch: 'main', language: 'zh', domain: 'wiki' }, content: { state: 'available', publishedCount: 4, preparedCount: 2, expectedCount: 0 }, run: { taskId: 'task', revision: 3, phase: 'generate', state: state as NonNullable<RepoWikiKnowledgeSnapshot['run']>['state'], counts: { planned: 0, prepared: 2, failed: 0, blocked: 0, published: 0 }, capabilities: { pause: true, resume: false, cancel: true, repair: false, reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready', modelIdentity: 'model', modelDisplayName: '知识模型', planToken: 'plan' } }; }
+ const none = { pause: false, resume: false, cancel: false, repair: false, reanalyse: false };
+ describe('knowledge projection', () => {
++  it('shows README preparation without exposing a page denominator', () => {
++    const snapshot = knowledgeFixture(); Object.assign(snapshot.run!, { phase: 'readme' }); snapshot.run!.counts.planned = 8;
++    expect(projectKnowledge(snapshot)).toMatchObject({ title: '读取 README 中', progress: undefined });
++  });
++  it('projects the real active set without changing publication counts and clears it after stopping', () => {
++    const snapshot = knowledgeFixture();
++    const activeItems = [
++      { phase: 'generate', itemId: 'generate:architecture', title: '系统架构' },
++      { phase: 'generate', itemId: 'generate:api', title: 'API 参考' },
++      { phase: 'generate', itemId: 'generate:usage', title: '使用指南' },
++    ];
++    Object.assign(snapshot.run!, { activeItems }); snapshot.run!.counts.failed = 1;
++    expect(projectKnowledge(snapshot)).toMatchObject({ activeItems, activeLabel: '处理中 3 篇', published: 4, prepared: 2 });
++    snapshot.run!.state = 'paused'; expect(projectKnowledge(snapshot)).toMatchObject({ activeItems: [], activeLabel: undefined });
++    snapshot.run!.state = 'failed'; expect(projectKnowledge(snapshot)).toMatchObject({ activeItems: [] });
++  });
++  it('uses item units for catalogue work and preserves legacy current-item rendering', () => {
++    const snapshot = knowledgeFixture(); snapshot.run!.currentItem = '系统架构';
++    expect(projectKnowledge(snapshot)).toMatchObject({ activeItems: [], activeLabel: undefined });
++    Object.assign(snapshot.run!, { phase: 'catalogue', activeItems: [
++      { phase: 'catalogue', itemId: 'catalogue:api', title: 'API 参考' },
++      { phase: 'catalogue', itemId: 'catalogue:usage', title: '使用指南' },
++    ] });
++    expect(projectKnowledge(snapshot)).toMatchObject({ activeLabel: '处理中 2 项', progress: undefined });
++  });
+   it.each(['running','failed','paused','blocked','queued'])('keeps published content independent of %s', state => { const view = projectKnowledge(knowledgeFixture(state)); expect(view.published).toBe(4); expect(view.prepared).toBe(2); expect(view.progress).toBeUndefined(); expect(view.runLabel).toBeTruthy(); });
+   it('never reaches 100 before publication settles', () => { const snapshot = knowledgeFixture(); snapshot.run!.counts = { planned: 2, prepared: 2, failed: 0, blocked: 0, published: 0 }; expect(projectKnowledge(snapshot).progress).toBe(99); snapshot.run!.state = 'completed'; snapshot.run!.counts.published = 2; expect(projectKnowledge(snapshot).progress).toBe(100); });
+   it('hides the total until the catalogue is frozen and then reports page progress', () => {
+
+## electron-agent/src/features/repoWiki/KnowledgeActiveItems.tsx
+diff --git "a/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\KnowledgeActiveItems.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\KnowledgeActiveItems.tsx"
+new file mode 100644
+index 00000000..5da043a3
+--- /dev/null
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\KnowledgeActiveItems.tsx"	
+@@ -0,0 +1,12 @@
++import type { projectKnowledge } from './knowledgeProjection';
++
++/** A shared disclosure for the overview, reader banner and task detail. */
++export function KnowledgeActiveItems({ view }: { view: ReturnType<typeof projectKnowledge> }) {
++  if (!view.activeLabel) return null;
++  return <details data-testid="knowledge-active-items" style={{ width: '100%', minWidth: 0, fontSize: 'inherit' }}>
++    <summary style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}>{view.activeLabel}</summary>
++    <ul aria-label="正在处理的内容" style={{ margin: '8px 0 0', paddingLeft: 20, lineHeight: 1.6, overflowWrap: 'anywhere' }}>
++      {view.activeItems.map(item => <li key={`${item.phase}:${item.itemId}`} style={{ padding: '2px 0' }}>{item.title}</li>)}
++    </ul>
++  </details>;
++}
+
+## electron-agent/src/features/repoWiki/RepoWikiWorkspace.knowledge.test.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx"
+index 39c40532..fb6515bd 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx"	
+@@ -9,6 +9,21 @@ let fixture: ReturnType<typeof createRepoWikiRuntimeFixture>;
+ const snapshot = (): RepoWikiKnowledgeSnapshot => ({ version: 1, key: { workspaceInstanceId: 'instance', projectId: 'forest', portableProjectId: 'portable', branch: 'main', language: 'zh', domain: 'wiki' }, content: { state: 'available', publishedCount: 1, preparedCount: 2, expectedCount: 0 }, run: { taskId: 'kernel-task', revision: 3, phase: 'generate', state: 'running', counts: { planned: 0, prepared: 2, failed: 0, blocked: 0, published: 0 }, capabilities: { pause: true, resume: false, cancel: true, repair: false, reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready', modelIdentity: 'provider/model@digest', modelDisplayName: '知识模型', planToken: 'plan' } });
+ beforeEach(() => { fixture = createRepoWikiRuntimeFixture(); window.gren = fixture.bridge as typeof window.gren; useSessionStore.setState({ activeWorkspace: fixtureWorkspace, registeredProjects: fixture.snapshot().openedRoots }); });
+ afterEach(() => { cleanup(); delete window.gren; vi.restoreAllMocks(); });
++it('shows concurrent item names in the overview and removes them when the task pauses', async () => {
++  const initial = snapshot(); Object.assign(initial.run!, { currentItem: '系统架构', activeItems: [
++    { phase: 'generate', itemId: 'generate:architecture', title: '系统架构' },
++    { phase: 'generate', itemId: 'generate:api', title: 'API 参考' },
++    { phase: 'generate', itemId: 'generate:usage', title: '使用指南' },
++  ] }); fixture.setKnowledge(initial); render(<RepoWikiWorkspace />);
++  const region = await screen.findByTestId('knowledge-overview');
++  expect(await within(region).findByText('处理中 3 篇')).toBeInTheDocument();
++  fireEvent.click(within(region).getByText('处理中 3 篇'));
++  expect(within(region).getByLabelText('正在处理的内容')).toHaveTextContent('系统架构API 参考使用指南');
++  expect(within(region).queryByText('当前内容')).toBeNull();
++  const paused = structuredClone(initial); paused.run!.revision++; paused.run!.state = 'paused';
++  act(() => fixture.emitKnowledge(paused)); await within(region).findByText('生成已暂停');
++  expect(within(region).queryByText('处理中 3 篇')).toBeNull();
++});
+ it('does not paint an empty action strip during pinned publication', async () => {
+   const pinned = snapshot(); pinned.run!.phase = 'publish'; pinned.run!.capabilities = { pause: false, resume: false, cancel: false, repair: false, reanalyse: false }; fixture.setKnowledge(pinned); render(<RepoWikiWorkspace />);
+   const region = await screen.findByTestId('knowledge-overview'); expect(region).toHaveTextContent('整理中'); expect(region.querySelector('[data-knowledge-action]')).toBeNull();
+
+## electron-agent/src/features/agentData/TaskDetailDrawer.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx"
+index 8b36d47c..c445d34b 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx"	
+@@ -6,6 +6,7 @@ import { redact, resourceNavigation, taskKey, taskStatusColors, taskStatusLabels
+ import { PageBanner } from './workbench/PageBanner';
+ import type { RepoWikiKnowledgeSnapshot } from '../../../shared/knowledgeKernelContracts';
+ import { knowledgeErrorText, projectKnowledge } from '../repoWiki/knowledgeProjection';
++import { KnowledgeActiveItems } from '../repoWiki/KnowledgeActiveItems';
+ 
+ interface Props {
+   taskRef?: TaskRef; taskView?: TaskView; visible?: boolean; retryRequest?: number; onClose(): void;
+@@ -47,6 +48,7 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
+     ? { ...readDetail, ...taskView, events: readDetail.events } : readDetail;
+   const retryHandled = useRef<string | undefined>(undefined);
+   const knowledge = (detail as (TaskDetail & { knowledge?: RepoWikiKnowledgeSnapshot }) | undefined)?.knowledge;
++  const knowledgeView = knowledge ? projectKnowledge(knowledge) : undefined;
+   const valid = (request: number) => request === epoch.current && session === currentSession.current && visible && !!selected;
+ 
+   useEffect(() => { if (preview) previewCard.current?.scrollIntoView?.({ block: 'nearest' }); }, [preview]);
+@@ -168,11 +170,12 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
+             { key: 'published', label: '正式发布', children: knowledge.content.publishedCount },
+             { key: 'failed', label: '失败 / 依赖阻塞', children: `${knowledge.run?.counts.failed ?? 0} / ${knowledge.run?.counts.blocked ?? 0}` },
+           ]} />}
++          {knowledgeView && <KnowledgeActiveItems view={knowledgeView} />}
+           <Descriptions column={1} size="small" items={[
+             { key: 'status', label: '状态', children: detail.cancellationRequested ? '正在取消，等待确认' : taskStatusLabels[detail.status] },
+             { key: 'stage', label: '阶段', children: detail.stage || '未提供阶段' },
+             ...(detail.message ? [{ key: 'message', label: '当前操作', children: String(redact(detail.message)) }] : []),
+-            ...(detail.currentPage ? [{ key: 'page', label: '当前文档', children: detail.currentPage }] : []),
++            ...(!knowledgeView?.activeLabel && detail.currentPage ? [{ key: 'page', label: '当前文档', children: detail.currentPage }] : []),
+             { key: 'progress', label: '进度', children: detail.progress === undefined || !Number.isFinite(detail.progress) ? '未提供百分比' : `${detail.progress}%` },
+             { key: 'count', label: '处理数量', children: detail.processed === undefined && detail.total === undefined ? '未提供计数' : `${detail.processed ?? '—'} / ${detail.total ?? '—'}` },
+             { key: 'attempts', label: '尝试次数', children: detail.attempts ?? '未提供' },
+
+## electron-agent/src/features/agentData/TaskDetailDrawer.test.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx"
+index 318cc762..ecd850cd 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx"	
+@@ -8,6 +8,21 @@ import { deferred, systemTask, task, taskDetail } from './operationsTestData';
+ import type { TaskDetail, TaskView } from '../../../electron/agentData/operationsContracts';
+ import type { RepoWikiKnowledgeSnapshot } from '../../../shared/knowledgeKernelContracts';
+ 
++it('shows concurrent knowledge items instead of a misleading single current document', async () => {
++  const knowledge: RepoWikiKnowledgeSnapshot = { version: 1, key: { workspaceInstanceId: 'i', projectId: 'p', portableProjectId: 'p', branch: 'main', language: 'zh', domain: 'wiki' }, content: { state: 'available', publishedCount: 4, preparedCount: 2, expectedCount: 6 }, run: { taskId: task.ref.id, revision: 5, phase: 'generate', state: 'running', currentItem: '系统架构', counts: { planned: 6, prepared: 2, failed: 1, blocked: 0, published: 0 }, capabilities: { pause: true, resume: false, cancel: true, repair: false, reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready' } };
++  Object.assign(knowledge.run!, { activeItems: [
++    { phase: 'generate', itemId: 'generate:architecture', title: '系统架构' },
++    { phase: 'generate', itemId: 'generate:api', title: 'API 参考' },
++    { phase: 'generate', itemId: 'generate:usage', title: '使用指南' },
++  ] });
++  vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, status: 'running', currentPage: '系统架构', knowledge } as TaskDetail);
++  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
++  expect(await screen.findByText('处理中 3 篇')).toBeInTheDocument();
++  fireEvent.click(screen.getByText('处理中 3 篇'));
++  expect(screen.getByLabelText('正在处理的内容')).toHaveTextContent('系统架构API 参考使用指南');
++  expect(screen.queryByText('当前文档')).toBeNull();
++});
++
+ it('does not let an older task-list projection overwrite the newer knowledge revision from detail', async () => {
+   const knowledge: RepoWikiKnowledgeSnapshot = { version: 1, key: { workspaceInstanceId: 'i', projectId: 'p', portableProjectId: 'p', branch: 'main', language: 'en', domain: 'wiki' }, content: { state: 'available', publishedCount: 4, preparedCount: 2, expectedCount: 3 }, run: { taskId: task.ref.id, revision: 5, phase: 'generate', state: 'paused', counts: { planned: 3, prepared: 2, failed: 1, blocked: 0, published: 0 }, capabilities: { pause: false, resume: true, cancel: true, repair: false, reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready' } };
+   vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, knowledge } as TaskDetail);
+
+## electron-agent/vendor/repo-wiki/apps/web/src/workspace/GenerationOverview.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\GenerationOverview.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\GenerationOverview.tsx"
+index e9fc9dd5..db319a4c 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\GenerationOverview.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\GenerationOverview.tsx"	
+@@ -100,7 +100,7 @@ export function GenerationOverview({
+               <KnowledgeRunProgress view={view} />
+               <Divider className="rw-state-divider" />
+               {row('语言', language === 'zh' ? '简体中文' : 'English')}
+-              {task?.currentItem && row('当前内容', task.currentItem)}
++              {!view.activeLabel && view.currentItem && row('当前内容', view.currentItem)}
+             </> : <>
+               <Flex className="rw-state-row" justify="space-between" align="center" gap={16}>
+                 <Typography.Text strong>语言</Typography.Text>
+
+## electron-agent/vendor/repo-wiki/apps/web/src/workspace/KnowledgeRunStatus.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\KnowledgeRunStatus.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\KnowledgeRunStatus.tsx"
+index 61006bc3..d32f1855 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\KnowledgeRunStatus.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\KnowledgeRunStatus.tsx"	
+@@ -2,6 +2,7 @@ import { Button, Dropdown, Flex, Progress, Typography, theme, type MenuProps } f
+ import { AlertTriangle, LoaderCircle, MoreHorizontal, PauseCircle } from 'lucide-react';
+ import type { KnowledgeActionInput, RepoWikiKnowledgeSnapshot } from '../../../../../../shared/knowledgeKernelContracts';
+ import { projectKnowledge, type KnowledgePrimary } from '../../../../../../src/features/repoWiki/knowledgeProjection';
++import { KnowledgeActiveItems } from '../../../../../../src/features/repoWiki/KnowledgeActiveItems';
+ 
+ type View = ReturnType<typeof projectKnowledge>;
+ export type KnowledgeActionHandler = (action: KnowledgePrimary['kind']) => void;
+@@ -21,6 +22,7 @@ export function KnowledgeRunProgress({ view, compact }: { view: View; compact?:
+       {compact && view.progress !== undefined && <Typography.Text type="secondary" className="rw-tabular">{view.progress}%</Typography.Text>}
+     </Flex>
+     <Typography.Text type="secondary" className="rw-run-description">{view.description}</Typography.Text>
++    <KnowledgeActiveItems view={view} />
+     {view.progress !== undefined && !compact && <Progress percent={view.progress} showInfo={false} size="small" aria-label="知识构建进度" />}
+   </Flex>;
+ }
+
+## electron-agent/ui-harness/scenarios/repo-wiki.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx"
+index 691c140d..1b330e60 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\scenarios\\repo-wiki.tsx"	
+@@ -28,9 +28,14 @@ let allowLeave = false;
+ let previousContext = '';
+ let previousInstance = '';
+ const kernelSnapshot = (state: NonNullable<RepoWikiKnowledgeSnapshot['run']>['state'] | null, revision = 1): RepoWikiKnowledgeSnapshot => ({ version: 1, key: { workspaceInstanceId: 'forest-instance', projectId: 'forest-en', portableProjectId: 'forest-portable', branch: 'main', language: 'en', domain: 'wiki' }, content: { state: state === 'failed' ? 'partial' : 'available', publishedCount: 1, preparedCount: state ? 2 : 0, expectedCount: 0 }, run: state ? { taskId: 'kernel-task', revision, phase: 'generate', state, currentItem: 'architecture', counts: { planned: 0, prepared: 2, failed: state === 'failed' ? 1 : 0, blocked: 0, published: 0 }, capabilities: { pause: state === 'running' || state === 'queued', resume: state === 'paused', cancel: ['running','paused','queued'].includes(state), repair: state === 'failed', reanalyse: state === 'blocked' } } : null, action: { state: 'idle' }, admission: { state: 'ready', modelIdentity: 'fixture/knowledge@digest', modelDisplayName: 'Fixture 知识模型', planToken: 'frozen-plan' } });
++const concurrentTitles = ['系统架构', 'API参考与跨模块调用约束及来源范围说明'.repeat(4), '使用指南'];
+ window.confirm = () => { track('confirm-leave'); return allowLeave; };
+ exposeData({ workspace: fixtureWorkspace, nextFixtureWorkspace, scratchFixtureWorkspace, hostRoots });
+ exposeActions({
++  kernelReadme: () => { const next = kernelSnapshot('running', 11); next.run!.phase = 'readme'; fixture.emitKnowledge(next); },
++  kernelConcurrent: () => { const next = kernelSnapshot('running', 12); next.run!.counts.planned = 6; next.run!.counts.failed = 1; next.run!.activeItems = concurrentTitles.map((title, i) => ({ phase: 'generate', itemId: `generate:page-${i}`, title })); next.run!.currentItem = concurrentTitles[0]; fixture.emitKnowledge(next); },
++  kernelConcurrentPaused: () => { const next = kernelSnapshot('paused', 13); next.run!.activeItems = concurrentTitles.map((title, i) => ({ phase: 'generate', itemId: `generate:page-${i}`, title })); fixture.emitKnowledge(next); },
++  kernelLegacy: () => { const next = kernelSnapshot('running', 14); next.run!.currentItem = '兼容旧版单项'; fixture.emitKnowledge(next); },
+   kernelEnter: () => fixture.emitKnowledge(kernelSnapshot(null)),
+   kernelResponse: (state: NonNullable<RepoWikiKnowledgeSnapshot['run']>['state'], revision: number) => fixture.queueKnowledgeResponse(kernelSnapshot(state, revision)),
+   kernelEvent: (state: NonNullable<RepoWikiKnowledgeSnapshot['run']>['state'], revision: number) => fixture.emitKnowledge(kernelSnapshot(state, revision)),
+
+## electron-agent/ui-harness/probes/repo-wiki.mjs
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"
+index a3a3aef7..2ec93e32 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-alignment-source-baseline-20261102-145529\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"	
+@@ -283,6 +283,26 @@ export default async function (t) {
+   await t.waitFor('[data-testid="knowledge-overview"]');
+   await t.setTheme('light'); await t.resize(760, 640); await t.shot('kernel-light-narrow');
+   t.ok('窄屏仍能显示四维状态', await t.waitFor('[data-testid="knowledge-overview"]'));
++  await t.act('kernelReadme');
++  t.ok('README 作为本地阶段展示', await t.waitForText('[data-testid="knowledge-overview"]', '读取 README 中'));
++  t.check('README 阶段没有假分母和进度条', await t.count('[data-testid="knowledge-overview"] .ant-progress'), 0);
++  await t.act('kernelConcurrent');
++  const active = '[data-testid="knowledge-overview"] [data-testid="knowledge-active-items"]';
++  t.ok('独立项失败时仍展示实际三项在途', await t.waitForText(active, '处理中 3 篇'));
++  t.check('在途详情默认收起', await t.countVisible(`${active} li`), 0);
++  await t.click(`${active} summary`, 20);
++  t.check('点击展开显示全部三项名称', await t.countVisible(`${active} li`), 3);
++  t.check('多项在途不再只显示第一篇当前内容', (await t.text('[data-testid="knowledge-overview"]')).includes('当前内容'), false);
++  t.ok('窄屏长条目换行且不撑破正文', await t.js(`(() => { const el=document.querySelector('${active}'); return !!el && el.scrollWidth<=el.clientWidth+1 && el.getBoundingClientRect().right<=innerWidth; })()`));
++  await t.shot('kernel-parallel-light-narrow');
++  t.check('在途详情可通过键盘聚焦', await t.js(`document.activeElement === document.querySelector('${active} summary')`), true);
++  await t.key(' ');
++  t.check('原生详情支持键盘收起', await t.countVisible(`${active} li`), 0);
++  await t.act('kernelConcurrentPaused');
++  t.ok('暂停反馈来自后端状态', await t.waitForText('[data-testid="knowledge-overview"]', '生成已暂停'));
++  t.check('暂停不继续展示陈旧在途数量', await t.count(active), 0);
++  await t.act('kernelLegacy');
++  t.ok('旧记录无activeItems仍显示当前内容', await t.waitForText('[data-testid="knowledge-overview"]', '当前内容兼容旧版单项'));
+   await t.resize(1420, 880); await t.setTheme('dark');
+   await t.act('enterScratch');
+   t.ok('非空临时对话工作区显示宿主空态', await t.waitForText('.rw-collection-empty', '还没有打开的项目'));

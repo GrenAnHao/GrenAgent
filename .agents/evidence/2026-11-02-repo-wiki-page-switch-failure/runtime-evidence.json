@@ -1,0 +1,141 @@
+{
+  "captured_at": "2026-11-02T15:58:34+08:00",
+  "sources": {
+    "database": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\agent-data.db",
+    "log": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\logs\\runtime-diag.jsonl"
+  },
+  "task": {
+    "id": "a36ba391-6588-4b11-ba3f-ed92e808611d",
+    "project_id": "f658fc02ef7446a202f5c339",
+    "workspace": "D:\\System Dir\\Downloads\\note-pocock-flow",
+    "created_at_cst": "2026-11-02T15:37:53.098+08:00",
+    "updated_at_cst": "2026-11-02T15:56:51.987+08:00",
+    "state": "failed",
+    "phase": "generate",
+    "intent": "repair",
+    "retry_of": "508bfdb4-6a15-4e0f-a5de-845ef5acc197",
+    "outcome": "partial",
+    "error": {
+      "code": "INVALID_PAGE_LINK",
+      "message": "INVALID_PAGE_LINK",
+      "retriable": false
+    },
+    "counts": {
+      "planned": 16,
+      "prepared": 9,
+      "failed": 3,
+      "blocked": 4,
+      "published": 0
+    },
+    "pipelineConfigHash": "knowledge-kernel-v1",
+    "executionPolicy_present": false,
+    "repoWiki_control_present": false,
+    "top_control_present": false,
+    "cancellationRequested_present": false,
+    "resumePolicy": "auto"
+  },
+  "runtime": {
+    "user_data": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent",
+    "main_pid": 820,
+    "main_started_at_cst": "2026-11-02T15:37:32.811495+08:00",
+    "repo_wiki_host_pid": 41816,
+    "host_started_at_cst": "2026-11-02T15:37:44.546829+08:00",
+    "host_path": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out\\main\\repo-wiki-host.cjs",
+    "host_file_modified_cst": "2026-11-02T15:37:32.6444137+08:00",
+    "host_file_bytes": 891521
+  },
+  "execution_counts": [
+    {
+      "kind": "model",
+      "state": "settled",
+      "n": 149
+    },
+    {
+      "kind": "tool",
+      "state": "settled",
+      "n": 299
+    },
+    {
+      "kind": "time",
+      "state": "settled",
+      "n": 461
+    }
+  ],
+  "model_usage_sum": {
+    "inputTokens": 640075,
+    "outputTokens": 158427,
+    "totalTokens": 1322534
+  },
+  "last_model_request_updated_at_cst": "2026-11-02T15:56:51.937+08:00",
+  "control_evidence": {
+    "agent_audit_matching_task": {
+      "job.create": 1
+    },
+    "agent_audit_action_counts_in_run_window": {
+      "job.create": 1
+    },
+    "runtime_diag_knowledge_action_count_in_run_window": 1,
+    "runtime_diag_repoWiki_action_count_in_run_window": 1,
+    "only_action_sample_at_cst": "2026-11-02T15:37:54.581+08:00",
+    "only_action_log_line": 10726,
+    "extra_pause_or_cancel_action_observed": false
+  },
+  "build_items_residual_running": [
+    {
+      "item_id": "generate:modules/examples",
+      "attempt": 1,
+      "state": "running",
+      "payload": null,
+      "error": null,
+      "updated_at_cst": "2026-11-02T15:42:49.114+08:00"
+    },
+    {
+      "item_id": "generate:modules/pocock/upstream",
+      "attempt": 1,
+      "state": "running",
+      "payload": null,
+      "error": null,
+      "updated_at_cst": "2026-11-02T15:49:32.397+08:00"
+    },
+    {
+      "item_id": "generate:modules/scripts/evidence",
+      "attempt": 1,
+      "state": "running",
+      "payload": null,
+      "error": null,
+      "updated_at_cst": "2026-11-02T15:52:14.646+08:00"
+    }
+  ],
+  "blocked_items": [
+    {
+      "item_id": "generate:modules/pocock/mattpocock-skills",
+      "updated_at_cst": "2026-11-02T15:56:51.967+08:00"
+    },
+    {
+      "item_id": "generate:modules/pocock/brainstorm",
+      "updated_at_cst": "2026-11-02T15:56:51.972+08:00"
+    },
+    {
+      "item_id": "generate:modules/pocock/visual-companion",
+      "updated_at_cst": "2026-11-02T15:56:51.978+08:00"
+    },
+    {
+      "item_id": "generate:modules/scripts/cli",
+      "updated_at_cst": "2026-11-02T15:56:51.984+08:00"
+    }
+  ],
+  "blocked_error": {
+    "code": "BLOCKED_BY_DEPENDENCY",
+    "message": "A required dependency did not complete",
+    "retriable": true
+  },
+  "invalid_link": null,
+  "invalid_link_note": "The three residual-running build rows have null payload/error. Parent task only persisted INVALID_PAGE_LINK; the concrete invalid Markdown link was not retained in inspected records.",
+  "interpretation": {
+    "job_state_is_authoritative": true,
+    "new_host_loaded": true,
+    "repair_uses_legacy_v1_metadata": true,
+    "page_switch_cancel_or_pause_not_observed": true,
+    "page_switch_timestamp_not_structurally_recorded": true
+  }
+}

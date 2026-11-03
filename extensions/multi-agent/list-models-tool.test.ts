@@ -23,18 +23,47 @@ beforeEach(() => {
 });
 
 describe("list_subagent_models", () => {
-  it("is not registered when policy is disabled", () => {
-    expect(harness({ enabled: false, allowlist: new Set(["a/b"]) })).toBeUndefined();
+  it("keeps discovery registered while ordinary self-selection is disabled", async () => {
+    const exec = harness({ enabled: false, allowlist: new Set(["a/b"]), })!;
+    expect(exec).toBeTypeOf("function");
+    const r = await exec("t", {}, null, null, ctxWith([m("a", "b")]));
+    expect(r.content[0].text).toContain("普通子代理模型自选未开启");
+    expect(r.content[0].text).not.toContain("a/b");
+  });
+
+  it("disabled: still shows the default route actually used and its thinking levels", async () => {
+    // 自选关闭时子代理仍跑在默认路由上，父模型必须能看到这条路由的可用档位。
+    cfg({ SUBAGENT_MODEL: "a/b", SUBAGENT_MODEL_CHEAP: "a/b", SUBAGENT_MODEL_STRONG: "a/b" });
+    const exec = harness({ enabled: false, allowlist: new Set() })!;
+    const text = (await exec("t", {}, null, null, ctxWith([m("a", "b", true, "B model")]))).content[0].text;
+    expect(text).toContain("普通子代理模型自选未开启");
+    expect(text).toContain("a/b — B model；思考档：off/minimal/low/medium/high");
+  });
+
+  it("disabled: falls back to the parent route when no sub-agent model is configured", async () => {
+    const exec = harness({ enabled: false, allowlist: new Set() })!;
+    const text = (await exec("t", {}, null, null, { ...ctxWith([m("a", "b", false, "B")]), model: { provider: "a", id: "b" } })).content[0].text;
+    expect(text).toContain("a/b — B；思考档：off");
   });
 
   it("lists allowlist ∩ available with thinking levels", async () => {
     const exec = harness({ enabled: true, allowlist: new Set(["a/b", "a/c", "z/z"]) })!;
     const r = await exec("t", {}, null, null, ctxWith([m("a", "b", true, "B model"), m("a", "c", false), m("q", "q")]));
     const text = r.content[0].text;
-    expect(text).toContain("a/b — B model；思考档：off/minimal/low/medium/high/xhigh/max");
+    // 与 SDK 的 getSupportedThinkingLevels 一致：没写 xhigh / max 映射就是没有这两档。
+    expect(text).toContain("a/b — B model；思考档：off/minimal/low/medium/high");
     expect(text).toContain("a/c — c；思考档：off");
     expect(text).not.toContain("z/z");
     expect(text).not.toContain("q/q");
+  });
+
+  it("hides levels the model maps to null and only shows xhigh / max when mapped", async () => {
+    const exec = harness({ enabled: true, allowlist: new Set(["a/b"]) })!;
+    const model = { provider: "a", id: "b", name: "b", reasoning: true, thinkingLevelMap: { low: "low", medium: null, high: "high", xhigh: "xhigh" } };
+    const text = (await exec("t", {}, null, null, ctxWith([model]))).content[0].text;
+    expect(text).toContain("思考档：off/minimal/low/high/xhigh");
+    expect(text).not.toContain("medium");
+    expect(text).not.toContain("max");
   });
 
   it("filters by provider", async () => {

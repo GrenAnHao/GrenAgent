@@ -6,7 +6,11 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { toWireError } from '../../agentProcess/rpcPeer';
 import { CodeGraphService } from './codeGraphService';
+import { applyHostLimits } from './hostLimits';
 import type { WorkerMessage, WorkerRequest, WorkerRole } from './workerProtocol';
+
+// SDK 在第一次请求时才加载。旗标必须打在这个 isolate 上，父进程的 setFlagsFromString 传不过来。
+applyHostLimits();
 
 if (!parentPort) throw new Error('codegraph worker must run in a worker thread');
 const port = parentPort;

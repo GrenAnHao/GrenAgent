@@ -1,7 +1,7 @@
 // SQLite-backed registry of sub-agents, so the main agent and the UI can later
 // query (`status`), list, or stop (`cancel`) a sub-agent. Background results are
 // pushed to the parent as subagent-settled notices; this table is the record.
-// Project-scoped at <cwd>/.pi/subagents/registry.db (mirrors memory/checkpoint).
+// Project-scoped at <cwd>/.pi/subagents/registry.db.
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";

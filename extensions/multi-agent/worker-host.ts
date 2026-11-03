@@ -9,6 +9,7 @@ import { RpcPeer, type WireMessage } from "../_shared/rpc-peer.js";
 import { setApprovalUpstream, type ApprovalOutcome } from "../_shared/approval-route.js";
 import { runInWorkspace, type WorkspaceContext } from "../_shared/workspace-context.js";
 import { openResumedChildSession } from "./activation.js";
+import { routingModeFromConfig, withRoutingMode } from "../_shared/ultra-context.js";
 import { openEmbeddedChildSession, type EmbeddedSubagentOpts, type PreparedEmbedded } from "./embedded-runner.js";
 import { currentChild, rejectionWasHandled, reportLeakedError, trackUnhandledRejection } from "../_shared/leak-owner.js";
 import { guardListener } from "../_shared/guard-listener.js";
@@ -143,7 +144,13 @@ export async function runSubagentWorker(): Promise<void> {
         ...prepared.ctx,
         ...(prepared.parentSessionId ? { sessionId: () => prepared.parentSessionId } : {}),
       };
-      const full: PreparedEmbedded = { ...prepared, ctx: ctx as PreparedEmbedded["ctx"], cleanup: () => {} };
+      const full: PreparedEmbedded = {
+        ...prepared,
+        // 旧宿主没有这一项时按派生配置里的域键回退；都没有就是 ordinary。
+        routingMode: prepared.routingMode ?? routingModeFromConfig(prepared.childConfig) ?? "ordinary",
+        ctx: ctx as PreparedEmbedded["ctx"],
+        cleanup: () => {},
+      };
       const childOpts: EmbeddedSubagentOpts = {
         ...opts,
         onUpdate: (update) => peer.emit("update", cloneable(update)),
@@ -166,6 +173,9 @@ export async function runSubagentWorker(): Promise<void> {
       const { sessionPath, ctx: resumeCtx } = params as unknown as WorkerResumeRequest;
       ctx = resumeCtx;
       const resumed = await inCtx(() => openResumedChildSession(sessionPath));
+      // 之后每条 RPC（prompt / sendCustomMessage / appendCustomEntry…）都用子会话自己的域，
+      // 不跟着宿主之后给这个 worker 的上下文或被改过的父会话模式走。
+      if (ctx) ctx = withRoutingMode(ctx, resumed.routingMode);
       hosted = resumed as unknown as HostedSession;
       forward(hosted);
       const session = resumed.session as unknown as { sessionId?: string; model?: { provider?: string; id?: string } };
@@ -176,6 +186,7 @@ export async function runSubagentWorker(): Promise<void> {
         model: session.model ? { provider: session.model.provider, id: session.model.id } : undefined,
         entries: cloneable(resumed.sessionManager.getEntries()),
         state: state(),
+        routingMode: resumed.routingMode,
       };
     },
     prompt: async (params) => {

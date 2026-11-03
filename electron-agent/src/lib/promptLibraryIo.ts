@@ -1,5 +1,6 @@
 import { invoke } from '../platform/runtime';
 import type { PromptParam } from '@extensions/prompt-commands/syntax';
+import type { AgentMode } from '../stores/modeStore';
 
 export interface PromptCommandInfo {
   name: string;
@@ -19,6 +20,8 @@ export interface RuleInfo {
   title: string;
   enabled: boolean;
   body: string;
+  /** 适用模式；缺省 = 所有模式。 */
+  modes?: AgentMode[];
   error?: string;
 }
 
@@ -56,6 +59,7 @@ export function saveContextRule(input: {
   title: string;
   enabled: boolean;
   body: string;
+  modes?: AgentMode[];
 }): Promise<RuleInfo> {
   return invoke<RuleInfo>('save_context_rule', input);
 }

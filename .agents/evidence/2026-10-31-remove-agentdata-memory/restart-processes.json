@@ -1,0 +1,19 @@
+{
+  "mainPid": 85440,
+  "window": {
+    "MainWindowHandle": {
+      "value": 6692614
+    },
+    "MainWindowTitle": "GrenAgent"
+  },
+  "children": [
+    {
+      "ProcessId": 4692,
+      "Name": "electron.exe"
+    },
+    {
+      "ProcessId": 43580,
+      "Name": "electron.exe"
+    }
+  ]
+}

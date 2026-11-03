@@ -21,7 +21,7 @@ Status: implemented
 - `readComposerDraft(editor)` 返回 `{ text, json? }`。`text` 仍是 `readComposerText` 的输出（发送、空态判断、消息编辑都还用它）；`json` 是 lobehub `getDocument('json')` 给的 `{ root }`，节点由各自的 `exportJSON` 写出（`CommandPillNode` 带 name / params / values，`ChatTagNode` 带 category / label / value）。文本为空时不带 json。
 - `writeComposerDraft(editor, draft)`：有 json 就 `setDocument('json', json)`；解析抛错（节点类型没注册、格式变了）或没有 json 时退回 `writeComposerText(text)`。也接受纯字符串，老调用方和单测桩不用改。
 
-`chatDraftStore` 的值是 `string | { text, json }`，`getDraft` 统一返回 `{ text, json? }`，老的字符串草稿读成 `{ text }`。`setDraft` 比较 text 和 json 序列化结果，没变不写。
+`chatDraftStore` 的值是 `string | { text, json }`，`getDraft` 统一返回 `{ text, json? }`，老的字符串草稿读成 `{ text }`。`setDraft` 比较 text 和 json 序列化结果，没变不写。当前按 owner 单键写 `pi-chat-draft:<encodedOwner>`，原 `pi-chat-drafts` 整表只读兼容；未落盘用独立 draftId，见[会话独立记忆](2026-10-28-session-preferences-behavior.md)。
 
 `ChatInput` 存草稿（debounce、切会话、卸载）读 `readComposerDraft`，恢复走 `writeComposerDraft`。发送失败回填仍走文本：那条路径的快照本来就只有文本，失败时胶囊已经被 `cleanDocument` 清掉，按文本回填和原来一致。
 
@@ -29,7 +29,7 @@ Status: implemented
 
 ### 图片和粘贴块进 IndexedDB
 
-`composerFiles` store 挂 zustand `persist`，storage 是 `electron-agent/src/lib/idbStorage.ts`（一个库一个 kv 对象仓，`getItem / setItem / removeItem` 都返回 Promise；`indexedDB` 不存在时退化成空操作，jsdom 单测下 store 行为和以前一样）。库名和 key 都是 `pi-composer-files`。
+`composerFiles` store 挂 zustand `persist`，通过 `composerFilesStorage.ts` 和 `idbStorage.ts` 写入 IndexedDB。库为 `pi-composer-files`，独立 owner 桶是权威，原同名整表键保留兼容投影；读取旧桶时用原子 add 补迁，避免跨窗口整表覆盖。无 IndexedDB 时退化成空操作。完整规则见[会话独立记忆](2026-10-28-session-preferences-behavior.md)，本文的 JSON 与图片存储选型理由保持。
 
 - `partialize` 只留 `byKey`，图片去掉 `url`（它是整份 data URL，和 `data` 重复一倍；blob URL 重启后也失效）。
 - `merge` 时 `reviveComposerFiles` 按 `data:${mimeType};base64,${data}` 重建 `url`、丢掉形状不对的条目，再 `mergeComposerFiles` 把存档和内存合并、内存优先：hydration 是异步的，启动瞬间用户已经贴进去的东西不能被存档覆盖。
@@ -52,7 +52,7 @@ Status: implemented
 - 切会话、重启后，胶囊（含填了一半的参数）、`@文件` 标签、图片、粘贴块都原样回来。旧的字符串草稿照常恢复成文本。
 - 草稿体积：localStorage 里每份草稿多一份 Lexical JSON；图片在 IndexedDB，不占 localStorage。
 - JSON 里带的是 Lexical 节点类型名和版本。lobehub / lexical 升级改了序列化格式，旧草稿会解析失败，退回文本，用户看到的是 `/名 "参数"` 文字，和以前一样。
-- 草稿 key 还是按会话路径，会话删了 key 不会跟着删（文本草稿一直如此）。图片进 IndexedDB 后残留的体积更大。本次不处理，留给会话删除流程。
+- 已建会话使用会话路径，未落盘使用独立 draftId；首发过户，删除成功清理对应存档并阻止迟到回写。该生命周期与跨窗口写入规则由[会话独立记忆](2026-10-28-session-preferences-behavior.md)补齐，本篇不再保留“删除不清理”的旧边界。
 - `MessageEditBox`（编辑历史消息）仍按文本初始化，不走 JSON：它的初值来自已发出的消息文本，本来就没有胶囊节点。
 - 取代了 [命令与规则](../architecture/2026-10-02-commands-rules-and-tool-surface.md) Consequences 里「草稿恢复胶囊会变回调用文本」那条；那条改为只描述发送失败回填。
 

@@ -1,3 +1,4 @@
+import { supportsFastMode } from '../../../extensions/_shared/fast-mode.js';
 import { guardListener } from '../../../extensions/_shared/guard-listener.js';
 import { promptWasAccepted } from '../../../extensions/_shared/promptDisposition.js';
 import { runInWorkspace, type WorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
@@ -50,6 +51,8 @@ export function snapshotSessionModel(model: unknown): Record<string, unknown> | 
   if (typeof item.api === 'string') snap.api = item.api;
   if (typeof item.baseUrl === 'string') snap.baseUrl = item.baseUrl;
   if (typeof item.reasoning === 'boolean') snap.reasoning = item.reasoning;
+  if (Array.isArray(item.input)) snap.input = item.input.filter((value) => typeof value === 'string');
+  snap.fast = supportsFastMode(item);
   if (item.thinkingLevelMap && typeof item.thinkingLevelMap === 'object') {
     snap.thinkingLevelMap = { ...(item.thinkingLevelMap as Record<string, unknown>) };
   }

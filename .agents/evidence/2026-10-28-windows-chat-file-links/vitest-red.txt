@@ -1,0 +1,120 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:83444) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:44464) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/lib/hrefKinds.test.ts (10 tests | 4 failed) 26ms
+     × Windows 会话链接恢复真实盘符路径：/D:/OneDrive/Project%20Files/Pi/README.md 12ms
+     × Windows 会话链接恢复真实盘符路径：/D%3A/OneDrive/Project%20Files/Pi/README.md 2ms
+     × Windows 会话链接恢复真实盘符路径：D%3A/OneDrive/Project%20Files/Pi/README.md 1ms
+     × POSIX 根路径不剥离，Windows 链接仍保留 query/hash 规则 3ms
+Not implemented: navigation to another Document
+ ❯ |renderer| src/features/links/AppLinkGuard.test.tsx (9 tests | 1 failed) 119ms
+     × 会话中 /D:/ 形式的正文和图片链接都使用真实项目根 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/lib/hrefKinds.test.ts > classifyHref > Windows 会话链接恢复真实盘符路径：/D:/OneDrive/Project%20Files/Pi/README.md
+ FAIL  |renderer| src/lib/hrefKinds.test.ts > classifyHref > Windows 会话链接恢复真实盘符路径：/D%3A/OneDrive/Project%20Files/Pi/README.md
+AssertionError: expected { kind: 'path', …(3) } to deeply equal { kind: 'path', …(3) }
+
+- Expected
++ Received
+
+  {
+    "hash": "",
+    "kind": "path",
+-   "path": "D:/OneDrive/Project Files/Pi/README.md",
++   "path": "/D:/OneDrive/Project Files/Pi/README.md",
+    "rooted": true,
+  }
+
+ ❯ src/lib/hrefKinds.test.ts:46:32
+     44|     'D%3A/OneDrive/Project%20Files/Pi/README.md',
+     45|   ])('Windows 会话链接恢复真实盘符路径：%s', (href) => {
+     46|     expect(classifyHref(href)).toEqual({ kind: 'path', path: 'D:/OneDr…
+       |                                ^
+     47|   });
+     48|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  |renderer| src/lib/hrefKinds.test.ts > classifyHref > Windows 会话链接恢复真实盘符路径：D%3A/OneDrive/Project%20Files/Pi/README.md
+AssertionError: expected { kind: 'path', …(3) } to deeply equal { kind: 'path', …(3) }
+
+- Expected
++ Received
+
+  {
+    "hash": "",
+    "kind": "path",
+    "path": "D:/OneDrive/Project Files/Pi/README.md",
+-   "rooted": true,
++   "rooted": false,
+  }
+
+ ❯ src/lib/hrefKinds.test.ts:46:32
+     44|     'D%3A/OneDrive/Project%20Files/Pi/README.md',
+     45|   ])('Windows 会话链接恢复真实盘符路径：%s', (href) => {
+     46|     expect(classifyHref(href)).toEqual({ kind: 'path', path: 'D:/OneDr…
+       |                                ^
+     47|   });
+     48|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  |renderer| src/lib/hrefKinds.test.ts > classifyHref > POSIX 根路径不剥离，Windows 链接仍保留 query/hash 规则
+AssertionError: expected { kind: 'path', …(3) } to deeply equal { kind: 'path', …(3) }
+
+- Expected
++ Received
+
+  {
+    "hash": "intro",
+    "kind": "path",
+-   "path": "D:/repo/a.md",
++   "path": "/D:/repo/a.md",
+    "rooted": true,
+  }
+
+ ❯ src/lib/hrefKinds.test.ts:51:57
+     49|   it('POSIX 根路径不剥离，Windows 链接仍保留 query/hash 规则', () => {
+     50|     expect(classifyHref('/docs/guide.md')).toMatchObject({ path: '/doc…
+     51|     expect(classifyHref('/D:/repo/a.md?plain=1#intro')).toEqual({ kind…
+       |                                                         ^
+     52|   });
+     53|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  |renderer| src/features/links/AppLinkGuard.test.tsx > AppLinkGuard > 会话中 /D:/ 形式的正文和图片链接都使用真实项目根
+AssertionError: expected 1st "vi.fn()" call to have been called with [ …(2) ]
+
+- Expected
++ Received
+
+  [
+-   "D:/OneDrive/Project Files/Pi/.agents/evidence/README.md",
+-   "D:\\OneDrive\\Project Files\\Pi",
++   "/D:/OneDrive/Project Files/Pi/.agents/evidence/README.md",
++   "/D:/OneDrive/Project Files/Pi/.agents/evidence",
+  ]
+
+ ❯ src/features/links/AppLinkGuard.test.tsx:104:37
+    102|     navigationBlocked(getByText('查看验证记录'));
+    103|     navigationBlocked(getByText('查看截图'));
+    104|     expect(mocks.openWorkspaceFile).toHaveBeenNthCalledWith(1, 'D:/One…
+       |                                     ^
+    105|     expect(mocks.openWorkspaceFile).toHaveBeenNthCalledWith(2, 'D:/One…
+    106|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  5 failed | 14 passed (19)
+   Start at  14:13:16
+   Duration  12.72s (transform 515ms, setup 14.05s, import 652ms, tests 145ms, environment 8.01s)
+

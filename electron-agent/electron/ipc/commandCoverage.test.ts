@@ -16,10 +16,8 @@ const expectedCommands = [
   'agentData_admin_jobs_get', 'agentData_admin_jobs_cancel', 'agentData_admin_config_get', 'agentData_admin_config_update',
   'agentData_admin_jobs_remove', 'agentData_admin_jobs_clear',
   'agentData_admin_audit_list', 'agentData_admin_diagnostics', 'agentData_admin_export', 'agentData_admin_import',
-  'agentData_memory_overview', 'agentData_code_status', 'agentData_jobs_create',
-  'agentData_memory_search', 'agentData_memory_delete',
-  'agentData_code_search', 'agentData_code_projects',
-  'agentData_code_call', 'agentData_memory_list', 'agentData_memory_read', 'agentData_memory_create', 'agentData_memory_update', 'agentData_memory_conversations_list', 'agentData_memory_conversations_read',
+  'agentData_code_status', 'agentData_jobs_create',
+  'agentData_code_search', 'agentData_code_projects', 'agentData_code_call',
   'agentData_tasks_list', 'agentData_tasks_read', 'agentData_tasks_previewRetry', 'agentData_tasks_retry', 'agentData_audit_query', 'agentData_audit_export', 'agentData_diagnostics_check', 'agentData_diagnostics_open', 'agentData_overview',
   'agentData_wiki_create', 'agentData_wiki_read', 'agentData_wiki_list', 'agentData_wiki_update', 'agentData_wiki_remove', 'agentData_wiki_resetDraft', 'agentData_wiki_ingest',
   'agentData_wiki_rawWrite', 'agentData_wiki_rawRemove', 'agentData_wiki_rawList', 'agentData_wiki_rawRead',
@@ -38,10 +36,12 @@ describe('Rust handler coverage', () => {
     expect(registered).toEqual(expect.arrayContaining([...expectedCommands]));
   });
 
-  it('rejects removed Goal IPC commands', async () => {
+  it('rejects removed Goal and Memory IPC commands', async () => {
     registerIpcHandlers({ agentData: {} } as any);
     const invoke = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === IPC_CHANNELS.invoke)?.[1];
     if (!invoke) throw new Error('invoke handler not registered');
-    await expect(invoke({}, { command: 'agentData_goal_get', args: { sessionId: 's', workspace: '/repo' } })).rejects.toThrow();
+    for (const command of ['agentData_goal_get', 'agentData_memory_search', 'agentData_memory_create', 'agentData_memory_overview']) {
+      await expect(invoke({}, { command, args: { sessionId: 's', workspace: '/repo' } })).rejects.toThrow();
+    }
   });
 });

@@ -1,29 +1,29 @@
 # 第三方依赖清单
 
-本文件由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 `electron-agent/package-lock.json` 生成，不要手改。
+本文件由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 pnpm 安装的生产依赖图（`electron-agent/pnpm-lock.yaml`）及 `vendor/repo-wiki` 生成，不要手改。
 只列随安装包分发的生产依赖；开发依赖（vitest、electron-builder、sharp、lightningcss 等）不进包，不在此列。
-每个包的许可原文随安装包放在 `resources/licenses/<包名>/`，索引在 `resources/licenses/INDEX.md`。
+每个包的许可原文随安装包放在 `resources/licenses/<包名>/`，多版本包放在 `<包名>/<版本>/`，索引在 `resources/licenses/INDEX.md`。
 
 ## 许可证分布
 
 | 许可证 | 包数 |
 | --- | --- |
-| MIT | 744 |
-| ISC | 47 |
-| Apache-2.0 | 39 |
-| BSD-3-Clause | 26 |
+| MIT | 764 |
+| ISC | 55 |
+| Apache-2.0 | 42 |
+| BSD-3-Clause | 33 |
+| BSD-2-Clause | 3 |
 | apache-2.0 | 2 |
-| BSD-2-Clause | 2 |
+| (MPL-2.0 OR Apache-2.0) | 2 |
 | Unlicense | 2 |
+| BlueOak-1.0.0 | 2 |
+| 0BSD | 2 |
 | OFL-1.1 | 1 |
 | (BSD-3-Clause AND Apache-2.0) | 1 |
-| (MPL-2.0 OR Apache-2.0) | 1 |
 | EPL-2.0 | 1 |
 | (MIT OR WTFPL) | 1 |
 | UNKNOWN | 1 |
-| BlueOak-1.0.0 | 1 |
 | (BSD-2-Clause OR MIT OR Apache-2.0) | 1 |
-| 0BSD | 1 |
 | MIT AND ISC | 1 |
 
 ## 需要留意的条目
@@ -35,7 +35,8 @@
 | --- | --- | --- | --- |
 | @fontsource/inter | 5.3.0 | OFL-1.1 | LICENSE |
 | chroma-js | 3.2.0 | (BSD-3-Clause AND Apache-2.0) | LICENSE |
-| dompurify | 3.4.15 | (MPL-2.0 OR Apache-2.0) | LICENSE、LICENSE-MPL |
+| dompurify | 3.4.14 | (MPL-2.0 OR Apache-2.0) | LICENSE、LICENSE-MPL |
+| dompurify | 3.4.17 | (MPL-2.0 OR Apache-2.0) | LICENSE、LICENSE-MPL |
 | elkjs | 0.11.1 | EPL-2.0 | LICENSE.md |
 | expand-template | 2.0.3 | (MIT OR WTFPL) | LICENSE |
 | khroma | 2.1.0 | UNKNOWN | license |
@@ -53,17 +54,9 @@
 - @ant-design/icons@6.3.4
 - @ant-design/icons-svg@4.6.0
 - @ant-design/react-slick@2.0.0
-- @antfu/install-pkg@2.0.1
+- @antfu/install-pkg@1.1.0
 - @anthropic-ai/sdk@0.129.0
 - @ast-grep/napi@0.45.3
-- @ast-grep/napi-darwin-arm64@0.45.3
-- @ast-grep/napi-darwin-x64@0.45.3
-- @ast-grep/napi-linux-arm64-gnu@0.45.3
-- @ast-grep/napi-linux-arm64-musl@0.45.3
-- @ast-grep/napi-linux-x64-gnu@0.45.3
-- @ast-grep/napi-linux-x64-musl@0.45.3
-- @ast-grep/napi-win32-arm64-msvc@0.45.3
-- @ast-grep/napi-win32-ia32-msvc@0.45.3
 - @ast-grep/napi-win32-x64-msvc@0.45.3
 - @babel/code-frame@7.29.7
 - @babel/generator@7.29.8
@@ -73,10 +66,13 @@
 - @babel/helper-validator-identifier@7.29.7
 - @babel/parser@7.29.8
 - @babel/runtime@7.29.7
+- @babel/runtime@8.0.5
 - @babel/template@7.29.7
 - @babel/traverse@7.29.8
 - @babel/types@7.29.8
+- @base-ui/react@1.6.0
 - @base-ui/react@1.7.0
+- @base-ui/utils@0.3.1
 - @base-ui/utils@0.3.2
 - @braintree/sanitize-url@7.1.2
 - @codemirror/autocomplete@6.20.3
@@ -113,11 +109,6 @@
 - @codemirror/theme-one-dark@6.1.3
 - @codemirror/view@6.43.14
 - @colbymchenry/codegraph@1.6.2
-- @colbymchenry/codegraph-darwin-arm64@1.6.2
-- @colbymchenry/codegraph-darwin-x64@1.6.2
-- @colbymchenry/codegraph-linux-arm64@1.6.2
-- @colbymchenry/codegraph-linux-x64@1.6.2
-- @colbymchenry/codegraph-win32-arm64@1.6.2
 - @colbymchenry/codegraph-win32-x64@1.6.2
 - @dnd-kit/accessibility@3.1.1
 - @dnd-kit/core@6.3.1
@@ -137,11 +128,13 @@
 - @emotion/cache@11.14.0
 - @emotion/css@11.13.5
 - @emotion/hash@0.8.0
+- @emotion/hash@0.9.2
 - @emotion/is-prop-valid@1.4.0
 - @emotion/memoize@0.9.0
 - @emotion/react@11.14.0
 - @emotion/serialize@1.3.3
 - @emotion/sheet@1.4.0
+- @emotion/unitless@0.10.0
 - @emotion/unitless@0.7.5
 - @emotion/use-insertion-effect-with-fallbacks@1.2.0
 - @emotion/utils@1.4.2
@@ -156,7 +149,7 @@
 - @homebridge/node-pty-prebuilt-multiarch@0.14.1
 - @hono/node-server@2.1.1
 - @iconify/types@2.0.0
-- @iconify/utils@3.1.7
+- @iconify/utils@3.1.4
 - @jridgewell/gen-mapping@0.3.13
 - @jridgewell/resolve-uri@3.1.2
 - @jridgewell/sourcemap-codec@1.6.0
@@ -198,7 +191,7 @@
 - @lobehub/emojilib@1.0.0
 - @lobehub/fluent-emoji@4.1.1
 - @lobehub/icons@5.18.0
-- @lobehub/streamdown@1.3.0
+- @lobehub/streamdown@1.0.0
 - @lobehub/ui@5.32.7
 - @marijn/find-cluster-break@1.0.4
 - @mdx-js/mdx@3.1.1
@@ -207,7 +200,7 @@
 - @modelcontextprotocol/sdk@1.30.0
 - @pierre/theme@1.1.0
 - @preact/signals-core@1.14.4
-- @primer/octicons@19.36.0
+- @primer/octicons@19.33.0
 - @radix-ui/primitive@1.1.7
 - @radix-ui/react-arrow@1.1.15
 - @radix-ui/react-compose-refs@1.1.5
@@ -251,6 +244,7 @@
 - @rc-component/overflow@1.0.1
 - @rc-component/pagination@1.4.0
 - @rc-component/picker@1.12.2
+- @rc-component/portal@1.1.2
 - @rc-component/portal@2.2.1
 - @rc-component/progress@1.0.3
 - @rc-component/qrcode@2.0.0
@@ -267,6 +261,7 @@
 - @rc-component/tour@2.4.0
 - @rc-component/tree@1.4.0
 - @rc-component/tree-select@1.16.1
+- @rc-component/trigger@2.3.1
 - @rc-component/trigger@3.10.1
 - @rc-component/upload@1.1.1
 - @rc-component/util@1.13.0
@@ -321,14 +316,16 @@
 - @types/estree-jsx@1.0.5
 - @types/geojson@7946.0.16
 - @types/hast@3.0.5
+- @types/js-cookie@3.0.6
 - @types/katex@0.16.8
 - @types/mdast@4.0.4
 - @types/mdx@2.0.14
 - @types/ms@2.1.0
-- @types/node@22.20.2
+- @types/node@22.20.3
 - @types/parse-json@4.0.2
 - @types/retry@0.12.0
 - @types/trusted-types@2.0.7
+- @types/unist@2.0.11
 - @types/unist@3.0.3
 - @types/whatwg-mimetype@3.0.2
 - @types/ws@8.18.1
@@ -336,27 +333,17 @@
 - @use-gesture/core@10.3.1
 - @use-gesture/react@10.3.1
 - @vscode/ripgrep@1.18.0
-- @vscode/ripgrep-darwin-arm64@1.18.0
-- @vscode/ripgrep-darwin-x64@1.18.0
-- @vscode/ripgrep-linux-arm@1.18.0
-- @vscode/ripgrep-linux-arm64@1.18.0
-- @vscode/ripgrep-linux-ia32@1.18.0
-- @vscode/ripgrep-linux-ppc64@1.18.0
-- @vscode/ripgrep-linux-riscv64@1.18.0
-- @vscode/ripgrep-linux-s390x@1.18.0
-- @vscode/ripgrep-linux-x64@1.18.0
-- @vscode/ripgrep-win32-arm64@1.18.0
-- @vscode/ripgrep-win32-ia32@1.18.0
 - @vscode/ripgrep-win32-x64@1.18.0
 - @xmldom/xmldom@0.9.12
 - accepts@2.0.0
 - acorn@8.18.0
 - acorn-jsx@5.3.2
 - agent-base@7.1.4
-- ahooks@3.10.0
+- agent-base@9.0.0
+- ahooks@3.9.7
 - ajv@8.20.0
 - ajv-formats@3.0.1
-- antd@6.6.5
+- antd@6.6.4
 - antd-style@4.1.0
 - assign-symbols@1.0.0
 - astring@1.9.0
@@ -378,6 +365,7 @@
 - call-bound@1.0.4
 - callsites@3.1.0
 - ccount@2.0.1
+- chalk@6.0.0
 - character-entities@2.0.2
 - character-entities-html4@2.1.0
 - character-entities-legacy@3.0.0
@@ -387,19 +375,24 @@
 - collapse-white-space@2.1.0
 - colord@2.10.0
 - comma-separated-tokens@2.0.3
+- commander@15.0.0
+- commander@7.2.0
+- commander@8.3.0
 - compute-scroll-into-view@3.1.1
 - content-disposition@1.1.0
 - content-type@1.0.5
+- content-type@2.1.0
 - convert-source-map@1.9.0
 - cookie@0.7.2
 - cookie-signature@1.2.2
 - cors@2.8.6
 - cose-base@1.0.3
+- cose-base@2.2.0
 - cosmiconfig@7.1.0
 - crelt@1.0.7
 - cross-spawn@7.0.6
 - csstype@3.2.3
-- cytoscape@3.34.3
+- cytoscape@3.34.2
 - cytoscape-cose-bilkent@4.1.0
 - cytoscape-fcose@2.2.0
 - dagre-d3-es@7.0.14
@@ -431,6 +424,7 @@
 - esast-util-from-js@2.0.1
 - escape-html@1.0.3
 - escape-string-regexp@4.0.0
+- escape-string-regexp@5.0.0
 - estree-util-attach-comments@3.0.0
 - estree-util-build-jsx@3.0.1
 - estree-util-is-identifier-name@3.0.0
@@ -439,6 +433,7 @@
 - estree-util-visit@2.0.0
 - estree-walker@3.0.3
 - etag@1.8.1
+- eventemitter3@4.0.7
 - eventemitter3@5.0.4
 - eventsource@3.0.7
 - eventsource-parser@3.1.1
@@ -446,10 +441,12 @@
 - express-rate-limit@8.7.0
 - extend@3.0.2
 - extend-shallow@2.0.1
+- extend-shallow@3.0.2
 - fast-deep-equal@3.1.3
-- fast-equals@5.4.2
+- fast-equals@5.4.1
 - fastdom@1.0.12
 - fetch-blob@3.2.0
+- fflate@0.8.2
 - file-selector@0.5.0
 - filter-obj@5.1.0
 - finalhandler@2.1.1
@@ -468,7 +465,7 @@
 - github-from-package@0.0.0
 - gopd@1.2.0
 - hachure-fill@0.5.2
-- happy-dom@20.14.3
+- happy-dom@20.12.0
 - has-symbols@1.1.0
 - hasown@2.0.4
 - hast-util-from-html@2.0.3
@@ -484,12 +481,16 @@
 - hast-util-to-text@4.0.2
 - hast-util-whitespace@3.0.0
 - hastscript@9.0.1
-- hono@4.13.7
+- hono@4.13.5
 - html-url-attributes@3.0.1
 - html-void-elements@3.0.0
 - http-errors@2.0.1
+- http-proxy-agent@9.1.0
 - https-proxy-agent@7.0.6
+- https-proxy-agent@9.1.0
+- iconv-lite@0.6.3
 - iconv-lite@0.7.3
+- ignore@7.0.5
 - ignore@7.0.8
 - immer@11.1.18
 - import-fresh@3.3.1
@@ -502,6 +503,7 @@
 - is-arrayish@0.2.1
 - is-core-module@2.16.2
 - is-decimal@2.0.1
+- is-extendable@0.1.1
 - is-extendable@1.0.1
 - is-hexadecimal@2.0.1
 - is-mobile@5.0.0
@@ -511,7 +513,7 @@
 - isobject@3.0.1
 - isomorphic.js@0.2.5
 - jiti@2.7.0
-- jose@6.2.12
+- jose@6.2.10
 - js-cookie@3.0.8
 - js-tokens@4.0.0
 - jsesc@3.1.0
@@ -522,8 +524,10 @@
 - json2mq@0.2.0
 - jwa@2.0.1
 - jws@4.0.1
-- katex@0.18.7
+- katex@0.16.47
+- katex@0.18.5
 - layout-base@1.0.2
+- layout-base@2.0.1
 - leva@0.10.1
 - lexical@0.42.0
 - lib0@0.2.117
@@ -535,7 +539,8 @@
 - lru_map@0.4.1
 - markdown-extensions@2.0.0
 - markdown-table@3.0.4
-- marked@18.0.12
+- marked@16.4.2
+- marked@18.0.11
 - math-intrinsics@1.1.0
 - mdast-util-find-and-replace@3.0.2
 - mdast-util-from-markdown@2.0.3
@@ -563,7 +568,9 @@
 - micromark@4.0.2
 - micromark-core-commonmark@2.0.3
 - micromark-extension-cjk-friendly@1.2.3
+- micromark-extension-cjk-friendly@2.0.1
 - micromark-extension-cjk-friendly-util@2.1.1
+- micromark-extension-cjk-friendly-util@3.0.1
 - micromark-extension-gfm@3.0.0
 - micromark-extension-gfm-autolink-literal@2.1.0
 - micromark-extension-gfm-footnote@2.1.0
@@ -600,6 +607,7 @@
 - micromark-util-types@2.0.2
 - mime-db@1.54.0
 - mime-types@3.0.2
+- mimic-response@3.1.0
 - minimist@1.2.8
 - mixin-deep@1.3.2
 - mkdirp-classic@0.5.3
@@ -609,6 +617,7 @@
 - ms@2.1.3
 - napi-build-utils@2.0.0
 - negotiator@1.1.0
+- node-abi@3.96.0
 - node-addon-api@8.9.2
 - node-domexception@1.0.0
 - node-fetch@3.3.2
@@ -624,6 +633,7 @@
 - parent-module@1.0.1
 - parse-entities@4.0.2
 - parse-json@5.2.0
+- parse5@7.3.0
 - parseurl@1.3.3
 - partial-json@0.1.7
 - path-data-parser@0.1.0
@@ -642,7 +652,7 @@
 - proxy-addr@2.0.7
 - proxy-agent-negotiate@1.1.0
 - pump@3.0.4
-- query-string@9.5.1
+- query-string@9.5.0
 - quickjs-wasi@3.6.2
 - range-parser@1.3.0
 - raw-body@3.0.2
@@ -660,19 +670,21 @@
 - re-resizable@6.11.2
 - react@19.2.8
 - react-avatar-editor@15.1.0
-- react-colorful@5.8.1
+- react-colorful@5.8.0
 - react-dom@19.2.8
 - react-draggable@4.7.1
 - react-dropzone@12.1.0
-- react-error-boundary@6.1.5
+- react-error-boundary@6.1.4
 - react-fast-compare@3.2.2
 - react-hotkeys-hook@5.3.3
+- react-is@16.13.1
+- react-is@18.3.1
 - react-is@19.3.0
 - react-markdown@10.1.0
 - react-merge-refs@3.0.2
 - react-rnd@10.5.3
 - react-smooth@4.0.4
-- react-zoom-pan-pinch@4.2.0
+- react-zoom-pan-pinch@4.0.4
 - readable-stream@3.6.2
 - recharts@2.15.4
 - recharts-scale@0.4.5
@@ -690,6 +702,7 @@
 - remark@15.0.1
 - remark-breaks@4.0.0
 - remark-cjk-friendly@1.2.3
+- remark-cjk-friendly@2.3.1
 - remark-gfm@4.0.1
 - remark-github@12.0.0
 - remark-math@6.0.0
@@ -698,12 +711,14 @@
 - remark-rehype@11.1.2
 - remark-stringify@11.0.0
 - remark-supersub@1.0.0
+- repo-wiki@2.0.0
 - require-from-string@2.0.2
 - reselect@5.3.0
 - resize-observer-polyfill@1.5.1
 - resolve@1.22.12
 - resolve-from@4.0.0
 - retry@0.12.0
+- retry@0.13.1
 - roughjs@4.6.6
 - router@2.2.0
 - safe-buffer@5.2.1
@@ -737,6 +752,7 @@
 - style-mod@4.1.4
 - style-to-js@1.1.21
 - style-to-object@1.0.14
+- stylis@4.2.0
 - stylis@4.4.0
 - supports-preserve-symlinks-flag@1.0.0
 - swr@2.5.1
@@ -745,7 +761,7 @@
 - tar-stream@2.2.0
 - throttle-debounce@5.0.2
 - tiny-invariant@1.3.3
-- tinyexec@1.3.1
+- tinyexec@1.3.0
 - to-vfile@8.0.0
 - toidentifier@1.0.1
 - trim-lines@3.0.1
@@ -760,17 +776,20 @@
 - undici-types@6.21.0
 - unified@11.0.5
 - unist-util-find-after@5.0.0
+- unist-util-is@5.2.1
 - unist-util-is@6.0.1
 - unist-util-position@5.0.0
 - unist-util-position-from-estree@2.0.0
 - unist-util-remove-position@5.0.0
 - unist-util-stringify-position@4.0.0
+- unist-util-visit@4.1.2
 - unist-util-visit@5.1.0
+- unist-util-visit-parents@5.1.3
 - unist-util-visit-parents@6.0.2
 - unpipe@1.0.0
 - url-join@5.0.0
 - use-merge-value@1.2.0
-- use-sync-external-store@1.7.0
+- use-sync-external-store@1.6.0
 - util-deprecate@1.0.2
 - uuid@14.0.2
 - v8n@1.5.1
@@ -778,6 +797,7 @@
 - vfile@6.0.3
 - vfile-location@5.0.3
 - vfile-message@4.0.3
+- virtua@0.49.3
 - virtua@0.51.3
 - w3c-keyname@2.2.8
 - web-namespaces@2.0.1
@@ -788,12 +808,14 @@
 - xterm-addon-fit@0.8.0
 - yjs@13.6.32
 - zod@3.25.76
+- zustand@3.7.2
 - zustand@5.0.15
 - zwitch@2.0.4
 
 ### ISC
 
 - @ungap/structured-clone@1.4.0
+- chownr@1.1.4
 - d3@7.9.0
 - d3-array@3.2.4
 - d3-axis@3.0.0
@@ -827,49 +849,57 @@
 - delaunator@5.1.0
 - graceful-fs@4.2.11
 - hast-util-from-dom@5.0.1
+- hosted-git-info@9.0.3
 - inherits@2.0.4
 - ini@1.3.8
+- internmap@1.0.1
 - internmap@2.0.3
 - isexe@2.0.0
+- lucide-react@0.469.0
+- lucide-react@0.562.0
 - lucide-react@1.47.0
 - once@1.4.0
 - picocolors@1.1.1
+- semver@7.8.5
 - setprototypeof@1.2.0
 - signal-exit@3.0.7
 - which@2.0.2
 - wrappy@1.0.2
+- yaml@1.10.3
+- yaml@2.9.0
 - yaml@2.9.1
 - zod-to-json-schema@3.25.2
 
 ### Apache-2.0
 
 - @aws-sdk/client-bedrock-runtime@3.1127.0
-- @aws-sdk/core@3.978.3
-- @aws-sdk/credential-provider-env@3.972.74
-- @aws-sdk/credential-provider-http@3.972.76
-- @aws-sdk/credential-provider-ini@3.973.19
-- @aws-sdk/credential-provider-login@3.972.81
-- @aws-sdk/credential-provider-node@3.972.86
-- @aws-sdk/credential-provider-process@3.972.74
-- @aws-sdk/credential-provider-sso@3.973.18
-- @aws-sdk/credential-provider-web-identity@3.972.80
-- @aws-sdk/eventstream-handler-node@3.972.36
-- @aws-sdk/middleware-eventstream@3.972.31
-- @aws-sdk/middleware-websocket@3.972.56
-- @aws-sdk/nested-clients@3.997.48
-- @aws-sdk/signature-v4-multi-region@3.996.48
+- @aws-sdk/core@3.978.0
+- @aws-sdk/credential-provider-env@3.972.71
+- @aws-sdk/credential-provider-http@3.972.73
+- @aws-sdk/credential-provider-ini@3.973.16
+- @aws-sdk/credential-provider-login@3.972.78
+- @aws-sdk/credential-provider-node@3.972.83
+- @aws-sdk/credential-provider-process@3.972.71
+- @aws-sdk/credential-provider-sso@3.973.15
+- @aws-sdk/credential-provider-web-identity@3.972.77
+- @aws-sdk/eventstream-handler-node@3.972.34
+- @aws-sdk/middleware-eventstream@3.972.29
+- @aws-sdk/middleware-websocket@3.972.53
+- @aws-sdk/nested-clients@3.997.45
+- @aws-sdk/signature-v4-multi-region@3.996.46
 - @aws-sdk/token-providers@3.1048.0
-- @aws-sdk/types@3.974.6
-- @aws-sdk/xml-builder@3.972.41
+- @aws-sdk/types@3.974.5
+- @aws-sdk/xml-builder@3.972.40
 - @aws/lambda-invoke-store@0.3.0
 - @chevrotain/types@11.1.2
 - @google/genai@2.21.0
-- @smithy/core@3.36.0
+- @silvia-odwyer/photon-node@0.3.4
+- @smithy/core@3.33.3
 - @smithy/credential-provider-imds@4.5.2
 - @smithy/fetch-http-handler@5.8.0
 - @smithy/node-http-handler@4.12.1
-- @smithy/signature-v4@5.7.4
-- @smithy/types@4.19.0
+- @smithy/signature-v4@5.7.3
+- @smithy/types@4.18.0
 - class-variance-authority@0.7.1
 - detect-libc@2.1.2
 - ecdsa-sig-formatter@1.0.11
@@ -878,6 +908,8 @@
 - gcp-metadata@8.1.2
 - google-auth-library@10.9.1
 - google-logging-utils@1.1.3
+- grok-mermaid@0.2.3
+- intersection-observer@0.12.2
 - long@5.3.2
 - openai@7.19.0
 - remend@1.3.1
@@ -897,10 +929,16 @@
 - @protobufjs/pool@1.1.0
 - @protobufjs/utf8@1.1.2
 - buffer-equal-constant-time@1.0.1
+- d3-array@2.12.1
 - d3-ease@3.0.1
+- d3-path@1.0.9
 - d3-sankey@0.12.3
+- d3-shape@1.3.7
+- diff@8.0.2
+- diff@8.0.4
 - diff@9.0.0
-- fast-uri@3.1.7
+- fast-uri@3.1.6
+- highlight.js@10.7.3
 - hoist-non-react-statics@3.3.2
 - ieee754@1.2.1
 - lit@3.3.3
@@ -910,22 +948,39 @@
 - qs@6.16.0
 - react-transition-group@4.4.5
 - rw@1.3.3
+- source-map@0.5.7
 - source-map@0.7.6
+
+### BSD-2-Clause
+
+- entities@6.0.1
+- entities@7.0.1
+- json-schema-typed@8.0.2
 
 ### apache-2.0
 
 - @pierre/diffs@1.2.12
 - @pierre/theming@0.0.2
 
-### BSD-2-Clause
+### (MPL-2.0 OR Apache-2.0)
 
-- entities@7.0.1
-- json-schema-typed@8.0.2
+- dompurify@3.4.14
+- dompurify@3.4.17
 
 ### Unlicense
 
 - fast-sha256@1.3.0
 - robust-predicates@3.0.3
+
+### BlueOak-1.0.0
+
+- lru-cache@11.5.2
+- minimatch@10.2.6
+
+### 0BSD
+
+- tslib@2.6.2
+- tslib@2.8.1
 
 ### OFL-1.1
 
@@ -934,10 +989,6 @@
 ### (BSD-3-Clause AND Apache-2.0)
 
 - chroma-js@3.2.0
-
-### (MPL-2.0 OR Apache-2.0)
-
-- dompurify@3.4.15
 
 ### EPL-2.0
 
@@ -951,17 +1002,9 @@
 
 - khroma@2.1.0
 
-### BlueOak-1.0.0
-
-- minimatch@10.2.6
-
 ### (BSD-2-Clause OR MIT OR Apache-2.0)
 
 - rc@1.2.8
-
-### 0BSD
-
-- tslib@2.8.1
 
 ### MIT AND ISC
 

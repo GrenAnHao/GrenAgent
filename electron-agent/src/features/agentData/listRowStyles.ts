@@ -1,7 +1,7 @@
 import { createStaticStyles, cssVar } from 'antd-style';
 
 /**
- * antd Button 充当多行列表行（概览最近项、Memory 列表、代码结果行）的共同布局。
+ * antd Button 充当多行列表行（概览最近项、代码结果行）的共同布局。
  *
  * antd 给 `.ant-btn` 写死了 `white-space: nowrap` 与 `align-items: center`，堆叠内容会被压成
  * 一行横向溢出；这里只覆盖布局，颜色仍由 antd 变体决定。antd 样式表 prepend 在 head 顶部，

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CodeGraphEngine, type CodeGraphSdk } from './codeGraphEngine';
+import { CodeGraphEngine, type CodeGraphEngineOptions, type CodeGraphSdk } from './codeGraphEngine';
 import { executeCodeGraphTool } from './codeGraphQuery';
 
 vi.mock('./codeGraphQuery', () => ({ executeCodeGraphTool: vi.fn(async () => ({ content: [], isError: false, structuredContent: { schemaVersion: 1, rows: [], nodes: [], edges: [] } })) }));
@@ -10,7 +10,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function fixture(initialized = true) {
+function fixture(initialized = true, extra: Partial<CodeGraphEngineOptions> = {}) {
   const graph = {
     close: vi.fn(), watch: vi.fn(),
     getStats: vi.fn(() => ({ fileCount: 2, nodeCount: 5, edgeCount: 6 })),
@@ -20,7 +20,7 @@ function fixture(initialized = true) {
     sync: vi.fn(async (_options?: unknown) => ({ filesAdded: 0, filesModified: 0, filesRemoved: 0 })),
   };
   const sdk = { CodeGraph: { open: vi.fn(async () => graph), init: vi.fn(async () => graph) }, isInitialized: vi.fn(() => initialized) };
-  const engine = new CodeGraphEngine({ loadSdk: async () => sdk as unknown as CodeGraphSdk });
+  const engine = new CodeGraphEngine({ loadSdk: async () => sdk as unknown as CodeGraphSdk, ...extra });
   engines.push(engine);
   return { engine, graph, sdk };
 }
@@ -68,6 +68,14 @@ describe('embedded CodeGraph lifecycle', () => {
     const { engine, graph } = fixture(false);
     graph.getIndexState.mockReturnValue('partial');
     await expect(engine.runSync('partial', '/repo')).rejects.toThrow(/partial/i);
+  });
+
+  it('retries once when the index commits during a read, and marks a second collision mixed', async () => {
+    let version = 1;
+    const { engine } = fixture(true, { dataVersion: () => version++ });
+    const result = await engine.call('/repo', 'codegraph_search', { query: 'a' });
+    expect(executeCodeGraphTool).toHaveBeenCalledTimes(2);
+    expect(result.structuredContent.meta).toEqual({ consistency: 'mixed' });
   });
 
   it('does not initialize an index during queries or status checks', async () => {

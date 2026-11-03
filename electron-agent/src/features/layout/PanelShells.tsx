@@ -51,7 +51,7 @@ export const SidebarShell = memo(function SidebarShell({ children }: SidebarShel
         onResizeLive={setLiveSidebarWidth}
         expand={sidebarVisible}
         onExpandChange={toggleSidebar}
-        backgroundColor={cssVar.colorBgLayout}
+        backgroundColor={`var(--gren-sidebar-bg, ${cssVar.colorBgLayout})`}
       >
         {drawerPresence.present ? null : children}
       </ResizeHandle>
@@ -104,7 +104,7 @@ export const RightPanelShell = memo(function RightPanelShell({ children }: Right
       onResizeLive={setLiveRightPanelWidth}
       expand={rightPanelVisible}
       onExpandChange={toggleRightPanel}
-      backgroundColor={cssVar.colorBgContainer}
+      backgroundColor={`var(--gren-content-bg, ${cssVar.colorBgContainer})`}
     >
       {children}
     </ResizeHandle>
@@ -130,7 +130,7 @@ export const TerminalShell = memo(function TerminalShell({ children }: TerminalS
       onResize={setTerminalHeight}
       expand={terminalOpen}
       onExpandChange={toggleTerminal}
-      backgroundColor={cssVar.colorBgContainer}
+      backgroundColor={`var(--gren-content-bg, ${cssVar.colorBgContainer})`}
     >
       {children}
     </ResizeHandle>

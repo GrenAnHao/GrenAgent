@@ -1,0 +1,50 @@
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\pause-drain-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.ts" b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+index 8d8f320e..33858b1e 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\pause-drain-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+@@ -71,7 +71,14 @@ export class KnowledgeKernelCoordinator {
+   const notify=()=>this.notify(store.getTask(taskId)!);
+   try {
+    while(true){
+-    if(signal.aborted||store.getTask(taskId)?.metadata?.repoWiki?.control){await Promise.allSettled(active.values());throw new Error('INTERRUPTED');}
++    if(signal.aborted||store.getTask(taskId)?.metadata?.repoWiki?.control){
++     const settled=await Promise.all(active.values());
++     for(const {node,result} of settled){if(!result||result.disposition!=='prepared')continue;try{
++      const current=graph.nodes.find(item=>item.id===node.id);if(!current||current.inputHash!==result.inputHash||result.taskId!==taskId||result.phase!==node.phase||result.itemId!==node.id||!isDeepStrictEqual(result.fence,fence))continue;
++      const next=advanceStageGraph(graph,node.id,result.payload as Record<string,unknown>);store.commitItem(result,result.stageAttempt);graph=next;this.updateCounts(taskId,fence,graph);
++     }catch{/* Invalid or stale results stay unacknowledged for recovery. */}}
++     throw new Error('INTERRUPTED');
++    }
+     let restarted=false;
+     for(const node of selectDispatchableItems(graph,new Set(active.keys()),failed,policy)) {
+      if(signal.aborted||store.getTask(taskId)?.metadata?.repoWiki?.control)break;
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\pause-drain-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.test.ts" b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+index 37bb0689..a14ed2d2 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\pause-drain-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.test.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+@@ -136,6 +136,15 @@ it('retries a paused task after a sibling releases the same write lease',async()
+  finally{claim.mockRestore();await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
+ },30000);
+ 
++it.each(['both','failed','stale'])('v2 drains all prepared concurrent pages on pause (%s)',async scenario=>{
++ const firstFails=scenario==='failed',stale=scenario==='stale';
++ const base=mkdtempSync(join(tmpdir(),'knowledge-pause-drain-')),root=join(base,'src');mkdirSync(root);writeFileSync(join(root,'readme.md'),'# project\n');const engine=new WorkspaceEngine(join(base,'data')),db=new DatabaseSync(':memory:'),store=new KnowledgeBuildStore(db,{controllerEpoch:'epoch'}),project=new KnowledgeProjectPort(engine),p=engine.create_project(root,'en'),prepared=await project.prepare(p.id,'wiki');const active=new Set<string>();const defs=['a','b'].map(id=>({id,title:id,goal:id,dependencies:[],expand:false}));let drainedStates:string[]=[];
++ const executeStage=async(req:StageExecutionRequest,signal:AbortSignal):Promise<StageExecutionResult>=>{const sources=[{path:'readme.md',hash:prepared.source.hashes['readme.md'],start:1,end:1}];const payload=req.phase==='overview'?{summary:'Project',sources}:req.phase==='plan'?{items:defs}:req.phase==='catalogue'?{children:defs}:{markdown:'# Page',sources};let failed=false;if(req.phase==='generate'){active.add(req.itemId);await new Promise<void>(resolve=>signal.addEventListener('abort',()=>setTimeout(resolve,req.itemId==='generate:a'?0:25),{once:true}));failed=firstFails&&req.itemId==='generate:a';}return {version:1,taskId:req.taskId,fence:req.fence,phase:req.phase,itemId:req.itemId,stageAttempt:req.attempt,sequence:1,inputHash:stale&&req.itemId==='generate:b'?'stale-input':req.inputHash,outputHash:hashKnowledgePayload(failed?null:payload),payload:failed?null:payload,evidence:[{path:'readme.md',hash:sources[0].hash,startLine:1,endLine:1,kind:'read'}],dependencies:[],disposition:failed?'failed':'prepared',...(failed?{error:{code:'MODEL_ERROR',message:'aborted',retriable:false}}:{})};};
++ const c=new KnowledgeKernelCoordinator({store,project,bindModel:async()=>binding,executeStage,abortStage:async()=>{},drainModels:async(taskId)=>{drainedStates=store.listItems(taskId).filter(i=>i.phase==='generate').map(i=>i.state);},pipelineConfigHash:'knowledge-kernel-qoder-v2'});
++ try{const run=await c.start({version:1,requestId:'parallel-pause',projectId:p.id,domain:'wiki',language:'en',intent:'generate',confirmExternal:true,expectedModelIdentity:knowledgeModelIdentity(binding),expectedPlanToken:prepared.planToken});await viWait(()=>active.size===2);const job=store.getTask(run.run!.taskId)!;const stopped=await c.act({version:1,requestId:'parallel-stop',taskId:job.id,expectedRevision:job.metadata!.repoWiki!.revision,action:'pause'});expect(stopped.run?.state).toBe('paused');const items=store.listItems(job.id);expect(items.find(i=>i.itemId==='generate:a')?.state).toBe(firstFails?'running':'prepared');expect(items.find(i=>i.itemId==='generate:b')?.state).toBe(stale?'running':'prepared');expect(store.getTask(job.id)!.metadata!.repoWiki!.counts.failed).toBe(0);expect(drainedStates.filter(s=>s==='prepared')).toHaveLength(firstFails||stale?1:2);expect(project.read(p.id,'wiki').content.publishedCount).toBe(0);}
++ finally{await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
++},30000);
++
+ it('v2 fills a page slot after a durable ACK without waiting for siblings',async()=>{
+  const base=mkdtempSync(join(tmpdir(),'knowledge-parallel-')),root=join(base,'src');mkdirSync(root);writeFileSync(join(root,'readme.md'),'# project\n');const engine=new WorkspaceEngine(join(base,'data'));const db=new DatabaseSync(':memory:');const store=new KnowledgeBuildStore(db,{controllerEpoch:'epoch'});const project=new KnowledgeProjectPort(engine);const p=engine.create_project(root,'en'),prepared=await project.prepare(p.id,'wiki');
+  const pending=new Map<string,()=>void>();const started:string[]=[];const defs=['a','b','c','e'].map(id=>({id,title:id.toUpperCase(),goal:id,dependencies:[]}));
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\pause-drain-preimage\\.agents\\notes\\proposed\\bug-fix\\2026-11-02-repo-wiki-generation-validation-repair.md" b/.agents/notes/proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md
+index a18ddd54..feec0218 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\pause-drain-preimage\\.agents\\notes\\proposed\\bug-fix\\2026-11-02-repo-wiki-generation-validation-repair.md"
++++ b/.agents/notes/proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md
+@@ -42,3 +42,5 @@ Status: proposed
+ ## 真实验收后的诊断与暂停边界
+ 
+ 唯一一次真实 repair 在收到模型错误后按约定暂停，未取得该页有效正文、未完成验收；父任务的 prepared 成果仍保留。原错误已净化为 STAGE_FAILED，无法倒推当时的 HTTP 状态。后续从模型响应入口只生成稳定的模型错误码，只有能明确辨认 HTTP 状态时才记录状态，绝不落响应全文或凭据；既有重试判定和次数不变。暂停中止后返回的非 prepared 结果不应落成业务失败，已完成且通过校验的 prepared 结果仍可 ACK，未完成项沿用现有续跑路径。
++
++v2 暂停排空并发 stage 时，逐个接纳当前 fence、输入与依赖仍有效且已通过本地校验的 prepared；failed / blocked 和无效结果留给既有续跑路径。排空在暂停终态和租约释放前完成，不在停止期间调度或发布。

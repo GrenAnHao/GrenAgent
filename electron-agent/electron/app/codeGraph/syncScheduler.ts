@@ -8,7 +8,7 @@
 import type { IndexProgress } from '@colbymchenry/codegraph';
 import type { SyncMode, SyncOutcome, SyncPlan } from './codeGraphEngine';
 
-export type SyncTrigger = 'manual' | 'watch' | 'activate' | 'retry';
+export type SyncTrigger = 'manual' | 'branch_switch' | 'watch' | 'activate' | 'poll' | 'startup' | 'retry';
 export type SyncPhase = 'idle' | 'queued' | 'syncing' | 'rebuilding' | 'backoff' | 'failed';
 
 export interface SyncTask {
@@ -96,6 +96,12 @@ export interface SyncSchedulerOptions {
   maxPendingPaths?: number;
   /** 熔断后，自动触发（文件改动、激活）至少隔这么久才重新试一次。 */
   rearmAfterMs?: number;
+  /**
+   * 写任务这么久没有进度就判停滞。0 或未设置表示不查。
+   * 线程宿主默认 120 秒：先取消，再由 onStall 决定要不要退出进程（SDK 的 sync 不转发 signal）。
+   */
+  writeStallTimeoutMs?: number;
+  onStall?: (workspace: string) => void;
   retry?: Partial<SyncRetryPolicy>;
   onEvent?: (event: SyncEvent) => void;
   /** 某个工作区的调度状态变了（进出队列、开始、结束）。 */
@@ -122,6 +128,9 @@ interface Run extends Batch {
   startedAt: number;
   cancelled: boolean;
   dispatched: boolean;
+  /** 停滞超时已经触发。结束时按失败记，不按用户取消。 */
+  stalled: boolean;
+  stallTimer?: unknown;
   progress?: SyncView['progress'];
   done?: Promise<void>;
 }
@@ -147,7 +156,9 @@ interface Slot {
   generation: number;
 }
 
-const PRIORITY: Record<SyncTrigger, number> = { manual: 3, watch: 2, activate: 1, retry: 1 };
+const PRIORITY: Record<SyncTrigger, number> = {
+  manual: 5, branch_switch: 4, watch: 3, activate: 2, poll: 1, startup: 1, retry: 1,
+};
 const STAGES: Record<string, string> = { scanning: '扫描文件', parsing: '解析代码', resolving: '解析引用', linking: '关联符号' };
 export const SYNC_CLOSED = 'CodeGraph engine is closed';
 
@@ -243,6 +254,7 @@ export class SyncScheduler {
       stage: STAGES[phase] ?? phase,
       ...(Number.isSafeInteger(current) && Number.isSafeInteger(total) && (total as number) > 0 ? { processed: current, total } : {}),
     };
+    if (!entry.run.stalled) this.armStall(entry.slot, entry.run);
     for (const waiter of entry.run.waiters.values()) waiter.onProgress?.(progress);
   }
 
@@ -340,11 +352,13 @@ export class SyncScheduler {
     const batch = slot.pending!;
     slot.pending = undefined;
     this.clearBackoff(slot);
-    const run: Run = { ...batch, runId: `sync-${++this.seq}`, startedAt: this.now(), cancelled: false, dispatched: false };
+    const run: Run = { ...batch, runId: `sync-${++this.seq}`, startedAt: this.now(), cancelled: false, dispatched: false, stalled: false };
     slot.running = run;
     slot.lastAttemptAt = run.startedAt;
     this.runs.set(run.runId, { slot, run });
+    this.armStall(slot, run);
     run.done = this.execute(slot, run).finally(() => {
+      this.clearStall(run);
       this.runs.delete(run.runId);
       if (slot.running === run) slot.running = undefined;
       this.pump();
@@ -400,10 +414,11 @@ export class SyncScheduler {
   }
 
   private fail(slot: Slot, run: Run, error: Error): void {
+    if (run.stalled) error = stallError();
     for (const waiter of run.waiters.values()) waiter.reject(error);
     const automatic = [...run.triggers].some((trigger) => trigger !== 'manual');
     const now = this.now();
-    if (run.cancelled || error.name === 'AbortError' || this.closed) {
+    if (!run.stalled && (run.cancelled || error.name === 'AbortError' || this.closed)) {
       if (run.paths) slot.reconcile = true;
       return;
     }
@@ -470,6 +485,27 @@ export class SyncScheduler {
   }
 
   private changed(slot: Slot): void { this.options.onChange?.(slot.workspace); }
+
+  /** 没有进度事件就重新计时。到点取消这次写；停不下来时由 onStall 退出进程。 */
+  private armStall(slot: Slot, run: Run): void {
+    const ms = this.options.writeStallTimeoutMs ?? 0;
+    if (!(ms > 0) || run.stalled) return;
+    this.clearStall(run);
+    run.stallTimer = this.setTimer(() => this.stalled(slot, run), ms);
+  }
+
+  private clearStall(run: Run): void {
+    if (run.stallTimer === undefined) return;
+    this.clearTimer(run.stallTimer);
+    run.stallTimer = undefined;
+  }
+
+  private stalled(slot: Slot, run: Run): void {
+    if (slot.running !== run || run.stalled || this.closed) return;
+    run.stalled = true;
+    this.options.onStall?.(slot.workspace);
+    if (run.dispatched) void this.options.executor.cancel(run.runId).catch(() => undefined);
+  }
 }
 
 function topPriority(triggers: Set<SyncTrigger>): number { let best = 0; for (const trigger of triggers) best = Math.max(best, PRIORITY[trigger]); return best; }
@@ -488,5 +524,11 @@ function errorCode(error: Error): string | undefined {
 function cancelledError(): Error {
   const error = new Error('CodeGraph sync was cancelled; completed index writes are retained');
   error.name = 'AbortError';
+  return error;
+}
+
+function stallError(): Error {
+  const error = new Error('CODEGRAPH_STALL: index write made no progress');
+  error.name = 'CodeGraphStallError';
   return error;
 }

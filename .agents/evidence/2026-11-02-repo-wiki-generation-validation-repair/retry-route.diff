@@ -1,0 +1,195 @@
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/knowledgeProjection.ts b/src/features/repoWiki/knowledgeProjection.ts
+index 3ba6021..5bb6223 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/knowledgeProjection.ts
++++ b/src/features/repoWiki/knowledgeProjection.ts
+@@ -94,7 +94,7 @@ export function projectKnowledge(snapshot: RepoWikiKnowledgeSnapshot) {
+     else if (run!.state === 'blocked' && can('reanalyse')) primary = { kind: 'reanalyse', label: '重新分析' };
+     else if (can('pause')) primary = { kind: 'pause', label: '暂停' };
+     else if (run!.state === 'pause_requested') primary = { kind: 'pause', label: '暂停中…' };
+-  } else if (failed && can('repair') && run!.counts.prepared > 0) primary = { kind: 'repair', label: '重试' };
++  } else if (failed && can('repair')) primary = { kind: 'repair', label: '重试' };
+   else if (failed) primary = { kind: 'generate', label: '重试', intent: content.publishedCount ? 'update' : 'generate' };
+   else primary = content.publishedCount ? { kind: 'generate', label: '更新', intent: 'update' } : { kind: 'generate', label: '生成', intent: 'generate' };
+   const secondary = inFlight && can('cancel') ? { kind: 'cancel' as const, label: '取消' } : undefined;
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/knowledgeProjection.test.ts b/src/features/repoWiki/knowledgeProjection.test.ts
+index c4d795f..fa101a5 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/knowledgeProjection.test.ts
++++ b/src/features/repoWiki/knowledgeProjection.test.ts
+@@ -50,10 +50,10 @@ describe('knowledge projection', () => {
+     const snapshot = knowledgeFixture('completed'); expect(projectKnowledge(snapshot).primary).toEqual({ kind: 'generate', label: '更新', intent: 'update' });
+     snapshot.content.publishedCount = 0; snapshot.run = null; expect(projectKnowledge(snapshot)).toMatchObject({ primary: { kind: 'generate', label: '生成' }, statusLabel: '未生成', inFlight: false });
+   });
+-  it('retries a failed run by repair only when prepared items can be reused', () => {
++  it('routes failed runs through the server repair capability even with zero prepared pages', () => {
+     const snapshot = knowledgeFixture('failed'); snapshot.run!.capabilities = { ...none, repair: true };
+     expect(projectKnowledge(snapshot).primary).toEqual({ kind: 'repair', label: '重试' });
+-    snapshot.run!.counts.prepared = 0; snapshot.content.publishedCount = 0; expect(projectKnowledge(snapshot)).toMatchObject({ primary: { kind: 'generate', label: '重试' }, statusLabel: '生成失败', statusTone: 'failed' });
++    snapshot.run!.counts.prepared = 0; snapshot.content.publishedCount = 0; expect(projectKnowledge(snapshot)).toMatchObject({ primary: { kind: 'repair', label: '重试' }, statusLabel: '生成失败', statusTone: 'failed' });
+   });
+   it('disables a new generation until the model is ready', () => { const snapshot = knowledgeFixture('failed'); expect(projectKnowledge(snapshot).primaryDisabled).toBe(false); snapshot.admission = { state: 'blocked' }; expect(projectKnowledge(snapshot).primaryDisabled).toBe(true); });
+   it('renders no actions during a pinned publication', () => { const snapshot = knowledgeFixture(); snapshot.run!.phase = 'publish'; snapshot.run!.capabilities = none; expect(projectKnowledge(snapshot)).toMatchObject({ primary: undefined, secondary: undefined, title: '整理中' }); });
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/RepoWikiWorkspace.knowledge.test.tsx b/src/features/repoWiki/RepoWikiWorkspace.knowledge.test.tsx
+index 64c67bd..e4f8de7 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/RepoWikiWorkspace.knowledge.test.tsx
++++ b/src/features/repoWiki/RepoWikiWorkspace.knowledge.test.tsx
+@@ -43,7 +43,7 @@ it('shows four independent dimensions and performs server-authorized pause/resum
+ });
+ it('confirms repair with the frozen model and scope while keeping the official document', async () => {
+   const failed = snapshot(); failed.run!.state = 'failed'; failed.run!.counts.failed = 1; failed.run!.capabilities = { pause: false, resume: false, cancel: false, repair: true, reanalyse: false }; fixture.setKnowledge(failed); render(<RepoWikiWorkspace />);
+-  fireEvent.click(await screen.findByRole('button', { name: '重试' })); const dialog = await screen.findByRole('dialog', { name: '确认修复失败项？' }); expect(dialog).toHaveTextContent('知识模型'); expect(dialog).toHaveTextContent('语言：zh；可复用 2 项，重做 1 项');
++  fireEvent.click(await screen.findByRole('button', { name: '重试' })); const dialog = await screen.findByRole('dialog', { name: '确认修复失败项？' }); expect(dialog).toHaveTextContent('知识模型'); expect(dialog).toHaveTextContent('语言：zh；已完成 2 项，失败或受阻 1 项');
+   fixture.queueKnowledgeResponse({ ...failed, run: { ...failed.run!, taskId: 'repair-task', revision: 0, state: 'queued', capabilities: { pause: true, resume: false, cancel: true, repair: false, reanalyse: false } } });
+   fireEvent.click(within(dialog).getByRole('button', { name: '确认并生成' })); await waitFor(() => expect(fixture.calls.some(call => call.command === 'repoWiki_action')).toBe(true)); expect(fixture.calls.find(call => call.command === 'repoWiki_action')?.args).toMatchObject({ action: 'repair', confirm_external: true, expected_model_identity: 'provider/model@digest' });
+ });
+@@ -51,7 +51,7 @@ it('keeps the repair confirmation bound to its original task, revision, model an
+   const failed = snapshot(); failed.run!.state = 'failed'; failed.run!.capabilities.repair = true; fixture.setKnowledge(failed); render(<RepoWikiWorkspace />);
+   fireEvent.click(await screen.findByRole('button', { name: '重试' })); const dialog = await screen.findByRole('dialog', { name: '确认修复失败项？' });
+   const changed = structuredClone(failed); changed.run!.taskId = 'another-task'; changed.run!.revision = 7; changed.run!.counts.prepared = 9; changed.admission.modelIdentity = 'changed-model'; changed.admission.planToken = 'changed-plan'; act(() => fixture.emitKnowledge(changed));
+-  expect(dialog).toHaveTextContent('可复用 2 项，重做 0 项');
++  expect(dialog).toHaveTextContent('已完成 2 项，失败或受阻 0 项');
+   fixture.queueKnowledgeResponse(changed); fireEvent.click(within(dialog).getByRole('button', { name: '确认并生成' })); await waitFor(() => expect(fixture.calls.some(call => call.command === 'repoWiki_action')).toBe(true));
+   expect(fixture.calls.find(call => call.command === 'repoWiki_action')?.args).toMatchObject({ task_id: 'kernel-task', expected_revision: 3, expected_model_identity: 'provider/model@digest', expected_plan_token: 'plan' });
+ });
+@@ -67,3 +67,21 @@ it('isolates late reads, stops while hidden, and immediately refreshes when visi
+   view.rerender(<RepoWikiWorkspace visible={false} />); const count = fixture.calls.filter(call => call.command === 'repoWiki_knowledge').length; await act(async () => { await new Promise(resolve => setTimeout(resolve, 2700)); }); expect(fixture.calls.filter(call => call.command === 'repoWiki_knowledge')).toHaveLength(count);
+   view.rerender(<RepoWikiWorkspace visible />); await waitFor(() => expect(fixture.calls.filter(call => call.command === 'repoWiki_knowledge').length).toBeGreaterThan(count));
+ });
++it('repairs the original failed task with zero prepared pages without starting a new generation', async () => {
++  const failed = snapshot(); failed.run!.taskId = '10f59f63-e763-4379-9970-f77428f63d6b'; failed.run!.state = 'failed'; failed.run!.counts = {planned:11,prepared:0,failed:1,blocked:10,published:0}; failed.content = {state:'empty',publishedCount:0,preparedCount:0,expectedCount:11} as typeof failed.content; failed.run!.capabilities = {pause:false,resume:false,cancel:false,repair:true,reanalyse:false}; fixture.setKnowledge(failed); render(<RepoWikiWorkspace />);
++  fireEvent.click(await screen.findByRole('button', { name:'重试' })); const dialog = await screen.findByRole('dialog', {name:'确认修复失败项？'});
++  expect(dialog).toHaveTextContent('已完成 0 项，失败或受阻 11 项'); expect(dialog).toHaveTextContent('Wiki 文档 · 修复失败项');
++  fixture.queueKnowledgeResponse({ ...failed, run:{...failed.run!,taskId:'repair-task',revision:0,state:'queued'} });
++  fireEvent.click(within(dialog).getByRole('button',{name:'确认并生成'})); await waitFor(()=>expect(fixture.calls.some(call=>call.command==='repoWiki_action')).toBe(true));
++  expect(fixture.calls.find(call=>call.command==='repoWiki_action')?.args).toMatchObject({action:'repair',task_id:'10f59f63-e763-4379-9970-f77428f63d6b',expected_revision:3,confirm_external:true});
++  expect(fixture.calls.filter(call=>call.command==='repoWiki_generate')).toHaveLength(0);
++});
++it('never turns a confirmed repair into generation when the current run disappears', async () => {
++  const failed = snapshot(); failed.run!.state = 'failed'; failed.run!.capabilities.repair = true; fixture.setKnowledge(failed); render(<RepoWikiWorkspace />);
++  fireEvent.click(await screen.findByRole('button',{name:'重试'})); const dialog = await screen.findByRole('dialog',{name:'确认修复失败项？'});
++  act(()=>fixture.emitKnowledge({...failed,run:null}));
++  fireEvent.click(within(dialog).getByRole('button',{name:'确认并生成'}));
++  await screen.findByText('任务状态已变化，请关闭确认窗口后重试。');
++  expect(fixture.calls.some(call=>call.command==='repoWiki_action')).toBe(false);
++  expect(fixture.calls.filter(call=>call.command==='repoWiki_generate')).toHaveLength(0);
++});
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/RepoWikiWorkspace.test.tsx b/src/features/repoWiki/RepoWikiWorkspace.test.tsx
+index e4c179b..efd2265 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/RepoWikiWorkspace.test.tsx
++++ b/src/features/repoWiki/RepoWikiWorkspace.test.tsx
+@@ -248,7 +248,7 @@ describe('real embedded Repo Wiki', () => {
+     expect(screen.queryByText(/重复序号|旧进程|退役任务进度/)).toBeNull();
+   });
+ 
+-  it('binds a newly submitted generation to its returned run id', async () => {
++  it('binds a submitted repair to its returned run id', async () => {
+     render(<RepoWikiWorkspace />);
+     await screen.findByTestId('knowledge-overview');
+     act(() => fixture.emit({ id: 'previous-run', status: 'failed', target: 'wiki', error: '上次任务失败' }));
+@@ -436,7 +436,8 @@ describe('real embedded Repo Wiki', () => {
+     expect(await screen.findByText('模型暂不可用')).toBeInTheDocument();
+     fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+     fireEvent.click(screen.getByRole('button', { name: '确认并生成' }));
+-    await waitFor(() => expect(fixture.calls.filter((call) => call.command === 'repoWiki_generate')).toHaveLength(2));
++    await waitFor(() => expect(fixture.calls.filter((call) => call.command === 'repoWiki_action').at(-1)?.args).toMatchObject({ action: 'repair', task_id: 'run-1' }));
++    expect(fixture.calls.filter((call) => call.command === 'repoWiki_generate')).toHaveLength(1);
+     expect(screen.queryByText('离线规则演示')).toBeNull();
+   });
+ });
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/App.tsx b/vendor/repo-wiki/apps/web/src/App.tsx
+index 24f1d60..ee48091 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/App.tsx
++++ b/vendor/repo-wiki/apps/web/src/App.tsx
+@@ -990,8 +990,9 @@ export default function App({
+     const serial = beginMutation();
+     const version = runVersion.current;
+     try {
+-      if (intent.action && knowledgeRef.current?.run && client) {
+-        const current = knowledgeRef.current;
++      if (intent.action) {
++        if (!client) throw new Error('Repo Wiki connection unavailable');
++        if (!knowledgeRef.current?.run) throw new Error('任务状态已变化，请关闭确认窗口后重试。');
+         const next = await client.invoke('action', { project_id: intent.projectId, task_id: intent.taskId!, action: intent.action, expected_revision: intent.taskRevision!, request_id: intent.requestId!, confirm_external: true, expected_model_identity: intent.modelIdentity, expected_plan_token: intent.planToken }) as RepoWikiKnowledgeSnapshot;
+         if (scopeCurrent(scope)) { runVersion.current++; rememberRun(next.run?.taskId); setKnowledge(next); setModal(null); setGenerationConsent(null); }
+         return;
+@@ -2483,7 +2484,7 @@ export default function App({
+                 {generationConsent?.target === "cards"
+                   ? "知识卡片"
+                   : "Wiki 文档"}{" "}
+-                · {generationConsent?.force ? "全量" : "增量（复用未变缓存）"}
++                · {generationConsent?.action === 'repair' ? '修复失败项' : generationConsent?.action === 'reanalyse' ? '重新分析' : generationConsent?.force ? "全量" : "增量（复用未变缓存）"}
+               </dd>
+             </div>
+             <div>
+@@ -2505,7 +2506,7 @@ export default function App({
+               <dd>真实模型不会由监听器自动调用</dd>
+             </div>
+           </dl>
+-          {generationConsent?.action && <p>语言：{project?.language}；可复用 {generationConsent.reusableCount} 项，重做 {generationConsent.redoCount} 项。</p>}
++          {generationConsent?.action && <p>语言：{project?.language}；已完成 {generationConsent.reusableCount} 项，失败或受阻 {generationConsent.redoCount} 项。已保存成果通过校验后复用，其余继续处理。</p>}
+           <div className="modal-actions">
+             <button
+               type="button"
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/repo-wiki.tsx b/ui-harness/scenarios/repo-wiki.tsx
+index b3f1822..48baa3b 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/repo-wiki.tsx
++++ b/ui-harness/scenarios/repo-wiki.tsx
+@@ -40,6 +40,7 @@ exposeActions({
+   kernelEnter: () => fixture.emitKnowledge(kernelSnapshot(null)),
+   kernelResponse: (state: NonNullable<RepoWikiKnowledgeSnapshot['run']>['state'], revision: number) => fixture.queueKnowledgeResponse(kernelSnapshot(state, revision)),
+   kernelEvent: (state: NonNullable<RepoWikiKnowledgeSnapshot['run']>['state'], revision: number) => fixture.emitKnowledge(kernelSnapshot(state, revision)),
++  kernelZeroFailure: () => { const next = kernelSnapshot('failed', 8); next.run!.taskId = 'original-zero-task'; next.run!.counts = { planned: 11, prepared: 0, failed: 1, blocked: 10, published: 0 }; next.content = { state: 'empty', publishedCount: 0, preparedCount: 0, expectedCount: 11 }; fixture.emitKnowledge(next); },
+   kernelPin: () => { const next = kernelSnapshot('running', 10); next.run!.phase = 'publish'; next.run!.capabilities = { pause: false, resume: false, cancel: false, repair: false, reanalyse: false }; fixture.emitKnowledge(next); },
+   releasePreparation: () => { activationGate.release(); snapshotGate.release(); },
+   coldTiming: () => ({ ...coldTiming, elapsedMs: coldTiming.visibleAt === null || coldTiming.clickedAt === null ? null : coldTiming.visibleAt - coldTiming.clickedAt }),
+diff --git a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/repo-wiki.mjs b/ui-harness/probes/repo-wiki.mjs
+index f7c2757..f66653a 100644
+--- a/../.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/retry-route-preimage/repo-wiki.mjs
++++ b/ui-harness/probes/repo-wiki.mjs
+@@ -162,8 +162,8 @@ export default async function (t) {
+   t.check('取消不需要旧版二次确认', await t.countVisible(modal), 0);
+   await t.act('failRun');
+   t.ok('失败保留原文并能重试', await t.waitForText('[data-testid="knowledge-overview"]', '模型暂不可用'));
+-  t.check('失败时主按钮是重试', await t.text('[data-testid="knowledge-overview"] [data-knowledge-action="generate"]'), '重试');
+-  await t.click('[data-testid="knowledge-overview"] [data-knowledge-action="generate"]');
++  t.check('失败时主按钮是修复重试', await t.text('[data-testid="knowledge-overview"] [data-knowledge-action="repair"]'), '重试');
++  await t.click('[data-testid="knowledge-overview"] [data-knowledge-action="repair"]');
+   t.ok('重试仍要求本次源码授权', await t.waitFor(`${modal} .modal-actions .primary`));
+   await t.click(`${modal} .modal-actions .primary`);
+   await t.act('completeRun');
+@@ -196,7 +196,7 @@ export default async function (t) {
+   await t.shot('collection-live');
+   await t.click('[aria-label="打开项目 Forest"]');
+   t.ok('从集合回到运行中的项目', await t.waitFor('[data-testid="knowledge-overview"]'));
+-  t.check('重开没有重复提交生成', (await snapshot(t)).calls.filter((call) => call.command === 'repoWiki_generate').length, 2);
++  t.check('重开没有重复提交生成', (await snapshot(t)).calls.filter((call) => call.command === 'repoWiki_generate').length, 1);
+   await t.click('[aria-label="查看生成任务"]');
+   t.ok('持久化任务进入统一任务中心', await t.waitForText('[data-testid="jobs-panel"]', 'Repo Wiki 文档生成'));
+   t.ok('任务中心显示正在生成哪篇文档', await t.waitForText('[data-testid="jobs-panel"]', '当前文档：overview'));
+@@ -310,7 +310,7 @@ export default async function (t) {
+   await t.wheel('[data-testid="knowledge-overview"]', 460);
+   t.info('修复入口滚动与命中', await t.js(`(() => { const root=document.querySelector('[data-testid="knowledge-overview"]'); const button=document.querySelector('[data-knowledge-action="repair"]'); const rect=button?.getBoundingClientRect(); return {scrollTop:root?.scrollTop,scrollHeight:root?.scrollHeight,clientHeight:root?.clientHeight,button:rect?{top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right}:null,hit:rect?button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)):false}; })()`));
+   await t.click('[data-knowledge-action="repair"]');
+-  t.ok('修复确认显示模型和重做范围', await t.waitForText(`${modal}`, '可复用 2 项，重做 1 项'));
++  t.ok('修复确认显示模型和重做范围', await t.waitForText(`${modal}`, '已完成 2 项，失败或受阻 1 项'));
+   t.ok('修复确认按钮真实可点', await t.waitUntil(`(() => { const button=document.querySelector('[role="dialog"] .modal-actions .primary'); if(!button)return false; const r=button.getBoundingClientRect(); return r.bottom<=innerHeight && button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)); })()`));
+   await t.act('kernelResponse', 'queued', 6); await t.click(`${modal} .modal-actions .primary`);
+   t.ok('修复使用服务器新任务投影', await t.waitForText('[data-testid="knowledge-overview"]', '等待生成'));
+@@ -352,6 +352,18 @@ export default async function (t) {
+   await t.act('kernelLegacy');
+   t.ok('旧记录无activeItems仍显示当前内容', await t.waitForText('[data-testid="knowledge-overview"]', '当前内容兼容旧版单项'));
+   await t.resize(1420, 880); await t.setTheme('dark');
++  await t.act('kernelZeroFailure');
++  t.ok('零正文失败仍提供修复重试', await t.waitFor('[data-knowledge-action="repair"]'));
++  const generateBefore = (await snapshot(t)).calls.filter(call => call.command === 'repoWiki_generate').length;
++  await t.click('[data-knowledge-action="repair"]');
++  t.ok('重试确认真实失败范围并说明复用条件', await t.waitForText(modal, '已完成 0 项，失败或受阻 11 项'));
++  await t.shot('retry-zero-prepared');
++  await t.act('kernelResponse', 'queued', 9); await t.click(`${modal} .modal-actions .primary`);
++  t.ok('零正文修复提交完成', await t.waitForText('[data-testid="knowledge-overview"]', '等待生成'));
++  const afterRetry = await snapshot(t);
++  t.check('重试绑定原失败任务', afterRetry.calls.filter(call => call.command === 'repoWiki_action').at(-1)?.args.task_id, 'original-zero-task');
++  t.check('重试走 repair 而非新生成', afterRetry.calls.filter(call => call.command === 'repoWiki_action').at(-1)?.args.action, 'repair');
++  t.check('不走生成入口（其内部 prepare/start）', afterRetry.calls.filter(call => call.command === 'repoWiki_generate').length, generateBefore);
+   await t.act('enterScratch');
+   t.ok('非空临时对话工作区显示宿主空态', await t.waitForText('.rw-collection-empty', '还没有打开的项目'));
+   t.check('临时对话不显示连接入口', await t.count('.rw-connect-project'), 0);

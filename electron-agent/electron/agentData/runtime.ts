@@ -5,37 +5,39 @@ import { stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentDataStorage } from './storage';
+import { NativeWikiProjection } from './nativeWikiProjection';
+import type { WikiOperation } from '../wikiService/contracts';
 import { ThreadStore } from './threadStore';
-import { MemoryStore } from './memoryStore';
-import type { MemoryDraft, MemoryFilter, MemoryListInput, MemoryOwner } from './memoryContracts';
 import { WikiService } from './wikiEngine/service';
+import type { CompleteOptions, KnowledgeCompletionInput } from './wikiEngine/llm';
+export type { KnowledgeCompletionInput } from './wikiEngine/llm';
 import { TaskViewStore } from './taskViewStore';
 import { TaskViewService } from '../app/taskViewService';
 import { AuditViewStore } from './auditViewStore';
 import { AgentDataDiagnostics } from '../app/agentDataDiagnostics';
 import type { AuditQuery, DiagnosticReport, JobMetadata, TaskListInput, TaskRef, TaskRetryOptions, WorkbenchOverview } from './operationsContracts';
-import { JobStore, type Job } from './jobStore';
-import { MemoryService, type LayerScheduleOptions, type MemoryTaskQueue } from '../app/memoryService';
+import { JobStore, parseJobMetadata, parseRepoWikiJobPayload, type Job } from './jobStore';
 import { ServiceTaskRegistry } from '../app/appServer/serviceTaskRegistry';
 import { TaskQueue, type QueueTaskInput } from '../app/appServer/taskQueue';
 import type { ServiceTask, ServiceTaskHooks } from '../app/appServer/types';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from './codeRetrievalProtocol';
 import { RequestFrameDecoder } from './requestFrames';
-import { agentDataTiming, timeSync } from './methodTiming';
+import { agentDataTiming } from './methodTiming';
 import { PluginStateStore } from '../app/plugin/pluginStateStore';
 import { ToolAuditStore } from '../app/toolPermission/auditStore';
 import { ToolRuleStore } from '../app/toolPermission/ruleStore';
 import { ToolDecisionService } from '../app/toolPermission/toolDecisionService';
 import { toolPermissionMethods } from '../app/toolPermission/rpc';
 
+import { createKnowledgeKernelRuntime, type KnowledgeKernelRuntimePorts } from './knowledgeKernel/runtimeBridge';
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
 const SYSTEM_METHODS = new Set(['system.hello', 'system.status', 'system.shutdown']);
-const JOB_ADMIN_METHODS = new Set(['admin.jobs.start', 'admin.jobs.complete', 'admin.jobs.fail', 'admin.jobs.markCancelled']);
+const JOB_ADMIN_METHODS = new Set(['admin.jobs.get', 'admin.jobs.start', 'admin.jobs.complete', 'admin.jobs.fail', 'admin.jobs.markCancelled']);
 
 export interface AgentDataJobRunner {
-  run(jobId: string, workspace: string, expectedModel?: string): Promise<void>;
+  run(jobId: string, workspace: string, expectedModel?: string, payload?: JobMetadata['payload']): Promise<void>;
   cancel(jobId: string): void | Promise<void>;
 }
 
@@ -56,12 +58,11 @@ export interface AgentDataRuntimeOptions {
   /** 按 job kind 注册的执行器：创建即派发，取消时通知。未注册的 kind 只落库。 */
   jobRunners?: Record<string, AgentDataJobRunner>;
   codeRetrieval?: AgentDataCodeRetrievalProvider;
-  validateProject?: (workspace: string) => Promise<string>;
   /** Injected model short-call for Wiki ingest; tests pass a stub. */
-  completeSimple?: (input: { systemPrompt?: string; user: string }) => Promise<string>;
+  completeSimple?: (input: { systemPrompt?: string; user: string } & CompleteOptions) => Promise<string>;
+  describeModel?: () => Promise<string>;
   /** Resolves whether a session is currently owned by the endpoint workspace. */
   resolveSession?: (workspace: string, sessionId: string) => boolean | Promise<boolean>;
-  layerSchedule?: LayerScheduleOptions;
   /**
    * 监听命名管道（Windows `\\.\pipe\…`）或 Unix socket 路径，而不是环回 TCP 的随机端口。
    * 运行在子进程里时由主进程指定：崩溃重拉后路径不变，扩展缓存的端点仍然有效。
@@ -71,6 +72,7 @@ export interface AgentDataRuntimeOptions {
   hostToken?: string;
   /** 重拉时带回的工作区令牌：规范化后的工作区 → 令牌。 */
   workspaceTokens?: Record<string, string>;
+  knowledge?: Omit<KnowledgeKernelRuntimePorts, 'withModelSlot'>;
 }
 
 export class AgentDataRuntime {
@@ -81,7 +83,6 @@ export class AgentDataRuntime {
   private readonly sockets = new Set<Socket>();
   private inFlight = 0;
   private readonly token: string;
-  private memory?: MemoryStore;
   private wiki?: WikiService;
   private taskViews?: TaskViewStore;
   private taskService?: TaskViewService;
@@ -93,10 +94,14 @@ export class AgentDataRuntime {
   private readonly closeWaiters: Array<() => void> = [];
   private jobs?: JobStore;
   private threads?: ThreadStore;
-  private memoryService?: MemoryService;
   private taskQueue?: TaskQueue;
+  private readonly knowledgeCalls = new Map<string, AbortController>();
   private temporaryWikiRoot?: string;
   private toolPermission?: ToolDecisionService;
+  private knowledgeRuntime?: ReturnType<typeof createKnowledgeKernelRuntime>;
+  private knowledgeClosing?: Promise<void>;
+  private nativeProjection?: NativeWikiProjection;
+  private readonly nativeSlots = new Map<string, { abort: AbortController; release(): void; done: Promise<void> }>();
 
   constructor(private readonly options: AgentDataRuntimeOptions) {
     this.token = options.hostToken ?? randomBytes(32).toString('hex');
@@ -107,6 +112,7 @@ export class AgentDataRuntime {
     if (this.endpoint) return this.endpoint;
     this.storage = new AgentDataStorage(this.options.dataPath);
     this.storage.migrate();
+    this.nativeProjection = new NativeWikiProjection(this.storage.db);
     this.toolPermission = new ToolDecisionService(
       new ToolRuleStore(this.storage.db),
       new ToolAuditStore(this.storage.db),
@@ -114,49 +120,13 @@ export class AgentDataRuntime {
     // Old Wiki calls have no live publisher after a process restart. Keep their
     // history but require explicit ingest/retry instead of replaying a model.
     this.storage.db.prepare("UPDATE service_tasks SET status='failed',error='WIKI_TASK_INTERRUPTED: runtime restarted',updated_at=? WHERE kind='wiki_page_generate' AND status IN ('queued','running')").run(Date.now());
-    this.memory = new MemoryStore(this.storage.db);
-    const fallbackQueue: MemoryTaskQueue = {
-        enqueue: async (input) => {
-          const now = Date.now();
-          this.storage!.db.prepare(`INSERT INTO service_tasks(id,kind,source_project_id,source_session_id,is_system,status,input,output,attempts,error,created_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(input.id, input.kind, input.sourceProjectId ?? null, input.sourceSessionId ?? null, input.system ? 1 : 0, 'queued', JSON.stringify(input.input), null, 0, null, now, now);
-          return { id: input.id, kind: input.kind, sourceProjectId: input.sourceProjectId, sourceSessionId: input.sourceSessionId, status: 'queued', input: input.input, attempts: 0, createdAt: now, updatedAt: now };
-        },
-        get: (id) => {
-          const row = this.storage!.db.prepare('SELECT * FROM service_tasks WHERE id=?').get(id) as Record<string, unknown> | undefined;
-          if (!row) return undefined;
-          return { id: String(row.id), kind: String(row.kind), sourceProjectId: row.source_project_id == null ? undefined : String(row.source_project_id), sourceSessionId: row.source_session_id == null ? undefined : String(row.source_session_id), status: String(row.status) as never, input: JSON.parse(String(row.input)), output: row.output == null ? undefined : JSON.parse(String(row.output)), attempts: Number(row.attempts), error: row.error == null ? undefined : String(row.error), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) };
-        },
-        findPending: (kind, matches) => {
-          const rows = this.storage!.db.prepare("SELECT id FROM service_tasks WHERE kind=? AND status IN ('queued','running') ORDER BY created_at ASC").all(kind);
-          return rows.map((row) => fallbackQueue.get!(String(row.id))!).find(matches);
-        },
-      };
     if (this.options.executeServiceTask) {
-      const registry = new ServiceTaskRegistry();
-      const queue = new TaskQueue({
+      this.taskQueue = new TaskQueue({
         storage: this.storage,
-        registry,
-        execute: async (task, hooks) => {
-          const output = await this.options.executeServiceTask!(task, hooks);
-          timeSync(`task.${task.kind}.complete`, () => {
-            if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
-            if (task.kind === 'memory_deduplicate') this.memoryService!.completeDedup(task.id, output);
-            if (task.kind === 'memory_scene') this.memoryService!.completeScene(task.id, output);
-            if (task.kind === 'memory_persona') this.memoryService!.completePersona(task.id, output);
-          });
-          return output;
-        },
-        onSettled: (task) => this.memoryService!.taskSettled(task),
+        registry: new ServiceTaskRegistry(),
+        execute: this.options.executeServiceTask,
       });
-      this.taskQueue = queue;
-      this.memoryService = new MemoryService({ store: this.memory, queue, validateProject: this.options.validateProject, layerSchedule: this.options.layerSchedule });
-      queue.recoverRunning();
-      this.memoryService.recoverLayerSchedules();
-      this.memoryService.recoverPendingCaptures();
-    } else {
-      this.memoryService = new MemoryService({ store: this.memory, queue: fallbackQueue, validateProject: this.options.validateProject, layerSchedule: this.options.layerSchedule });
-      this.memoryService.recoverLayerSchedules();
+      this.taskQueue.recoverRunning();
     }
     const wikiRoot = this.options.wikiRootDir ?? (this.options.dataPath === ':memory:'
       ? (this.temporaryWikiRoot = mkdtempSync(join(tmpdir(), 'agent-data-wiki-')))
@@ -166,15 +136,41 @@ export class AgentDataRuntime {
     this.wiki = new WikiService({
       root: wikiRoot,
       db: this.storage.db,
-      complete: async (system, prompt) => {
+      describeModel: this.options.describeModel,
+      complete: async (system, prompt, _label, options) => {
         if (!this.options.completeSimple) throw new Error('MODEL_UNAVAILABLE: no Wiki model is configured');
-        return this.options.completeSimple({ systemPrompt: system, user: prompt });
+        return this.options.completeSimple({ systemPrompt: system, user: prompt, ...options });
       },
     });
+    if (this.options.knowledge) {
+      this.knowledgeRuntime = createKnowledgeKernelRuntime(this.storage.db, { ...this.options.knowledge,
+        withModelSlot: (work, signal) => this.wiki!.withKnowledgeModelSlot(work, signal) });
+      void this.knowledgeRuntime.ready.catch(error => console.error('KnowledgeKernel initialization failed', error));
+    }
     this.taskViews = new TaskViewStore(this.storage.db);
     this.taskService = new TaskViewService({ views: this.taskViews, jobs: this.jobs,
       readTarget: (job) => this.readTaskTarget(job), dispatch: (job, metadata, options) => this.retryTask(job, metadata, options),
       canCancel: (job) => Boolean(this.options.jobRunners?.[job.kind]),
+      describeModel: () => this.describeKnowledgeModel(),
+      ...(this.knowledgeRuntime ? {
+        readKnowledgeSnapshot: (job: Job) => this.knowledgeRuntime!.coordinator.snapshotForTask(job),
+        previewKnowledgeRetry: async (job: Job) => {
+          const key = job.metadata!.repoWiki!.key;
+          const snapshot = await this.knowledgeRuntime!.coordinator.prepare(key.projectId, key.domain);
+          return { model: snapshot.admission.modelDisplayName, modelIdentity: snapshot.admission.modelIdentity, planToken: snapshot.admission.planToken };
+        },
+        actKnowledgeTask: async (job: Job, options?: { expectedModel?: string; expectedModelIdentity?: string; expectedPlanToken?: string }) => {
+          const key = job.metadata!.repoWiki!.key;
+          const preview = await this.knowledgeRuntime!.coordinator.prepare(key.projectId, key.domain);
+          if (!options || options.expectedModel !== preview.admission.modelDisplayName || options.expectedModelIdentity !== preview.admission.modelIdentity) throw new Error('MODEL_CHANGED');
+          if (options.expectedPlanToken !== preview.admission.planToken) throw new Error('PLAN_CHANGED');
+          const snapshot = await this.knowledgeRuntime!.coordinator.act({ version: 1, requestId: randomUUID(), taskId: job.id,
+            expectedRevision: job.metadata!.repoWiki!.revision, action: 'repair', confirmExternal: true,
+            expectedModelIdentity: options.expectedModelIdentity!, expectedPlanToken: options.expectedPlanToken! });
+          if (!snapshot.run) throw new Error('TASK_NOT_FOUND');
+          return this.jobs!.get(snapshot.run.taskId)!;
+        },
+      } : {}),
     });
     this.auditViews = new AuditViewStore(this.storage.db);
     this.diagnostics = new AgentDataDiagnostics({
@@ -187,6 +183,7 @@ export class AgentDataRuntime {
       await listenWithRetry(this.server, listenPath);
       this.options.stdin?.once('end', () => this.handleStdinEnd());
       this.endpoint = { host: '', port: 0, path: listenPath, token: this.token };
+      this.resumeKnowledgeKernel(); this.resumeRepoWikiJobs();
       return this.endpoint;
     }
     await new Promise<void>((resolve, reject) => {
@@ -197,6 +194,7 @@ export class AgentDataRuntime {
     if (!address || typeof address === 'string') throw new Error('agent data server address unavailable');
     this.options.stdin?.once('end', () => this.handleStdinEnd());
     this.endpoint = { host: '127.0.0.1', port: address.port, token: this.token };
+    this.resumeKnowledgeKernel(); this.resumeRepoWikiJobs();
     return this.endpoint;
   }
 
@@ -208,10 +206,48 @@ export class AgentDataRuntime {
   private settleOrphanJobs(): void {
     for (const job of [...this.jobs!.list('pending'), ...this.jobs!.list('running')]) {
       if (!this.options.jobRunners?.[job.kind]) continue;
+      if (job.kind === 'repoWiki.generate') continue;
       if (job.metadata?.cancellationRequested) this.jobs!.cancel(job.id);
       else this.jobs!.fail(job.id, 'JOB_INTERRUPTED: 应用重启时任务仍在运行，已中断');
     }
   }
+
+  /** Repo Wiki checkpoints make an acknowledged request resumable; other job kinds retain their interruption policy. */
+  private resumeRepoWikiJobs(): void {
+    if (this.knowledgeRuntime) return;
+    const runner = this.options.jobRunners?.['repoWiki.generate'];
+    if (!runner) return;
+    for (const job of [...this.jobs!.list('pending'), ...this.jobs!.list('running')]) {
+      if (job.kind !== 'repoWiki.generate') continue;
+      if (job.metadata?.cancellationRequested) {
+        this.inFlight += 1;
+        void Promise.resolve().then(() => runner.cancel(job.id)).then(() => this.jobs!.cancel(job.id))
+          .catch((error) => this.jobs!.fail(job.id, error instanceof Error ? error.message : String(error)))
+          .finally(() => { this.inFlight -= 1; this.finishClose(); });
+      } else if (!parseRepoWikiJobPayload(job.metadata?.payload)) {
+        this.jobs!.fail(job.id, 'INVALID_PARAMS: 已保存的 Repo Wiki 生成确认或参数缺失');
+      } else {
+        this.jobs!.recordStage(job.id, '正在恢复');
+        this.dispatchJob(job);
+      }
+    }
+  }
+  private resumeKnowledgeKernel(): void {
+    if (!this.knowledgeRuntime) return;
+    void this.knowledgeRuntime.ready.then(async () => {
+      if (this.closed) return;
+      for (const job of this.jobs!.list()) if (job.kind === 'repoWiki.generate' && !job.metadata?.repoWiki && ['pending', 'running'].includes(job.state)) {
+        if (job.metadata?.cancellationRequested) this.jobs!.cancel(job.id);
+        else this.storage!.db.prepare("UPDATE agent_jobs SET state='blocked',error=?,updated_at=? WHERE id=?").run('CONFIRMATION_REQUIRED: 旧任务缺少可验证的模型与阶段身份，请在 Repo Wiki 重新确认生成', Date.now(), job.id);
+      }
+      await this.knowledgeRuntime!.coordinator.recoverPending();
+    }).catch(error => console.error('KnowledgeKernel recovery failed', error));
+  }
+  async closeKnowledge(): Promise<void> {
+    this.knowledgeClosing ??= this.knowledgeRuntime?.close() ?? Promise.resolve();
+    await this.knowledgeClosing;
+  }
+  knowledgeControllerEpoch(): string | undefined { return this.options.knowledge?.controllerEpoch; }
 
   handleStdinEnd(): void { this.close(); }
   isClosed(): boolean { return this.closed; }
@@ -247,14 +283,16 @@ export class AgentDataRuntime {
 
   /** Trusted main-process entry. No socket method can select this context. */
   async requestAdmin<T>(name: string, params: Record<string, unknown> = {}): Promise<T> {
-    if (!this.endpoint || this.closed) throw new Error('agent data runtime is not started');
+    if ((!this.endpoint || this.closed) && !(this.knowledgeClosing && ['admin.knowledge.worker', 'admin.knowledge.abort'].includes(name)) && !['admin.native.slotRelease', 'admin.native.slotCancel'].includes(name)) throw new Error('agent data runtime is not started');
     this.inFlight += 1;
     const begun = performance.now();
     let label = 'admin.unknown';
     let syncMs = 0;
     let stop = agentDataTiming.start();
     try {
-      const method = this.operationsMethod(name) ?? this.memoryManagementMethod(name) ?? this.wikiMethod(name, 'admin');
+      const method = name.startsWith('admin.native.') ? (params: Record<string, unknown>) => this.nativeAdmin(name, params) : this.knowledgeRuntime && name.startsWith('admin.knowledge.')
+        ? (params: Record<string, unknown>) => this.knowledgeRuntime!.request(name, params)
+        : this.operationsMethod(name) ?? this.wikiMethod(name, 'admin') ?? this.adminMethod(name, true);
       if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown management method: ${name}`);
       label = name;
       const pending = method(params);
@@ -268,6 +306,27 @@ export class AgentDataRuntime {
       agentDataTiming.record(label, syncMs, { totalMs: performance.now() - begun, nested: agentDataTiming.nested });
       this.inFlight -= 1; this.finishClose();
     }
+  }
+
+  private async nativeAdmin(name: string, params: Record<string, unknown>): Promise<unknown> {
+    if (!this.nativeProjection || !this.wiki) throw new Error('AGENTDATA_NOT_READY');
+    if (name === 'admin.native.admit') return { leaseId: this.nativeProjection.admit(params.operation as WikiOperation, String(params.scope ?? '')) };
+    if (name === 'admin.native.release') { this.nativeProjection.release(params.operation as WikiOperation, String(params.leaseId ?? '')); return null; }
+    if (name === 'admin.native.recover') { this.nativeProjection.recover(params.operation as WikiOperation); return null; }
+    if (name === 'admin.native.stage') { this.nativeProjection.stage(String(params.eventId ?? ''), String(params.operationId ?? ''), String(params.stage ?? ''), params.detail); return null; }
+    if (name === 'admin.native.publication') { this.nativeProjection.publication(params.operation as WikiOperation, params.summary as import('./operationsContracts').NativeWikiPublicationSummary); return null; }
+    if (name === 'admin.native.project') { this.nativeProjection.apply(params.operation as WikiOperation); return null; }
+    const id = String(params.requestId ?? ''); if (!id) throw new Error('INVALID_REQUEST');
+    if (name === 'admin.native.slotCancel') { this.nativeSlots.get(id)?.abort.abort(); return null; }
+    if (name === 'admin.native.slotRelease') { const slot = this.nativeSlots.get(id); if (slot) { slot.release(); await slot.done; } return null; }
+    if (name !== 'admin.native.slotAcquire' || this.nativeSlots.has(id)) throw new Error('INVALID_NATIVE_SLOT');
+    const abort = new AbortController(); let release!: () => void, acquired!: () => void, fail!: (error: unknown) => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>((resolve, reject) => { acquired = resolve; fail = reject; });
+    const done = this.wiki.withKnowledgeModelSlot(async () => { acquired(); await held; }, abort.signal).catch(error => { fail(error); throw error; }).finally(() => this.nativeSlots.delete(id));
+    this.nativeSlots.set(id, { abort, release, done });
+    try { await ready; } catch (error) { await done.catch(() => undefined); throw error; }
+    return { acquired: true };
   }
 
   private authorized(token: string): boolean { return token === this.token || this.projectTokens.has(token); }
@@ -295,6 +354,12 @@ export class AgentDataRuntime {
     return new PluginStateStore(this.storage.db);
   }
 
+  /** 自动同步熔断。写成失败任务，不启动执行器。 */
+  recordCodegraphBreaker(event: { workspace: string; message: string }): void {
+    if (!this.jobs || this.closed || !event.workspace) return;
+    this.jobs.recordBreaker(event.workspace, event.message);
+  }
+
   recordJobStage(id: string, stage: string, processed?: number, total?: number): void {
     if (!this.jobs || this.closed) return;
     this.jobs.recordStage(id, stage, processed === undefined || total === undefined ? undefined : { processed, total });
@@ -309,14 +374,22 @@ export class AgentDataRuntime {
     if (name === 'admin.audit.query') return (p) => this.auditViews!.query(p as AuditQuery);
     if (name === 'admin.audit.export') return (p) => this.auditViews!.export(p as AuditQuery);
     if (name === 'admin.diagnostics.check') return async () => (this.diagnosticReport = await this.diagnostics!.check());
-    if (name === 'admin.overview') return (p) => this.workbenchOverview(readString(p.userId));
+    if (name === 'admin.overview') return () => this.workbenchOverview();
     return undefined;
   }
 
   private async readTaskTarget(job: Job): Promise<{ exists: boolean; busy: boolean }> {
-    if (!['codegraph.sync'].includes(job.kind) || !this.options.jobRunners?.[job.kind] || !job.workspace) return { exists: false, busy: false };
+    if (this.knowledgeRuntime && job.metadata?.repoWiki) {
+      try {
+        const view = await this.knowledgeRuntime.coordinator.snapshotForTask(job);
+        return { exists: view.admission.state !== 'blocked', busy: this.jobs!.list().some(other => other.id !== job.id && other.metadata?.repoWiki
+          && ['pending', 'running', 'paused', 'blocked'].includes(other.state) && this.sameJobTarget(other, job)) };
+      } catch { return { exists: false, busy: false }; }
+    }
+    if (!['codegraph.sync', 'repoWiki.generate'].includes(job.kind) || !this.options.jobRunners?.[job.kind] || !job.workspace) return { exists: false, busy: false };
+    if (job.kind === 'repoWiki.generate' && !parseRepoWikiJobPayload(job.metadata?.payload)) return { exists: false, busy: false };
     try { if (!(await stat(job.workspace)).isDirectory()) return { exists: false, busy: false }; } catch { return { exists: false, busy: false }; }
-    return { exists: true, busy: this.jobs!.list().some((other) => other.kind === job.kind && ['pending', 'running'].includes(other.state) && normalizeWorkspace(other.workspace) === normalizeWorkspace(job.workspace)) };
+    return { exists: true, busy: this.jobs!.list().some((other) => other.kind === job.kind && ['pending', 'running'].includes(other.state) && this.sameJobTarget(other, job)) };
   }
 
   private async retryTask(previous: Job, metadata: { retryOf: string }, options?: TaskRetryOptions): Promise<Job> {
@@ -327,11 +400,11 @@ export class AgentDataRuntime {
     if (this.closed) throw new Error('runtime is closed');
     const again = await this.readTaskTarget(previous);
     if (!again.exists || again.busy || this.closed) throw new Error('TASK_TARGET_BUSY');
-    return this.createUserJob(previous.kind, previous.workspace, { ...metadata }, options?.expectedModel);
+    return this.createUserJob(previous.kind, previous.workspace, { ...previous.metadata, ...metadata, cancellationRequested: false, cancellationError: undefined }, options?.expectedModel);
   }
 
-  private async workbenchOverview(userId: string): Promise<WorkbenchOverview> {
-    const result: WorkbenchOverview = { recentPages: [], recentMemories: [], errors: [] };
+  private async workbenchOverview(): Promise<WorkbenchOverview> {
+    const result: WorkbenchOverview = { recentPages: [], errors: [] };
     try {
       const libraries = this.wiki!.list();
       result.libraries = { total: libraries.length, pendingSources: 0, pages: 0 };
@@ -339,8 +412,6 @@ export class AgentDataRuntime {
         result.libraries.pages += library.pageCount ?? 0;
       }
     } catch { result.errors.push({ domain: 'wiki', message: '知识库概览暂不可用' }); }
-    try { result.recentMemories = this.memory!.list({ userId, filter: { scope: 'all' }, limit: 5 }).items.map(({ id, content, level, updatedAt, scope, sourceProjectId }) => ({ id, content: content.slice(0, 240), level, updatedAt, scope, ...(sourceProjectId ? { sourceProjectId } : {}) })); }
-    catch { result.errors.push({ domain: 'memory', message: '最近记忆暂不可用' }); }
     try {
       const counts = this.storage!.db.prepare("SELECT SUM(active) AS active,SUM(failed) AS failed FROM (SELECT state IN ('pending','running') AS active,state='failed' AS failed FROM agent_jobs UNION ALL SELECT status IN ('pending','queued','running','blocked') AS active,status='failed' AS failed FROM service_tasks)").get()!;
       result.activeTasks = Number(counts.active ?? 0); result.failedTasks = Number(counts.failed ?? 0);
@@ -349,7 +420,7 @@ export class AgentDataRuntime {
     return result;
   }
 
-  /** Main-process service work shares the same serialized system-task lane as memory extraction. */
+  /** Main-process service work uses the serialized system-task lane. */
   async runServiceTask(input: Omit<QueueTaskInput, 'system'>): Promise<unknown> {
     if (!this.taskQueue || this.closed) throw new Error('agent data task executor is not available');
     this.inFlight += 1;
@@ -362,10 +433,42 @@ export class AgentDataRuntime {
     }
   }
 
+  /** Trusted host port only; deliberately absent from socket/admin method tables. */
+  async describeKnowledgeModel(): Promise<string> {
+    if (this.closed || !this.wiki || !this.options.describeModel) throw new Error('MODEL_UNAVAILABLE');
+    return this.options.describeModel();
+  }
+
+  async completeKnowledge(input: KnowledgeCompletionInput, options: { signal?: AbortSignal; requestId?: string } = {}): Promise<string> {
+    if (this.closed || !this.wiki) throw new Error('agent data runtime is not started');
+    const id = options.requestId ?? randomUUID();
+    if (this.knowledgeCalls.has(id)) throw new Error('duplicate knowledge request id');
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+    this.knowledgeCalls.set(id, controller);
+    this.inFlight += 1;
+    try { return await this.wiki.completeKnowledge(input, { signal: controller.signal }); }
+    finally {
+      options.signal?.removeEventListener('abort', onAbort);
+      this.knowledgeCalls.delete(id);
+      this.inFlight -= 1;
+      this.finishClose();
+    }
+  }
+
+  cancelKnowledge(requestId: string): void { this.knowledgeCalls.get(requestId)?.abort(); }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.memoryService?.dispose();
+    if (this.knowledgeRuntime) {
+      this.inFlight += 1;
+      void this.closeKnowledge().catch(error => console.error('KnowledgeKernel shutdown failed', error))
+        .finally(() => { this.inFlight -= 1; this.finishClose(); });
+    }
+    for (const controller of this.knowledgeCalls.values()) controller.abort();
     if (this.taskQueue) {
       const queuedWiki = this.storage!.db.prepare("SELECT id FROM service_tasks WHERE kind='wiki_page_generate' AND status='queued'").all();
       for (const task of queuedWiki) this.taskQueue.cancel(String(task.id));
@@ -447,7 +550,7 @@ export class AgentDataRuntime {
           throw new RpcError('FORBIDDEN', 'Wiki management is available only in the application');
         }
         const method = value.method.startsWith('wiki.') ? this.wikiMethod(value.method, 'project')
-          : projectJobs ?? this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.adminMethod(value.method) ?? this.toolPermissionMethod(value.method, workspace) ?? this.threadMethod(value.method);
+          : projectJobs ?? this.options.methods?.[value.method] ?? this.adminMethod(value.method) ?? this.toolPermissionMethod(value.method, workspace) ?? this.threadMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         label = value.method;
         const pending = method(value.params);
@@ -523,40 +626,7 @@ export class AgentDataRuntime {
     return undefined;
   }
 
-  /** Deliberately absent from socket dispatch, including the host socket. */
-  private memoryManagementMethod(name: string): AgentDataMethod | undefined {
-    if (!this.memoryService || !this.memory) return undefined;
-    const service = this.memoryService;
-    if (name === 'memory.list') return (p) => service.list(readMemoryList(p));
-    if (name === 'memory.read') return (p) => service.read({ userId: readString(p.userId), id: readString(p.id) });
-    if (name === 'memory.create') return (p) => service.create({ userId: readString(p.userId), draft: readMemoryDraft(p.draft) });
-    if (name === 'memory.update') return (p) => service.update({ userId: readString(p.userId), id: readString(p.id), expectedRevision: readMemoryRevision(p.expectedRevision), draft: readMemoryDraft(p.draft) });
-    if (name === 'memory.delete') return (p) => { this.memory!.remove({ userId: readString(p.userId), workspace: '' }, readString(p.id)); return null; };
-    if (name === 'memory.conversations.list') return (p) => service.listConversations(readMemoryList(p));
-    if (name === 'memory.conversations.read') return (p) => service.readConversation({ userId: readString(p.userId), id: readString(p.id) });
-    return undefined;
-  }
-
-  private memoryMethod(name: string): AgentDataMethod | undefined {
-    if (!this.memory) return undefined;
-    if (name === 'memory.upsert') return (params) => this.memory!.upsert(readScope(params), {
-      level: readLevel(params.level), content: readString(params.content), source: typeof params.source === 'string' ? params.source : undefined,
-    });
-    if (name === 'memory.capture') return async (params) => {
-      const result = await this.memoryService!.capture({ ...readScope(params), projectId: typeof params.projectId === 'string' ? params.projectId : readString(params.workspace), source: readString(params.source), transcript: readString(params.transcript), fingerprint: readString(params.fingerprint), ...(params.extract === false ? { extract: false } : {}) });
-      // Extraction uses the stored delta. A large transcript only needs a receipt, not a second full copy over RPC.
-      return Buffer.byteLength(result.delta) > 65_536 ? { ...result, delta: '' } : result;
-    };
-    if (name === 'memory.captureCommit' || name === 'memory.commitCapture') return (params) => { this.memory!.commitCapture(readScope(params), readString(params.source), readString(params.fingerprint)); return null; };
-    if (name === 'memory.completeExtraction') return (params) => this.memoryService!.completeExtraction(readString(params.taskId), params.output);
-    if (name === 'memory.search') return (params) => this.memoryService!.search({ ...readQueryScope(params), projectId: typeof params.projectId === 'string' ? params.projectId : (typeof params.workspace === 'string' ? params.workspace : ''), query: readString(params.query), limit: typeof params.limit === 'number' ? params.limit : 20 });
-    if (name === 'memory.conversations.search') return (params) => this.memory!.searchConversations(readQueryScope(params), readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
-    if (name === 'memory.admin.overview') return (params) => this.memory!.overview(readQueryScope(params));
-    if (name === 'memory.delete') return (params) => { this.memory!.remove(readScope(params), readString(params.id)); return null; };
-    return undefined;
-  }
-
-  private adminMethod(name: string): AgentDataMethod | undefined {
+  private adminMethod(name: string, trusted = false): AgentDataMethod | undefined {
     if (!this.jobs) return undefined;
     if (name === 'admin.jobs.list') return (params) => this.jobs!.list(params.state === undefined ? undefined : readJobState(params.state));
     if (name === 'codeRetrieval.admin.projects') return () => this.options.codeRetrieval?.projects() ?? [];
@@ -585,10 +655,29 @@ export class AgentDataRuntime {
       return this.options.codeRetrieval.call(workspace, tool, args);
     };
     if (name === 'admin.jobs.get') return (p) => this.jobs!.get(readString(p.id));
+    if (trusted && name === 'admin.jobs.stage') return (p) => {
+      const id = readString(p.id);
+      if (p.progress !== undefined && (typeof p.progress !== 'number' || !Number.isFinite(p.progress) || p.progress < 0 || p.progress > 100)) throw new RpcError('INVALID_PARAMS', 'progress must be between 0 and 100');
+      if ((p.processed === undefined) !== (p.total === undefined)) throw new RpcError('INVALID_PARAMS', 'processed and total must be provided together');
+      this.jobs!.recordStage(id, readString(p.stage), p.processed === undefined ? undefined : { processed: Number(p.processed), total: Number(p.total) });
+      if (p.progress !== undefined) this.jobs!.progress(id, p.progress as number);
+      if (p.message !== undefined || p.currentPage !== undefined) this.jobs!.updateMetadata(id, this.readJobDetailPatch(p));
+      return this.jobs!.get(id);
+    };
+    if (trusted && name === 'admin.jobs.metadata') return (p) => {
+      const patch = readRecord(p.patch), detail = this.readJobDetailPatch(patch);
+      if (patch.payload !== undefined) {
+        const payload = parseRepoWikiJobPayload(patch.payload);
+        if (!payload) throw new RpcError('INVALID_PARAMS', 'Repo Wiki payload requires valid parameters and confirmation');
+        detail.payload = payload;
+      }
+      return this.jobs!.updateMetadata(readString(p.id), detail);
+    };
     if (name === 'admin.jobs.remove') return (p) => {
       try {
         const id = readString(p.id);
         const task = this.taskViews!.read({ source: 'user', id });
+        if (task?.capabilities.removeReason === 'native_referenced') throw new RpcError('JOB_REFERENCED', 'Native Wiki 发布或恢复仍引用此任务');
         if (task && !task.capabilities.remove) throw new Error('JOB_ACTIVE');
         return this.jobs!.remove(id);
       }
@@ -604,6 +693,11 @@ export class AgentDataRuntime {
     if (name === 'admin.jobs.cancel') return async (p) => {
       const id = readString(p.id);
       const job = this.jobs!.get(id);
+      if (job?.metadata?.repoWiki && this.knowledgeRuntime) {
+        await this.knowledgeRuntime.coordinator.act({ version: 1, requestId: randomUUID(), taskId: id, action: 'cancel', expectedRevision: job.metadata.repoWiki.revision });
+        return this.jobs!.get(id);
+      }
+      if (!job || !['pending', 'running'].includes(job.state)) return job;
       const runner = job ? this.options.jobRunners?.[job.kind] : undefined;
       if (!runner) return this.jobs!.cancel(id);
       // 有执行器时取消只是"请求"：状态由执行器确认停止后通过 admin.jobs.markCancelled 落定，
@@ -619,6 +713,15 @@ export class AgentDataRuntime {
     if (name === 'admin.jobs.markCancelled') return (p) => this.jobs!.cancel(readString(p.id));
     if (name === 'admin.jobs.create') return (p) => {
       const kind = readString(p.kind);
+      if (kind === 'repoWiki.generate') {
+        if (this.knowledgeRuntime) throw new RpcError('INVALID_PARAMS', 'KNOWLEDGE_START_REQUIRED: use the knowledge coordinator');
+        if (!trusted) throw new RpcError('FORBIDDEN', 'Repo Wiki generation is available only through the application');
+        const metadata = parseJobMetadata(p.metadata), payload = parseRepoWikiJobPayload(metadata?.payload);
+        if (!payload) throw new RpcError('INVALID_PARAMS', 'Repo Wiki payload requires valid parameters and confirmation');
+        if (!this.options.jobRunners?.[kind]) throw new RpcError('UNAVAILABLE', 'Repo Wiki runner is not available');
+        return this.createUserJob(kind, readString(p.workspace), { ...metadata, payload });
+      }
+      if (kind === 'memory' || kind.startsWith('memory_') || kind.startsWith('memory.')) throw new RpcError('INVALID_PARAMS', 'Memory tasks are no longer supported');
       if (kind.startsWith('wiki.')) throw new RpcError('INVALID_PARAMS', 'Wiki jobs are no longer created through the job queue');
       const workspace = readString(p.workspace);
       return this.createUserJob(kind, workspace);
@@ -629,6 +732,7 @@ export class AgentDataRuntime {
     if (name === 'admin.jobs.fail') return (p) => this.jobs!.fail(readString(p.id), readString(p.error));
     if (name === 'admin.config.get') return (p) => this.jobs!.config(readString(p.module));
     if (name === 'admin.config.update') return (p) => {
+      if (p.module === 'memory') throw new RpcError('INVALID_PARAMS', 'Memory configuration is no longer supported');
       try { return this.jobs!.updateConfig(readString(p.module), readRecord(p.value), typeof p.version === 'number' ? p.version : -1); }
       catch (error) { if (error instanceof Error && error.message === 'VERSION_CONFLICT') throw new RpcError('VERSION_CONFLICT', 'configuration version is stale'); throw error; }
     };
@@ -642,26 +746,53 @@ export class AgentDataRuntime {
   private createUserJob(kind: string, workspace: string, metadata?: JobMetadata, expectedModel?: string): Job {
     if (this.closed) throw new Error('runtime is closed');
     const runner = this.options.jobRunners?.[kind];
+    if (kind === 'repoWiki.generate') {
+      const existing = this.jobs!.list().find((job) => job.kind === kind && ['pending', 'running'].includes(job.state) && this.sameJobTarget(job, { kind, workspace, metadata }));
+      if (existing) return existing;
+    }
     const create = () => {
       if (metadata?.retryOf) {
         const original = this.jobs!.get(metadata.retryOf);
         if (!original || !['failed', 'cancelled'].includes(original.state) || original.kind !== kind || original.workspace !== workspace) throw new Error('TASK_RETRY_UNAVAILABLE');
       }
-      if (runner && this.jobs!.list().some((job) => job.kind === kind && ['pending', 'running'].includes(job.state) && normalizeWorkspace(job.workspace) === normalizeWorkspace(workspace))) throw new RpcError('JOB_ALREADY_RUNNING', `${kind} is already running for this workspace`);
-      const target = kind === 'codegraph.sync' ? { type: 'project' as const, id: workspace } : undefined;
-      const job = this.jobs!.create({ kind, workspace, ...(target || metadata ? { metadata: { ...metadata, ...(target ? { target, resourceName: workspace } : {}) } } : {}) });
+      if (runner && this.jobs!.list().some((job) => job.kind === kind && ['pending', 'running'].includes(job.state) && this.sameJobTarget(job, { kind, workspace, metadata }))) throw new RpcError('JOB_ALREADY_RUNNING', `${kind} is already running for this workspace`);
+      const target = kind === 'codegraph.sync' ? { type: 'project' as const, id: workspace }
+        : kind === 'repoWiki.generate' ? { type: 'repoWiki' as const, id: workspace, language: parseRepoWikiJobPayload(metadata?.payload)?.language } : undefined;
+      const job = this.jobs!.create({ kind, workspace, ...(target || metadata ? { metadata: { ...metadata, ...(target ? { target, resourceName: kind === 'repoWiki.generate' ? metadata?.resourceName || workspace : workspace } : {}) } } : {}) });
       return job;
     };
     const job = create();
-    if (runner) {
-      this.inFlight += 1;
-      void Promise.resolve().then(() => runner.run(job.id, workspace, expectedModel)).catch((error) => {
+    if (runner) this.dispatchJob(job, expectedModel);
+    return job;
+  }
+
+  private dispatchJob(job: Job, expectedModel?: string): void {
+    const runner = this.options.jobRunners?.[job.kind];
+    if (!runner) return;
+    this.inFlight += 1;
+    void Promise.resolve().then(() => job.kind === 'repoWiki.generate'
+      ? runner.run(job.id, job.workspace, expectedModel, job.metadata?.payload)
+      : runner.run(job.id, job.workspace, expectedModel)).catch((error) => {
         const current = this.jobs!.get(job.id);
         if (!current || ['cancelled', 'completed', 'failed'].includes(current.state)) return;
         this.jobs!.fail(job.id, error instanceof Error ? error.message : String(error));
       }).finally(() => { this.inFlight -= 1; this.finishClose(); });
+  }
+
+  private sameJobTarget(a: Pick<Job, 'kind' | 'workspace' | 'metadata'>, b: Pick<Job, 'kind' | 'workspace' | 'metadata'>): boolean {
+    if (normalizeWorkspace(a.workspace) !== normalizeWorkspace(b.workspace)) return false;
+    if (a.kind !== 'repoWiki.generate') return true;
+    const left = parseRepoWikiJobPayload(a.metadata?.payload), right = parseRepoWikiJobPayload(b.metadata?.payload);
+    return !!left && !!right && left.projectId === right.projectId && left.language === right.language && left.target === right.target;
+  }
+
+  private readJobDetailPatch(p: Record<string, unknown>): Partial<JobMetadata> {
+    const patch: Partial<JobMetadata> = {};
+    for (const [key, max] of [['message', 1000], ['currentPage', 500]] as const) if (p[key] !== undefined) {
+      if (typeof p[key] !== 'string' || p[key].length > max) throw new RpcError('INVALID_PARAMS', `invalid ${key}`);
+      patch[key] = p[key];
     }
-    return job;
+    return patch;
   }
 
   private threadMethod(name: string): AgentDataMethod | undefined {
@@ -719,31 +850,6 @@ function readTaskRef(value: Record<string, unknown>): TaskRef {
   if (value.source !== 'user' && value.source !== 'system') throw new RpcError('INVALID_PARAMS', 'task source is required');
   return { source: value.source, id: readString(value.id) };
 }
-function readMemoryOwner(value: unknown): MemoryOwner {
-  const owner = readRecord(value);
-  if (owner.scope === 'global') return { scope: 'global' };
-  if (owner.scope === 'project') return { scope: 'project', projectId: readString(owner.projectId) };
-  throw new RpcError('INVALID_PARAMS', 'an explicit memory owner is required');
-}
-function readMemoryDraft(value: unknown): MemoryDraft {
-  const draft = readRecord(value);
-  if (draft.source !== undefined && typeof draft.source !== 'string') throw new RpcError('INVALID_PARAMS', 'memory source must be text');
-  return { content: readString(draft.content), level: readLevel(draft.level), owner: readMemoryOwner(draft.owner), source: draft.source as string | undefined };
-}
-function readMemoryRevision(value: unknown): number {
-  if (!Number.isSafeInteger(value) || Number(value) < 0) throw new RpcError('INVALID_PARAMS', 'expected memory revision is required');
-  return Number(value);
-}
-function readMemoryList(value: Record<string, unknown>): MemoryListInput {
-  const record = readRecord(value.filter);
-  const filter: MemoryFilter = record.scope === 'all' ? { scope: 'all' } : readMemoryOwner(record);
-  if (value.query !== undefined && typeof value.query !== 'string') throw new RpcError('INVALID_PARAMS', 'memory query must be text');
-  if (value.limit !== undefined && (typeof value.limit !== 'number' || !Number.isFinite(value.limit))) throw new RpcError('INVALID_PARAMS', 'memory limit must be finite');
-  return { userId: readString(value.userId), filter, ...(value.query === undefined ? {} : { query: value.query as string }),
-    ...(value.level === undefined ? {} : { level: readLevel(value.level) }), ...(value.cursor === undefined ? {} : { cursor: readString(value.cursor) }),
-    ...(value.limit === undefined ? {} : { limit: value.limit as number }),
-  };
-}
 function wikiRpcError(error: unknown): RpcError {
   if (error instanceof RpcError) return error;
   const message = error instanceof Error ? error.message : String(error);
@@ -758,15 +864,7 @@ function normalizeWorkspace(workspace: string): string {
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
-function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value === 1 || value === 2 || value === 3) return value; throw new RpcError('INVALID_PARAMS', 'level must be 0..3'); }
 function readJobState(value: unknown): import('./jobStore').JobState { if (value === 'pending' || value === 'running' || value === 'completed' || value === 'failed' || value === 'cancelled') return value; throw new RpcError('INVALID_PARAMS', 'invalid job state'); }
-function readScope(value: Record<string, unknown>): import('./memoryStore').MemoryScope { return { userId: readString(value.userId), workspace: readString(value.workspace), projectId: value.projectId === undefined ? undefined : readString(value.projectId), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId), scope: value.scope === 'global' ? 'global' : 'project', includeOtherProjects: value.includeOtherProjects === true }; }
-/**
- * 只读查询作用域：workspace 可缺省（全局视图没有"当前项目"）。
- * MemoryStore.search/overview 只用 projectId(scope) 与 includeOtherProjects，不直接读 workspace，
- * 因此缺省时传 '' 是安全的；写入路径仍用 readScope 强制要求 workspace。
- */
-function readQueryScope(value: Record<string, unknown>): import('./memoryStore').MemoryScope { return { userId: readString(value.userId), workspace: typeof value.workspace === 'string' && value.workspace.trim() ? value.workspace : '', projectId: value.projectId === undefined ? undefined : readString(value.projectId), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId), scope: value.scope === 'global' ? 'global' : 'project', includeOtherProjects: value.includeOtherProjects === true }; }
 function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }
 function readStringArray(value: unknown): string[] { if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new RpcError('INVALID_PARAMS', 'string array is required'); return [...value] as string[]; }
 function isTurnStatus(value: unknown): value is import('../app/appServer/types').TurnStatus { return value === 'queued' || value === 'running' || value === 'blocked' || value === 'completed' || value === 'failed' || value === 'cancelled'; }

@@ -25,7 +25,7 @@ export const operationsStyles = createStaticStyles(({ css }) => ({
     tr:hover &, tr:focus-within & { opacity: 1; }
     @media (hover: none) { opacity: 1; }
   `,
-  /** 筛选下拉按选项内容撑开，避免路径/名称被截成 memory_extr... */
+  /** 筛选下拉按选项内容撑开，避免路径/名称被截成 codegraph.s... */
   filterPopup: css`
     .ant-select-item-option-content {
       overflow: visible;

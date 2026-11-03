@@ -1,0 +1,198 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:73680) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:81096) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/stores/todoConsistency.test.ts (7 tests | 6 failed) 24ms
+     × 执行结果不依赖 start 帧存在 10ms
+     × 只有持久化结果消息到达时也能恢复清单 2ms
+     × 回合完整结果补回缺失的最终 todo，放在最终正文之前 4ms
+     × 终态之后迟到的进度帧不回退已完成结果 4ms
+     × 较长 UI 历史不能遮住后端最终成功或清空结果 2ms
+     × 同消息数和末条正文时，todo 内容变化仍能让缓存失效 1ms
+ ❯ |renderer| src/stores/agent.test.ts (54 tests | 3 failed) 489ms
+     × 同签名快照也同步停止原因和 todo 完成标记 30ms
+     × 空闲会话缓存恢复后收尾标记立即可用 7ms
+     × 截断去掉终态以后，不继续沿用旧 todo 完成标记 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/stores/agent.test.ts > createAgentStore > 同签名快照也同步停止原因和 todo 完成标记
+AssertionError: expected 'stop' to be 'aborted' // Object.is equality
+
+Expected: "aborted"
+Received: "stop"
+
+ ❯ src/stores/agent.test.ts:111:53
+    109|     expect(store.useStore.getState().todoListFinished).toBe(true);
+    110|     store.loadMessages(todoHistory('aborted'), { force: true, sessionP…
+    111|     expect(store.useStore.getState().assistantStop).toBe('aborted');
+       |                                                     ^
+    112|     expect(store.useStore.getState().todoListFinished).toBe(false);
+    113|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  |renderer| src/stores/agent.test.ts > createAgentStore > 空闲会话缓存恢复后收尾标记立即可用
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ src/stores/agent.test.ts:120:56
+    118|     store.loadMessages([], { force: true, sessionPath: '/s/todo-other.…
+    119|     expect(store.showCachedSession('/s/todo-cached.jsonl')).toBe(true);
+    120|     expect(store.useStore.getState().todoListFinished).toBe(true);
+       |                                                        ^
+    121|     expect(store.useStore.getState().assistantStop).toBe('stop');
+    122|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  |renderer| src/stores/agent.test.ts > createAgentStore > 截断去掉终态以后，不继续沿用旧 todo 完成标记
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/stores/agent.test.ts:133:56
+    131|     expect(store.useStore.getState().todoListFinished).toBe(true);
+    132|     await store.truncateTo('cut-todo', 'drop-target');
+    133|     expect(store.useStore.getState().todoListFinished).toBe(false);
+       |                                                        ^
+    134|     expect(store.useStore.getState().assistantStop).toBeUndefined();
+    135|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > 执行结果不依赖 start 帧存在
+AssertionError: expected undefined to deeply equal [ 'completed' ]
+
+- Expected:
+[
+  "completed",
+]
+
++ Received:
+undefined
+
+ ❯ src/stores/todoConsistency.test.ts:17:38
+     15|   it('执行结果不依赖 start 帧存在', () => {
+     16|     const state = applyEvent(initialAgentState(), { type: 'tool_execut…
+     17|     expect(statuses(state.messages)).toEqual(['completed']);
+       |                                      ^
+     18|   });
+     19|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > 只有持久化结果消息到达时也能恢复清单
+AssertionError: expected undefined to deeply equal [ 'completed' ]
+
+- Expected:
+[
+  "completed",
+]
+
++ Received:
+undefined
+
+ ❯ src/stores/todoConsistency.test.ts:22:38
+     20|   it('只有持久化结果消息到达时也能恢复清单', () => {
+     21|     const state = applyEvent(initialAgentState(), { type: 'message_end…
+     22|     expect(statuses(state.messages)).toEqual(['completed']);
+       |                                      ^
+     23|   });
+     24|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > 回合完整结果补回缺失的最终 todo，放在最终正文之前
+AssertionError: expected [ 'in_progress' ] to deeply equal [ 'completed' ]
+
+- Expected
++ Received
+
+  [
+-   "completed",
++   "in_progress",
+  ]
+
+ ❯ src/stores/todoConsistency.test.ts:29:38
+     27|     const before = { ...initialAgentState(), messages: [card('previous…
+     28|     const state = applyEvent(before, { type: 'agent_end', messages: [r…
+     29|     expect(statuses(state.messages)).toEqual(['completed']);
+       |                                      ^
+     30|     expect(state.messages.map((m) => m.kind === 'tool' ? m.toolCallId …
+     31|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > 终态之后迟到的进度帧不回退已完成结果
+AssertionError: expected [ 'pending' ] to deeply equal [ 'completed' ]
+
+- Expected
++ Received
+
+  [
+-   "completed",
++   "pending",
+  ]
+
+ ❯ src/stores/todoConsistency.test.ts:37:38
+     35|       type: 'tool_execution_update', toolCallId: 'stable', toolName: '…
+     36|     } as AgentEvent);
+     37|     expect(statuses(state.messages)).toEqual(['completed']);
+       |                                      ^
+     38|   });
+     39|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > 较长 UI 历史不能遮住后端最终成功或清空结果
+AssertionError: expected [ 'in_progress' ] to deeply equal [ 'completed' ]
+
+- Expected
++ Received
+
+  [
+-   "completed",
++   "in_progress",
+  ]
+
+ ❯ src/stores/todoConsistency.test.ts:51:41
+     49|     const aligned = snapshotMessages([result('last-write', 'completed'…
+     50|     expect(aligned.processed.some((m) => m.kind === 'notice')).toBe(tr…
+     51|     expect(statuses(aligned.sanitized)).toEqual(['completed']);
+       |                                         ^
+     52|     const cleared = snapshotMessages([{ ...result('clear', 'completed'…
+     53|     expect(statuses(cleared.sanitized)).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  |renderer| src/stores/todoConsistency.test.ts > todo result consistency > 同消息数和末条正文时，todo 内容变化仍能让缓存失效
+AssertionError: expected '2:a:4:0:0' not to be '2:a:4:0:0' // Object.is equality
+ ❯ src/stores/todoConsistency.test.ts:58:70
+     56|   it('同消息数和末条正文时，todo 内容变化仍能让缓存失效', () => {
+     57|     const final = { kind: 'assistant', id: 'final', text: '相同正文', thin…
+     58|     expect(sessionSignature([card('same', 'completed'), final])).not.t…
+       |                                                                      ^
+     59|   });
+     60| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  9 failed | 52 passed (61)
+   Start at  14:39:12
+   Duration  30.92s (transform 5.19s, setup 35.60s, import 4.73s, tests 513ms, environment 15.04s)
+

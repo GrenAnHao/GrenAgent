@@ -1,4 +1,3 @@
-import { clearComposerUserPick } from '../features/chat/input/actions/ModelThinkingAction';
 import { useSessionStore } from '../store/session';
 import { pathsEquivalent } from './pathUtils';
 
@@ -19,10 +18,9 @@ export function needsSessionCreateOnSend(input: {
  * 同工作区时 reset 当前消息区；切工作区只改 activeWorkspace，交给 Workspace effect。
  */
 export function enterPendingNewSession(cwd: string, onSameWorkspace?: () => void): void {
-  clearComposerUserPick(cwd);
   const st = useSessionStore.getState();
-  st.setActiveSession('');
   st.setDraftConversation(cwd);
+  st.setActiveSession('');
   if (st.activeWorkspace && pathsEquivalent(st.activeWorkspace, cwd)) {
     onSameWorkspace?.();
     return;
@@ -36,11 +34,19 @@ export function applyOpenedProject(
   sessionFile: string | null | undefined,
   onSameWorkspace?: () => void,
 ): void {
+  const st = useSessionStore.getState();
   if (sessionFile) {
-    const st = useSessionStore.getState();
     st.clearDraftConversation();
     st.setActiveSession(sessionFile);
     st.setWorkspaceSessionPath(cwd, sessionFile);
+    if (!(st.activeWorkspace && pathsEquivalent(st.activeWorkspace, cwd))) {
+      st.setActiveWorkspace(cwd);
+    }
+    return;
+  }
+  if (st.draftConversationCwd && pathsEquivalent(st.draftConversationCwd, cwd) && st.draftConversationId) {
+    // 再次打开当前未使用项目是恢复，不等同于显式“新建”另一份草稿。
+    st.setActiveSession('');
     if (!(st.activeWorkspace && pathsEquivalent(st.activeWorkspace, cwd))) {
       st.setActiveWorkspace(cwd);
     }

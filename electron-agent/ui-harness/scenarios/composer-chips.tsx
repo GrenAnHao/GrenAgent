@@ -55,20 +55,16 @@ exposeActions({
     useComposerFilesStore.getState().addPastedText(KEY, { ...makePastedText('line1\nline2\nline3'), id: 'pt-fixed' })
   },
   dropMemory: () => useComposerFilesStore.setState({ byKey: {} }),
-  /**
-   * 模拟重启：内存清空但存档不动。setState 会触发 persist 把空内容写进去，
-   * 所以先把存档读出来，等空内容落盘后再原样写回。
-   */
-  dropMemoryKeepStorage: async () => {
-    const raw = await readStored()
-    useComposerFilesStore.setState({ byKey: {} })
-    const deadline = Date.now() + 3000
-    while (Date.now() < deadline) {
-      const now = await readStored()
-      if (typeof now === 'string' && !now.includes(KEY)) break
-      await new Promise((resolve) => setTimeout(resolve, 50))
+  /** 模拟重启只清内存；临时关闭写入，避免生成独立 owner 桶的删除遮罩。 */
+  dropMemoryKeepStorage: () => {
+    const storage = useComposerFilesStore.persist.getOptions().storage
+    if (!storage) throw new Error('composerFiles persist storage missing')
+    useComposerFilesStore.persist.setOptions({ storage: { ...storage, setItem: () => {} } })
+    try {
+      useComposerFilesStore.setState({ byKey: {} })
+    } finally {
+      useComposerFilesStore.persist.setOptions({ storage })
     }
-    if (typeof raw === 'string') await writeStored(raw)
   },
   rehydrate: async () => {
     await useComposerFilesStore.persist.rehydrate()
@@ -92,17 +88,6 @@ async function readStored(): Promise<string | null> {
   })
   db.close()
   return typeof value === 'string' ? value : null
-}
-
-async function writeStored(raw: string): Promise<void> {
-  const db = await openIdb()
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('kv', 'readwrite')
-    tx.objectStore('kv').put(raw, 'pi-composer-files')
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
-  db.close()
 }
 
 export default function ComposerChipsScenario(): ReactElement {

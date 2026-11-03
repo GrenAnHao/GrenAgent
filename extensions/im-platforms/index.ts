@@ -10,7 +10,7 @@
 //   - bounded context: the window can't blow up — only the last N messages are
 //     ever sent to the model;
 //   - exactly one reply per inbound message (no per-step forwarding);
-//   - no self-spam: auto drivers (goal re-entry, memory) are forced OFF in the
+//   - no self-spam: automatic goal re-entry is forced OFF in the
 //     isolated agent, so it can never loop itself into a message flood.
 //
 // Capability is owner-gated: with WECHAT_OC_OWNER set, wechat.ts only forwards

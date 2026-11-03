@@ -13,6 +13,8 @@ interface SessionStore {
   worksDir: string; // ~/.pi/agent/works 的 canonical 前缀（区分对话/项目）
   activeWorkspace: string; // 当前选中项目 cwd（替代常量 WORKSPACE，默认 '.'）
   draftConversationCwd: string | null; // 点了新建但尚未首发落盘的 cwd（对话 scratch 或项目）
+  /** 未落盘草稿的独立身份；不能用 cwd 代替，否则同项目两份草稿互相覆盖。 */
+  draftConversationId: string | null;
   activeSessionPath: string | null;
   workspaceSessionPaths: Record<string, string>; // workspace(cwd) → 该 ws 当前活跃 sessionPath
   searchKeyword: string;
@@ -39,8 +41,8 @@ interface SessionStore {
   getMergedSessions: () => SessionInfo[];
   setWorksDir: (dir: string) => void;
   setActiveWorkspace: (cwd: string) => void;
-  setDraftConversation: (cwd: string | null) => void;
-  clearDraftConversation: (cwd?: string) => void;
+  setDraftConversation: (cwd: string | null, draftId?: string) => void;
+  clearDraftConversation: (cwd?: string, draftId?: string) => void;
   setActiveSession: (path: string) => void;
   setWorkspaceSessionPath: (workspace: string, path: string) => void;
   setSearchKeyword: (kw: string) => void;
@@ -59,6 +61,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   worksDir: '',
   activeWorkspace: '',
   draftConversationCwd: null,
+  draftConversationId: null,
   activeSessionPath: null,
   workspaceSessionPaths: {},
   searchKeyword: '',
@@ -123,11 +126,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   getMergedSessions: () => mergeAllSessions(get().allSessions, get().optimisticSessions),
   setWorksDir: (worksDir) => set({ worksDir }),
   setActiveWorkspace: (activeWorkspace) => set({ activeWorkspace }),
-  setDraftConversation: (draftConversationCwd) => set({ draftConversationCwd }),
-  clearDraftConversation: (cwd) =>
+  setDraftConversation: (draftConversationCwd, draftId) => set({
+    draftConversationCwd,
+    draftConversationId: draftConversationCwd ? draftId || `draft:${crypto.randomUUID()}` : null,
+  }),
+  clearDraftConversation: (cwd, draftId) =>
     set((s) =>
-      !cwd || (s.draftConversationCwd && pathsEquivalent(s.draftConversationCwd, cwd))
-        ? { draftConversationCwd: null }
+      (!cwd || (s.draftConversationCwd && pathsEquivalent(s.draftConversationCwd, cwd))) &&
+      (!draftId || s.draftConversationId === draftId)
+        ? { draftConversationCwd: null, draftConversationId: null }
         : s,
     ),
   setActiveSession: (path) => set({ activeSessionPath: path }),

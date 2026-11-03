@@ -1,0 +1,212 @@
+[
+  {
+    "path": "docs/architecture.md",
+    "sha256": "124e151c2b98df8f9fbc4b8d2a638e6a06ca80cf1c6ddd195f12c68e5dfcfe25",
+    "baseline": false
+  },
+  {
+    "path": "docs/repo-wiki.md",
+    "sha256": "1f79c037ca446e737a865d9782304603de32754d819ef6146333fb4bef611cc9",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/electron/app/repoWikiHostProjects.integration.test.ts",
+    "sha256": "dc538c680ed7bcab388febf626703c5b05cf187b166908d0c13b04f885ce9d1c",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/electron/app/repoWikiLazy.integration.test.ts",
+    "sha256": "9467656addae5fc9f1f7ad28eba06d7d0fafd5d383bd856ef2062a877fe23ba2",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/electron/app/repoWikiLazyHost.test.ts",
+    "sha256": "2d6c3bd5e0ffe479d5dcda13efa489b8d603781a1f61ffd627f1abc16f67cd0b",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/electron/app/repoWikiService.test.ts",
+    "sha256": "75e26aa0f159a4dd27979e24a356143a30cd789a49f8f1ffa5c8c8d1d8409818",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/electron/app/repoWikiService.ts",
+    "sha256": "77a312d439ee2f5d95e1d3ea596a1810c0e3c88e0a19cc1746369fa4dfbd98be",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/electron/app/repoWikiWorkflow.integration.fixture.ts",
+    "sha256": "6b396b50c303e643412d500e0a9f750cb43ca5407c344758aaa6732134c0ac59",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/electron/app/repoWikiWorkflow.integration.test.ts",
+    "sha256": "c51b627bf9d8485241cc0c038329c15e4d41cb21935833c4b1805add78174656",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/electron/app/workspaceService.ts",
+    "sha256": "056cc14fb83e1493747176f1a5ceda4269db0d1ed7e88e0d947433a5ca979558",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/electron/main.ts",
+    "sha256": "f666a0fea3b31dce7fb77ba5912fbdba05df15e9e2dbd4a31eb2037a1e27dd02",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/scripts/fixtures/repoWikiWorkflowAgentDataHost.ts",
+    "sha256": "a75b1fd2386c88159b980c2f88b7de2596a31cb51e4620edf13b048baa3a5ba2",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/src/features/repoWiki/RepoWikiWorkspace.test.tsx",
+    "sha256": "a07da9df034b6180c178c425f2d5a5846215d4c33687c3e5b97e5febc1aaf3eb",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/src/features/repoWiki/RepoWikiWorkspace.tsx",
+    "sha256": "a9472239ff6f938439fd8c75e6d0216934700690029d39a3f5d50d2d5cb35c61",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/src/features/repoWiki/testing/runtimeFixture.ts",
+    "sha256": "a0d9e70d50e2ffa8ff8232dc435dea8af5aee42884559d95fe77f9ac5f04c86a",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/ui-harness/probes/repo-wiki.mjs",
+    "sha256": "0589f3f3599fab2caa0fa71910f9e2e721a0edd4b7e3347cab783b34e4bfb062",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/ui-harness/scenarios/repo-wiki.tsx",
+    "sha256": "c035f8a224ad0191ddf428ec094ac9f8fd070c4628b1799ee70ee6e5d2a65b88",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/apps/web/src/App.tsx",
+    "sha256": "171d6fee155cd4e645d68d2f2e353ee48c021532ce6ed9e9b0a4de0343848a56",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/apps/web/src/RepoWikiPanel.tsx",
+    "sha256": "69f29bf00978c6dc90cf19452e24649528f18b6b3ed13a59898c365376d5edad",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/apps/web/src/workspace/ProjectCollection.tsx",
+    "sha256": "a78b18d8f1fb92e934e806785fa6b01cebe190b3ce7ec4bf9f8db9e1984939a6",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/apps/web/src/workspace/api.ts",
+    "sha256": "921ea75cc8d596c43bb84c008123cc7a5e15502e1173d101fa0a2ca259002945",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/apps/web/src/workspace/collection.css",
+    "sha256": "388b22e08b90d6d4fef661430de3168808c9af198a7705f8fc116a8a61b3bfee",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/contracts/src/host.ts",
+    "sha256": "52c15a84e38fbfc5baae5b52894e1b5836dd950b41e49b9e21e538fa54764468",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/contracts/src/index.ts",
+    "sha256": "2db0d2aa136a2af08945b2adfccda2e89de87c131c99d6f0e8ded37515751dc4",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/core/src/engine.ts",
+    "sha256": "ba6e0d260a130e7c928f5e6896018f5d4397689e88bdcd2c9245d670c7be2dd6",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/core/src/project-files.ts",
+    "sha256": "145c84516af61641a5fa1e634b893e0823626b00b6c4646dcc808998567106ad",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/core/src/scanner.ts",
+    "sha256": "0e7e8f1324fa823d5a350e093a1f191ce994f80965a6bc719bc927f34f192cf7",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/core/tests/cards.test.ts",
+    "sha256": "78cfb54d210ae313e595ea84672c785a8941157ba8b3eff551f4c70eb78b2675",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/core/tests/engine.test.ts",
+    "sha256": "076f66351fa1d13d1c22dffe30a5ae233b991498c2686ef455c810e4afc33ecc",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/core/tests/migration.test.ts",
+    "sha256": "335b7166ba14c4bc0214b2fe82b55522e0b836e216abbd808f0f5bd65b30b176",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/core/tests/project-files.test.ts",
+    "sha256": "b2b29bc22a17d49f82080185ca84fd0bce7f2a7f0350470a7469a9899cb83a39",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/process/src/child.ts",
+    "sha256": "375b28932bf74856a75fa0eaea9d5f070b7257338b0923c7919fca1b932c17b5",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/process/src/client.ts",
+    "sha256": "243fd7e42bb8de8fa6424ac5c5097eeaf15e0ae19a934d89c26040abdc551f99",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/process/src/legacy-snapshot.ts",
+    "sha256": "4222e75ae3f0916c02792de66117df60e034e7f566142c70bd6220bb906ee4b2",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/process/tests/client.test.ts",
+    "sha256": "c217cab44c26383d47e37d7af3eb728aa5eaf95c65bcc94c9644da8cf60e74d5",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/process/tests/migration-worker.test.ts",
+    "sha256": "917a603c7efc58ccd9b5ad6a53fb52823006ece0d9dfb13c7c6050bb60437497",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/process/tests/scopes.test.ts",
+    "sha256": "520abf583c9e45f21be691bef3dfa400d89c71f32416a7bee56804e67ef704b1",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/process/tests/service-child.test.ts",
+    "sha256": "b2536afc070f7ffe55d6b4226793ec7c239ffc9856bf58723392553b526d2aaf",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/service/src/service.ts",
+    "sha256": "3c5686f2eacfafd3347ad217cf5754ee1714c0250b38a8c74b3796ef38d4e3a7",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/service/tests/cards.test.ts",
+    "sha256": "7ff03a8e524b33cfbf0cd0d325a66287ec849bbd9d8c28fe58227e859976b064",
+    "baseline": true
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/service/tests/lazy.test.ts",
+    "sha256": "c9acc370cd30aec2fbb139c28d694fbc5230eeebc661749d6d9564a98010765b",
+    "baseline": false
+  },
+  {
+    "path": "electron-agent/vendor/repo-wiki/packages/service/tests/service.test.ts",
+    "sha256": "14e10662fb8f6fb23e5af5ccfb0634cfb8b046b29051254539088e994198efcd",
+    "baseline": true
+  }
+]

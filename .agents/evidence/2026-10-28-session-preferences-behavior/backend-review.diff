@@ -1,0 +1,914 @@
+diff --git a/cli/src/gren-runtime.ts b/cli/src/gren-runtime.ts
+index ab8ef6e5..96615b24 100644
+--- a/cli/src/gren-runtime.ts
++++ b/cli/src/gren-runtime.ts
+@@ -9,6 +9,7 @@ import {
+ } from "@earendil-works/pi-coding-agent";
+ import { manifestExtensions } from "../../extensions/index.js";
+ import { getConfig } from "../../extensions/_shared/runtime-config.js";
++import { readRequestedPreferences, type SessionPreferenceEntry } from "../../extensions/_shared/session-preferences.js";
+ import { installToolRefreshBatching } from "../../extensions/_shared/tool-refresh-batch.js";
+ import { attachSessionCwd } from "../../extensions/_shared/session-cwd.js";
+ import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
+@@ -41,6 +42,35 @@ const realDeps: GrenRuntimeDeps = {
+   getConfig,
+ };
+ 
++/**
++ * 会话日志里保存的“请求值”恢复成会话的初始选项。
++ *
++ * SDK 从 `model_change` / `thinking_level_change` 恢复出来的是**有效值**：setModel 会追加能力钳制后的
++ * 档位（换到非推理模型就是 off），冷恢复只能看到这些。用户请求的 high 在 `session-preferences` 里，
++ * 这里把它作为显式初始值传给会话工厂，SDK 再按当前模型钳一次（钳制结果只影响有效值，不改日志里的请求值）。
++ *
++ * - 模型不在当前目录里：不传 model（不能静默改用另一个模型），保留会话自己的日志。
++ * - 没有 canonical 条目：完全交给 SDK，不干预旧会话恢复。
++ */
++function restoredSessionOptions(
++  modelRuntime: { getModel(provider: string, id: string): unknown; hasConfiguredAuth?(provider: string): boolean },
++  sessionManager: { getEntries?(): unknown[] },
++): { model?: unknown; thinkingLevel?: string } {
++  const entries = typeof sessionManager?.getEntries === 'function' ? sessionManager.getEntries() : [];
++  // 只看 canonical 条目：原生 model_change / thinking_level_change 里是 SDK 写的 effective 值。
++  const preferences = readRequestedPreferences((Array.isArray(entries) ? entries : []) as SessionPreferenceEntry[]);
++  const restored: { model?: unknown; thinkingLevel?: string } = {};
++  if (preferences.model) {
++    const model = modelRuntime?.getModel?.(preferences.model.provider, preferences.model.id);
++    const authOk = typeof modelRuntime?.hasConfiguredAuth === 'function'
++      ? modelRuntime.hasConfiguredAuth(preferences.model.provider)
++      : true;
++    if (model && authOk) restored.model = model;
++  }
++  if (preferences.thinkingLevel) restored.thinkingLevel = preferences.thinkingLevel;
++  return restored;
++}
++
+ export interface GrenRuntimeOptions {
+   /** 进程内共享的 ModelRuntime。省略则由 createAgentSessionServices 自建（worker 场景）。 */
+   modelRuntime?: ModelRuntime;
+@@ -92,7 +122,12 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
+         },
+       },
+     });
+-    const created = await deps.createAgentSessionFromServices({ services, sessionManager, sessionStartEvent });
++    const created = await deps.createAgentSessionFromServices({
++      services,
++      sessionManager,
++      sessionStartEvent,
++      ...restoredSessionOptions(services.modelRuntime, sessionManager),
++    });
+     // 绑定扩展（session_start 里 MCP 首次投影一批工具）之前装上，批量注册时工具表只刷新一次。
+     installToolRefreshBatching(created.session);
+     // 服务仍按原始目录建：runtime.cwd 决定之后 newSession / fork 的会话头，必须是原始目录。
+diff --git a/electron-agent/electron/app/piRuntimeService.ts b/electron-agent/electron/app/piRuntimeService.ts
+index 764a14d5..63203312 100644
+--- a/electron-agent/electron/app/piRuntimeService.ts
++++ b/electron-agent/electron/app/piRuntimeService.ts
+@@ -9,11 +9,24 @@ import type { Thread, Turn } from './appServer/types';
+ import type { PermissionAuthorization, PermissionManager, PermissionProfileName } from './permissionManager';
+ import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
+ import { isSessionWorkspaceMismatch, readSessionIdentity } from './sessionIdentity';
+-import { parseApproval, setApprovalPolicy, type ApprovalPolicy } from '../../../extensions/_shared/approval.js';
++import { parseApproval, getDefaultApprovalPolicy, setApprovalPolicy, type ApprovalPolicy } from '../../../extensions/_shared/approval.js';
+ import { getAgentMode, isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
++import { getConfig as getRuntimeConfigSnapshot } from '../../../extensions/_shared/runtime-config.js';
+ import { PLAN_UNCONFIRMED_MESSAGE, planBlocksModeSwitch } from '../../../extensions/agent-mode/planState.js';
+ import { buildGoalStatus, type GoalStatusEnvelope } from '../../../extensions/goal/status.js';
+-import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
++import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile, sessionDefaultsConfigKey } from './settingsService';
++import {
++  SESSION_PREFERENCES_ENTRY,
++  mergeSessionPreferences,
++  parseSessionPreferences,
++  parseSessionPreferencesPatch,
++  readSessionPreferences,
++  type SessionPreferenceEntry,
++  type SessionPreferenceField,
++  type SessionPreferences,
++  type SessionPreferencesAck,
++  type SessionPreferencesPatch,
++} from '../../../extensions/_shared/session-preferences.js';
+ import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
+ import { messagesWithEntryIds, type SessionProjectionLike } from './messagesWithEntryIds.js';
+ import { deleteAskUserDraft, readAskUserDraft, writeAskUserDraft, type AskUserDraft } from '../agent/askUserDraft.js';
+@@ -53,6 +66,8 @@ const commandTypes = {
+   agent_get_commands: 'get_commands',
+   agent_new_session: 'new_session',
+   agent_switch_session: 'switch_session',
++  agent_get_session_defaults: 'get_state',
++  agent_set_session_defaults: 'get_state',
+   agent_fork: 'fork',
+   agent_clone: 'clone',
+   agent_get_fork_messages: 'get_fork_messages',
+@@ -169,6 +184,8 @@ export class PiRuntimeService {
+   private readonly currentSessionByWorkspace = new Map<string, SessionContext>();
+   private readonly pendingSessionForks = new Map<string, { sourceSessionId: string; targetSessionId: string }>();
+   private readonly sessionForkSyncInFlight = new Map<string, Promise<boolean>>();
++  /** 同一会话的偏好写入队列：按收到顺序串行，逐次读最新快照再合并，revision 只增不减。 */
++  private readonly preferenceWrites = new Map<string, Promise<unknown>>();
+   private exclusionPulseRev = 0;
+   constructor(private readonly options: PiRuntimeOptions) {}
+ 
+@@ -312,6 +329,26 @@ export class PiRuntimeService {
+     if (command === 'agent_get_goal') {
+       return this.readGoalStatus(workspace, targetPath);
+     }
++    if (command === 'agent_get_session_defaults') {
++      return this.readSessionDefaults(workspace);
++    }
++    if (command === 'agent_set_session_defaults') {
++      return this.writeSessionDefaults(workspace, args.preferences);
++    }
++    if (command === 'agent_set_model' || command === 'agent_set_thinking_level') {
++      return this.writeSessionPreference(workspace, command, args, targetPath);
++    }
++    if (command === 'agent_get_state' && targetPath) {
++      return this.readTargetSessionState(workspace, targetPath);
++    }
++    if (command === 'agent_new_session' && args.initialPreferences !== undefined) {
++      return this.newSessionWithPreferences(workspace, args);
++    }
++    if (command === 'agent_prompt') {
++      // 模型已请求但目录里没有：不静默改用别的模型，明确报错让 UI 要用户重选。
++      // 只有 thinkingLevel 被能力钳制不算：顶层 effective 值照常用。
++      await this.assertSessionModelAvailable(workspace, targetPath);
++    }
+     if (targetPath && ROUTED_COMMANDS.has(command)) {
+       const owner = this.handleOwningPath(workspace, targetPath);
+       if (owner && owner !== this.options.agentHost.get(workspace)) {
+@@ -433,7 +470,7 @@ export class PiRuntimeService {
+       const result = await ops.run(command as PiCommand, rpcArgs);
+       if (command === 'agent_get_state') {
+         await this.refreshCurrentSession(workspace, ops);
+-        return this.ownedState(workspace, result);
++        return this.sessionStateWithPreferences(handle, (await this.ownedState(workspace, result)) as Record<string, unknown>);
+       }
+       if (command === 'agent_new_session' || command === 'agent_switch_session' || command === 'agent_fork' || command === 'agent_clone') {
+         if (isCancelledResult(result)) return result;
+@@ -478,7 +515,7 @@ export class PiRuntimeService {
+     if (command === 'agent_prompt' && shouldEnqueuePrompt(args, this.activeTurns.has(stateKey), this.queuedTurns.get(stateKey)?.length ?? 0)) {
+       return this.enqueueTurn(workspace, readInput(args), typeof args.permissionProfile === 'string' ? args.permissionProfile : 'workspace', session);
+     }
+-    if (command === 'agent_get_state') return this.ownedState(workspace, handle.getState());
++    if (command === 'agent_get_state') return this.sessionStateWithPreferences(handle, (await this.ownedState(workspace, handle.getState())) as Record<string, unknown>);
+     const adapter = this.options.threadStore && shouldTrackTurn(command, args)
+       ? await this.prepareTurn(workspace, command, args, session)
+       : undefined;
+@@ -757,40 +794,39 @@ export class PiRuntimeService {
+   }
+ 
+   /**
+-   * 模式 / 审批档按会话生效：带 targetSessionPath 时钉到那份会话（内存 + 会话条目），别的会话不动。
+-   * 项目默认照旧写内存与盘（最近一次选择），只给草稿和之后新建的会话继承；已打开的会话各自钉住不跟。
++   * 模式 / 审批档按会话生效：带 targetSessionPath 时只钉到那份会话（内存 + canonical 条目），别的会话和项目默认都不动。
++   * 不带 target 时沿用旧的“最近一次选择即项目默认”行为（草稿入口仍会用到）。
+    */
+-  private pinSessionControl(workspace: string, targetPath: string | undefined, patch: { mode?: string; approval?: string }): void {
+-    if (!targetPath) return;
+-    const handle = this.handleOwningPath(workspace, targetPath);
++  private async pinSessionControl(
++    workspace: string,
++    targetPath: string | undefined,
++    patch: SessionPreferencesPatch,
++  ): Promise<SessionPreferencesAck | undefined> {
++    if (!targetPath) return undefined;
++    const handle = await this.handleForTarget(workspace, targetPath);
+     const sessionId = typeof handle?.session.sessionId === 'string' ? handle.session.sessionId : '';
+-    if (!handle || !sessionId) return;
+-    if (patch.mode && isAgentMode(patch.mode)) setAgentMode(patch.mode, workspace, sessionId);
+-    const approval = patch.approval ? parseApproval(patch.approval) : undefined;
+-    if (approval) setApprovalPolicy(approval, workspace, sessionId);
+-    try {
+-      handle.session.sessionManager?.appendCustomEntry?.('session-controls', patch);
+-    } catch {
+-      /* 内存已钉住；落条目失败只影响重启后的回读 */
+-    }
+-    if (patch.mode) handle.ui.context.setStatus('agent-mode', patch.mode);
+-    if (approval) handle.ui.context.setStatus('approval-policy', approval);
++    if (!handle || !sessionId) throw new Error('SESSION_NOT_LOADED');
++    return this.applySessionPreferences(workspace, handle, patch);
+   }
+ 
+   private async writeAgentMode(
+     workspace: string,
+     rawMode: unknown,
+     targetPath?: string,
+-  ): Promise<{ ok: true; mode: string } | { ok: false; blocked: 'PLAN_UNCONFIRMED'; mode: string; message: string }> {
++  ): Promise<{ ok: true; mode: string; preferences?: SessionPreferences } | { ok: false; blocked: 'PLAN_UNCONFIRMED'; mode: string; message: string }> {
+     const mode = String(rawMode ?? '').trim().toLowerCase();
+     if (!isAgentMode(mode)) throw new Error('INVALID_AGENT_MODE');
+     // 未确认的计划只能经侧栏「确认执行」进入执行：手切到能动手的模式直接取消，不动内存、不落盘。
+-    const owner = targetPath ? this.handleOwningPath(workspace, targetPath) : this.options.agentHost.get(workspace);
++    const owner = targetPath ? await this.handleForTarget(workspace, targetPath) : this.options.agentHost.get(workspace);
+     const ownerSessionId = typeof owner?.session.sessionId === 'string' ? owner.session.sessionId : undefined;
+     if (planBlocksModeSwitch(ownerSessionId, mode)) {
+       return { ok: false, blocked: 'PLAN_UNCONFIRMED', mode: getAgentMode(workspace, ownerSessionId), message: PLAN_UNCONFIRMED_MESSAGE };
+     }
+-    this.pinSessionControl(workspace, targetPath, { mode });
++    if (targetPath) {
++      // 有 target：只改该会话，不碰项目默认。
++      const ack = await this.pinSessionControl(workspace, targetPath, { mode });
++      return { ok: true, mode, ...(ack ? { preferences: ack.preferences } : {}) };
++    }
+     setAgentMode(mode, workspace);
+     if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+     const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+@@ -802,10 +838,17 @@ export class PiRuntimeService {
+     return { ok: true, mode };
+   }
+ 
+-  private async writeApprovalPolicy(workspace: string, rawLevel: unknown, targetPath?: string): Promise<{ ok: true; level: ApprovalPolicy }> {
++  private async writeApprovalPolicy(
++    workspace: string,
++    rawLevel: unknown,
++    targetPath?: string,
++  ): Promise<{ ok: true; level: ApprovalPolicy; preferences?: SessionPreferences }> {
+     const level = parseApproval(typeof rawLevel === 'string' ? rawLevel : String(rawLevel ?? ''));
+     if (!level) throw new Error('INVALID_APPROVAL_POLICY');
+-    this.pinSessionControl(workspace, targetPath, { approval: level });
++    if (targetPath) {
++      const ack = await this.pinSessionControl(workspace, targetPath, { approval: level });
++      return { ok: true, level, ...(ack ? { preferences: ack.preferences } : {}) };
++    }
+     setApprovalPolicy(level, workspace);
+     if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+     const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+@@ -817,6 +860,391 @@ export class PiRuntimeService {
+     return { ok: true, level };
+   }
+ 
++  /**
++   * 按会话路径找到承载它的 handle。
++   *
++   * - 已在某个 handle 上（前景或停在后台）：直接用它，不切前景。
++   * - 已经不在任何 handle 上（后台跑完被拆了）：如果有 openAdditional，就为它另开一个非前景
++   *   handle 再 switchSession 过去。这不改 currentSessionByWorkspace，也不 focus，所以不会抢别的窗口的前景。
++   * - 没有 openAdditional 或文件不存在 / 属于别的项目：SESSION_NOT_LOADED（绝不复活已删除会话）。
++   */
++  private async handleForTarget(workspace: string, targetPath: string): Promise<WorkspaceHandlePort | undefined> {
++    const owned = this.handleOwningPath(workspace, targetPath);
++    if (owned) return owned;
++    // 已删除 / 不存在的目标绝不复活：先看文件在不在，再去读它的身份。
++    if (!existsSync(targetPath)) return undefined;
++    const host = this.options.agentHost;
++    if (!host.openAdditional) return undefined;
++    const identity = await readSessionIdentity(targetPath, workspace);
++    const cwd = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
++    const handle = await host.openAdditional.call(host, workspace, cwd);
++    try {
++      const result = await handle.switchSession(identity.sessionPath);
++      if (isCancelledResult(result)) throw new Error('SESSION_SWITCH_CANCELLED');
++    } catch (error) {
++      // 没能切到目标：这个多出来的 handle 不该留着占位。
++      try { await host.evict?.call(host, workspace, handle); } catch { /* 拆不掉不影响抛错 */ }
++      throw error;
++    }
++    return handle;
++  }
++
++  /** 读一份会话日志里的偏好快照（只看内存条目，不构造 runtime）。 */
++  private preferencesOf(handle: WorkspaceHandlePort): SessionPreferences {
++    const manager = handle.session.sessionManager as { getEntries?: () => unknown[] } | undefined;
++    const entries = typeof manager?.getEntries === 'function' ? manager.getEntries() : [];
++    return readSessionPreferences((Array.isArray(entries) ? entries : []) as SessionPreferenceEntry[]);
++  }
++
++  private sessionPathOf(handle: WorkspaceHandlePort): string | undefined {
++    const file = handle.session.sessionFile;
++    return typeof file === 'string' && file ? file : undefined;
++  }
++
++  /** 模型是否在当前目录里（不存在则 unavailable；不自动改写用户请求）。 */
++  private modelUnavailable(handle: WorkspaceHandlePort, preferences: SessionPreferences): boolean {
++    const wanted = preferences.model;
++    if (!wanted) return false;
++    const snapshot = handle.session.modelRuntime?.getAvailableSnapshot?.() ?? [];
++    return !snapshot.some((model) => model.provider === wanted.provider && model.id === wanted.id);
++  }
++
++  /** thinking 是否被当前模型能力挡住（例如非推理模型放不下 high）。 */
++  private thinkingUnavailable(handle: WorkspaceHandlePort, preferences: SessionPreferences): boolean {
++    const wanted = preferences.thinkingLevel;
++    if (!wanted) return false;
++    const model = preferences.model
++      ? handle.session.modelRuntime?.getAvailableSnapshot?.().find(
++        (item) => item.provider === preferences.model!.provider && item.id === preferences.model!.id,
++      )
++      : handle.session.model;
++    if (!model) return false;
++    return !supportedThinkingLevels(model).includes(wanted);
++  }
++
++  private unavailableFields(handle: WorkspaceHandlePort, preferences: SessionPreferences): SessionPreferenceField[] {
++    const fields: SessionPreferenceField[] = [];
++    if (this.modelUnavailable(handle, preferences)) fields.push('model');
++    if (this.thinkingUnavailable(handle, preferences)) fields.push('thinkingLevel');
++    return fields;
++  }
++
++  /** 会话 state + 偏好快照。顶层 model/thinkingLevel 是有效值，preferences 是请求值。 */
++  private sessionStateWithPreferences(
++    handle: WorkspaceHandlePort,
++    base: Record<string, unknown>,
++  ): Record<string, unknown> {
++    const preferences = this.preferencesOf(handle);
++    // base.sessionFile 被清 null（外来会话不归本项目）时不能把 handle 的路径当成已归属。
++    const owned = typeof base.sessionFile === 'string' && base.sessionFile ? base.sessionFile : undefined;
++    const sessionPath = owned ?? this.sessionPathOf(handle);
++    return {
++      ...base,
++      ...(owned && sessionPath ? { sessionPath, sessionFile: owned } : {}),
++      preferences,
++      unavailable: this.unavailableFields(handle, preferences),
++    };
++  }
++
++  /**
++   * 把一次偏好修改落到会话：先按该 handle 串行排队，读最新快照合并字段，写 canonical 条目，
++   * 再把能生效的字段应用到 live。日志写失败直接抛（不改 live），不能假报持久成功。
++   */
++  private applySessionPreferences(
++    workspace: string,
++    handle: WorkspaceHandlePort,
++    patch: SessionPreferencesPatch,
++    options: { failOnUnavailable?: boolean } = {},
++  ): Promise<SessionPreferencesAck> {
++    const key = this.sessionKey(workspace, handle.session.sessionId);
++    const previous = this.preferenceWrites.get(key) ?? Promise.resolve();
++    const task = previous.catch(() => {}).then(() => this.applySessionPreferencesNow(workspace, handle, patch, options));
++    this.preferenceWrites.set(key, task as Promise<unknown>);
++    return task.finally(() => {
++      if (this.preferenceWrites.get(key) === task as Promise<unknown>) this.preferenceWrites.delete(key);
++    });
++  }
++
++  private async applySessionPreferencesNow(
++    workspace: string,
++    handle: WorkspaceHandlePort,
++    patch: SessionPreferencesPatch,
++    options: { failOnUnavailable?: boolean },
++  ): Promise<SessionPreferencesAck> {
++    const sessionId = typeof handle.session.sessionId === 'string' ? handle.session.sessionId : undefined;
++    const sessionPath = this.sessionPathOf(handle);
++    // 模型 / 档位在目录或能力上不可用：保留请求值，但不动 live，也不报“已应用”。
++    const availablePatch: SessionPreferencesPatch = { ...patch };
++    const unavailable: SessionPreferenceField[] = [];
++    if (patch.model) {
++      const snapshot = handle.session.modelRuntime?.getAvailableSnapshot?.() ?? [];
++      if (!snapshot.some((model) => model.provider === patch.model!.provider && model.id === patch.model!.id)) {
++        unavailable.push('model');
++        delete availablePatch.model;
++      }
++    }
++    const base = this.preferencesOf(handle);
++    const requested = mergeSessionPreferences(base, patch);
++    // 档位能力要按“改完模型之后”的模型算：模型同时改时以 patch 里的模型为准。
++    if (patch.thinkingLevel) {
++      const targetModel = patch.model ?? base.model;
++      const levels = targetModel
++        ? this.thinkingLevelsFor(handle, targetModel)
++        : undefined;
++      if (levels && !levels.includes(patch.thinkingLevel)) {
++        unavailable.push('thinkingLevel');
++        delete availablePatch.thinkingLevel;
++      }
++    }
++    const manager = handle.session.sessionManager as {
++      appendCustomEntry?: (customType: string, data?: unknown) => string;
++      getEntries?: () => unknown[];
++    } | undefined;
++    try {
++      if (typeof manager?.appendCustomEntry !== 'function') throw new Error('session manager cannot append entries');
++      manager.appendCustomEntry(SESSION_PREFERENCES_ENTRY, requested);
++    } catch (error) {
++      const detail = error instanceof Error ? error.message : String(error);
++      throw new Error(`PREFERENCES_PERSIST_FAILED: ${detail}`);
++    }
++
++    const applied: SessionPreferenceField[] = [];
++    if (availablePatch.model) {
++      const model = handle.session.modelRuntime.getAvailableSnapshot()
++        .find((item) => item.provider === availablePatch.model!.provider && item.id === availablePatch.model!.id);
++      if (model) {
++        await handle.session.setModel(model);
++        applied.push('model');
++      }
++    }
++    if (availablePatch.thinkingLevel) {
++      handle.session.setThinkingLevel(availablePatch.thinkingLevel as Parameters<AgentSession['setThinkingLevel']>[0]);
++      applied.push('thinkingLevel');
++    }
++    if (availablePatch.mode) {
++      if (sessionId) setAgentMode(availablePatch.mode, workspace, sessionId);
++      this.pushSessionControlStatus(handle, { mode: availablePatch.mode });
++      applied.push('mode');
++    }
++    if (availablePatch.approval) {
++      if (sessionId) setApprovalPolicy(availablePatch.approval, workspace, sessionId);
++      this.pushSessionControlStatus(handle, { approval: availablePatch.approval });
++      applied.push('approval');
++    }
++    if (options.failOnUnavailable && unavailable.length > 0) {
++      // 草稿首发：模型无效时就别把这次写当成已初始化完成，交给调用方决定。
++      throw new Error(`PREFERENCES_UNAVAILABLE: ${unavailable.join(',')}`);
++    }
++    // 应用完再回读一次：SDK 可能在 setModel 后重选档位，快照仍是请求值，但 available 要保持真实。
++    const finalUnavailable = this.unavailableFields(handle, requested);
++    if (patch.mode || patch.approval) {
++      this.touchSessionPinned(workspace, handle);
++    }
++    // 顺带把有效值也带回去（与 getState 同形），UI 保存后不必再单独读一次
++    // 请求 high、有效 off 是成功：请求值留在 preferences 里，不触发回滚。
++    const state = await Promise.resolve(handle.getState()).catch(() => undefined) as Record<string, unknown> | undefined;
++    return {
++      ok: true,
++      ...(sessionId ? { sessionId } : {}),
++      ...(sessionPath ? { sessionPath, sessionFile: sessionPath } : {}),
++      ...(state ? { model: state.model ?? null, thinkingLevel: state.thinkingLevel ?? null } : {}),
++      preferences: requested,
++      applied,
++      unavailable: mergeUnavailable(unavailable, finalUnavailable),
++    };
++  }
++
++  private thinkingLevelsFor(
++    handle: WorkspaceHandlePort,
++    model: { provider: string; id: string },
++  ): string[] | undefined {
++    const snapshot = handle.session.modelRuntime?.getAvailableSnapshot?.() ?? [];
++    const live = snapshot.find((item) => item.provider === model.provider && item.id === model.id);
++    if (!live) return undefined;
++    return supportedThinkingLevels(live);
++  }
++
++  private pushSessionControlStatus(handle: WorkspaceHandlePort, patch: { mode?: string; approval?: string }): void {
++    const ui = handle.ui as { context?: { setStatus?: (key: string, value: unknown) => void } } | undefined;
++    if (patch.mode) ui?.context?.setStatus?.('agent-mode', patch.mode);
++    if (patch.approval) ui?.context?.setStatus?.('approval-policy', patch.approval);
++  }
++
++  /** 模式 / 审查钉到会话后，后续 prompt 要按这个 handle 取会话上下文，别再拿前景会话。 */
++  private touchSessionPinned(_workspace: string, _handle: WorkspaceHandlePort): void {
++    // 会话身份由 handle 自带（session.sessionId），无需额外登记；保留调用点便于后续扩展。
++  }
++
++  /** 写模型 / 思考档：带 target 按路径路由，不带则回落到当前前景会话。 */
++  private async writeSessionPreference(
++    workspace: string,
++    command: string,
++    args: Record<string, unknown>,
++    targetPath: string | undefined,
++  ): Promise<SessionPreferencesAck> {
++    const handle = targetPath
++      ? await this.handleForTarget(workspace, targetPath)
++      : await this.resolveHandle(workspace);
++    if (!handle) throw new Error('SESSION_NOT_LOADED');
++    if (command === 'agent_set_model') {
++      const provider = readOptionalString(args.provider);
++      const modelId = readOptionalString(args.modelId);
++      if (!provider || !modelId) throw new Error('INVALID_MODEL');
++      return this.applySessionPreferences(workspace, handle, { model: { provider, id: modelId } });
++    }
++    const level = readOptionalString(args.level);
++    if (!level) throw new Error('INVALID_THINKING_LEVEL');
++    return this.applySessionPreferences(workspace, handle, { thinkingLevel: level });
++  }
++
++  /** 新会话：按 initialPreferences 初始化并返回带路径的回执（不依赖 getState(workspace) 的当前前景）。 */
++  private async newSessionWithPreferences(
++    workspace: string,
++    args: Record<string, unknown>,
++  ): Promise<Record<string, unknown>> {
++    const initial = parseSessionPreferencesPatch(args.initialPreferences);
++    const foreground = await this.resolveHandle(workspace);
++    const stateBefore = await foreground.getState();
++    const beforeFile = typeof stateBefore.sessionFile === 'string' ? stateBefore.sessionFile : undefined;
++    const result = await foreground.newSession();
++    if (isCancelledResult(result)) return result;
++    const identity = await this.refreshCurrentSession(workspace, this.handleOps(foreground));
++    const afterFile = this.sessionPathOf(foreground) ?? identity?.sessionPath;
++    const sameFile = Boolean(beforeFile && afterFile && sameSessionPath(beforeFile, afterFile));
++    if (sameFile) {
++      // newSession 没换文件（测试桩/极端失败）：不能把偏好写进旧会话。
++      throw new Error('SESSION_NOT_CREATED');
++    }
++    if (Object.keys(initial).length === 0) {
++      return {
++        cancelled: false,
++        ...(identity?.sessionId ? { sessionId: identity.sessionId } : {}),
++        ...(afterFile ? { sessionPath: afterFile, sessionFile: afterFile } : {}),
++        preferences: this.preferencesOf(foreground),
++      };
++    }
++    const ack = await this.applySessionPreferences(workspace, foreground, initial);
++    return {
++      cancelled: false,
++      ...(ack.sessionId ? { sessionId: ack.sessionId } : {}),
++      ...(ack.sessionPath ? { sessionPath: ack.sessionPath, sessionFile: ack.sessionPath } : {}),
++      preferences: ack.preferences,
++      applied: ack.applied,
++      unavailable: ack.unavailable,
++    };
++  }
++
++  /**
++   * 按路径读会话 state：在 handle 上就读该 handle（不切前景）；已释放就只读投影它自己的 jsonl，并标 detached。
++   */
++  private async readTargetSessionState(workspace: string, targetPath: string): Promise<Record<string, unknown>> {
++    const owner = this.handleOwningPath(workspace, targetPath);
++    if (owner) {
++      return this.sessionStateWithPreferences(owner, (await this.ownedState(workspace, owner.getState())) as Record<string, unknown>);
++    }
++    const identity = await readSessionIdentity(targetPath, workspace);
++    if (!existsSync(identity.sessionPath)) throw new Error('SESSION_NOT_LOADED');    const manager = SessionManager.open(identity.sessionPath);
++    const preferences = readSessionPreferences(manager.getEntries() as SessionPreferenceEntry[]);
++    return {
++      // 只读投影：内存里的会话不在这里，不编造有效值，只给请求值与身份。
++      model: null,
++      thinkingLevel: null,
++      sessionFile: identity.sessionPath,
++      sessionPath: identity.sessionPath,
++      sessionId: identity.sessionId,
++      preferences,
++      unavailable: [],
++      detached: true,
++    };
++  }
++
++  /** prompt 前的最后一道门：请求的模型不在目录里时拒绝发送（UI 禁用之外的后端保证）。 */
++  private async assertSessionModelAvailable(workspace: string, targetPath?: string): Promise<void> {
++    // 这里只做检查，不为目标另开 handle：目标是停靠的会话就直接看它，否则交给后续路由。
++    const handle = targetPath
++      ? this.handleOwningPath(workspace, targetPath)
++      : this.options.agentHost.get(workspace);
++    if (!handle) return;
++    const preferences = this.preferencesOf(handle);
++    if (!preferences.model) return;
++    const snapshot = handle.session.modelRuntime?.getAvailableSnapshot?.() ?? [];
++    if (snapshot.some((model) => model.provider === preferences.model!.provider && model.id === preferences.model!.id)) return;
++    throw new Error('SESSION_MODEL_UNAVAILABLE');
++  }
++
++  /** 项目默认快照：模式与审查档读 runtime-settings（规范化 workspace 键），模型与思考读 SESSION_DEFAULTS。 */
++  private async readSessionDefaults(workspace: string): Promise<SessionPreferences> {
++    const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
++    const config = await this.runtimeConfigSnapshot();
++    const pick = (key: string) => config[key];
++    const mode = pick(agentModeConfigKey(workspace)) ?? pick(agentModeConfigKey(resolved)) ?? getAgentMode(workspace);
++    const approval = pick(approvalPolicyConfigKey(workspace)) ?? pick(approvalPolicyConfigKey(resolved)) ?? getDefaultApprovalPolicy(workspace);
++    const modelDefaults = parseSessionPreferencesPatch(safeJson(pick(sessionDefaultsConfigKey(workspace)) ?? pick(sessionDefaultsConfigKey(resolved))));
++    return {
++      ...(modelDefaults.model ? { model: modelDefaults.model } : {}),
++      ...(modelDefaults.thinkingLevel ? { thinkingLevel: modelDefaults.thinkingLevel } : {}),
++      mode: isAgentMode(mode) ? mode : 'agent',
++      approval: parseApproval(approval) ?? 'auto',
++      revision: 0,
++    };
++  }
++
++  /**
++   * 写项目默认：模式 / 审查写原有 AGENT_MODE / APPROVAL_POLICY 键（内存也同步），
++   * 模型 / 思考写 SESSION_DEFAULTS。不动任何现存会话。
++   */
++  private async writeSessionDefaults(workspace: string, raw: unknown): Promise<SessionPreferences> {
++    const patch = parseSessionPreferencesPatch(raw);
++    const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
++    const runtimePatch: Record<string, string> = {};
++    if (patch.mode) {
++      setAgentMode(patch.mode, workspace);
++      setAgentMode(patch.mode, resolved);
++      runtimePatch[agentModeConfigKey(workspace)] = patch.mode;
++      runtimePatch[agentModeConfigKey(resolved)] = patch.mode;
++    }
++    if (patch.approval) {
++      setApprovalPolicy(patch.approval, workspace);
++      setApprovalPolicy(patch.approval, resolved);
++      runtimePatch[approvalPolicyConfigKey(workspace)] = patch.approval;
++      runtimePatch[approvalPolicyConfigKey(resolved)] = patch.approval;
++    }
++    if (patch.model || patch.thinkingLevel) {
++      if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
++      const existing = parseSessionPreferencesPatch(safeJson(await this.readRawRuntimeKey(sessionDefaultsConfigKey(workspace))));
++      const merged: SessionPreferencesPatch = {
++        model: patch.model ?? existing.model,
++        thinkingLevel: patch.thinkingLevel ?? existing.thinkingLevel,
++      };
++      const serialized = JSON.stringify({
++        ...(merged.model ? { model: merged.model } : {}),
++        ...(merged.thinkingLevel ? { thinkingLevel: merged.thinkingLevel } : {}),
++      });
++      runtimePatch[sessionDefaultsConfigKey(workspace)] = serialized;
++      runtimePatch[sessionDefaultsConfigKey(resolved)] = serialized;
++    }
++    if (Object.keys(runtimePatch).length === 0) return this.readSessionDefaults(workspace);
++    if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
++    await this.mergeRuntimeSettings(runtimePatch);
++    return this.readSessionDefaults(workspace);
++  }
++
++  private async runtimeConfigSnapshot(): Promise<Record<string, string>> {
++    if (this.options.runtimeConfigPath) {
++      try {
++        const parsed = JSON.parse(await readFile(this.options.runtimeConfigPath, 'utf8')) as unknown;
++        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, string>;
++      } catch {
++        /* 文件还没建：返回空表，下面的内存回退照常工作 */
++      }
++    }
++    return getRuntimeConfigSnapshot();
++  }
++
++  private async readRawRuntimeKey(key: string): Promise<string | undefined> {
++    return (await this.runtimeConfigSnapshot())[key];
++  }
++
+   private async runOnHandle(handle: WorkspaceHandlePort, command: PiCommand, args: Record<string, unknown>, origin: 'main' | 'goal'): Promise<unknown> {
+     const s = handle.session;
+     const images = Array.isArray(args.images) ? (args.images as ImageContent[]) : undefined;
+@@ -1354,6 +1782,34 @@ function readOptionalString(value: unknown): string | undefined {
+   return typeof value === 'string' && value ? value : undefined;
+ }
+ 
++/** 合并两组不可用字段，去重且保持字段顺序。 */
++function mergeUnavailable(
++  left: readonly SessionPreferenceField[],
++  right: readonly SessionPreferenceField[],
++): SessionPreferenceField[] {
++  const out: SessionPreferenceField[] = [];
++  for (const field of [...left, ...right]) if (!out.includes(field)) out.push(field);
++  return out;
++}
++
++function safeJson(value: string | undefined): unknown {
++  if (!value) return undefined;
++  try { return JSON.parse(value); } catch { return undefined; }
++}
++
++/** 与 SDK 的 getSupportedThinkingLevels 同规则：非推理模型只有 off，xhigh/max 需显式映射。 */
++const EXTENDED_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
++function supportedThinkingLevels(model: unknown): string[] {
++  const item = model as { reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> } | undefined;
++  if (!item?.reasoning) return ['off'];
++  return EXTENDED_THINKING_LEVELS.filter((level) => {
++    const mapped = item.thinkingLevelMap?.[level];
++    if (mapped === null) return false;
++    if (level === 'xhigh' || level === 'max') return mapped !== undefined;
++    return true;
++  });
++}
++
+ function readInput(args: Record<string, unknown>): string {
+   return typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
+ }
+diff --git a/electron-agent/electron/app/settingsService.ts b/electron-agent/electron/app/settingsService.ts
+index 404cbf40..b4b04750 100644
+--- a/electron-agent/electron/app/settingsService.ts
++++ b/electron-agent/electron/app/settingsService.ts
+@@ -25,12 +25,24 @@ export function agentModeConfigKey(workspace: string): string {
+   return `AGENT_MODE:${workspaceConfigSuffix(workspace)}`;
+ }
+ 
++/**
++ * 项目级的模型 / 思考默认（新建会话的初始快照）。模式与审查档沿用 AGENT_MODE / APPROVAL_POLICY，
++ * 模型和思考档与它们同一套规范化 workspace 键，主机端没有应用级 defaultSessionModel，由前端回退合并。
++ */
++export function sessionDefaultsConfigKey(workspace: string): string {
++  return `SESSION_DEFAULTS:${workspaceConfigSuffix(workspace)}`;
++}
++
++export function isSessionDefaultsConfigKey(key: string): boolean {
++  return key.startsWith('SESSION_DEFAULTS:');
++}
++
+ export function isAgentModeConfigKey(key: string): boolean {
+   return key === 'AGENT_MODE' || key.startsWith('AGENT_MODE:');
+ }
+ 
+ export function isPreservedRuntimeConfigKey(key: string): boolean {
+-  return isApprovalPolicyConfigKey(key) || isContextExclusionConfigKey(key) || isAgentModeConfigKey(key);
++  return isApprovalPolicyConfigKey(key) || isContextExclusionConfigKey(key) || isAgentModeConfigKey(key) || isSessionDefaultsConfigKey(key);
+ }
+ 
+ const runtimeFileWrites = new Map<string, Promise<void>>();
+diff --git a/electron-agent/electron/ipc/register.ts b/electron-agent/electron/ipc/register.ts
+index 5c6fb74b..de144b26 100644
+--- a/electron-agent/electron/ipc/register.ts
++++ b/electron-agent/electron/ipc/register.ts
+@@ -510,6 +510,16 @@ function readRuleScope(args: Record<string, unknown>, key: string): 'global' | '
+   return value;
+ }
+ 
++/** 规则的模式范围：省略 / null 表示所有模式；给了就必须是字符串数组。 */
++function readOptionalRuleModes(args: Record<string, unknown>): string[] | undefined {
++  const value = args.modes;
++  if (value === undefined || value === null) return undefined;
++  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
++    throw new Error('modes must be a string array');
++  }
++  return value as string[];
++}
++
+ function registerPromptLibraryCommands(service: PromptLibraryService): void {
+   registerCommand('list_prompt_commands', () => service.listCommands());
+   registerCommand('save_prompt_command', (_event, args) => service.saveCommand({
+@@ -530,6 +540,8 @@ function registerPromptLibraryCommands(service: PromptLibraryService): void {
+       title: readText(args, 'title'),
+       enabled: readBoolean(args, 'enabled'),
+       body: readText(args, 'body'),
++      // 模式范围可选；服务端校验已知模式并去重，空数组等同所有模式。
++      modes: readOptionalRuleModes(args),
+     });
+   });
+   registerCommand('set_context_rule_enabled', (_event, args) => service.setRuleEnabled(
+@@ -557,6 +569,10 @@ function readOptionalReasoning(args: Record<string, unknown>): string | undefine
+ 
+ function registerProviderCommands(service: ProviderService): void {
+   registerCommand('get_provider_config', () => service.getConfig());
++  registerCommand('get_model_fast_preferences', () => service.getFastPreferences());
++  registerCommand('set_model_fast_preference', (_event, args) => service.setFastPreference(
++    readString(args, 'provider'), readString(args, 'modelId'), readBoolean(args, 'enabled'),
++  ));
+   registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson'), readString(args, 'authJson')));
+   registerCommand('refresh_model_registry', () => service.refresh());
+   registerCommand('list_models_global', () => service.listModels());
+@@ -751,6 +767,7 @@ function registerPiCommands(service: PiCommandsPort): void {
+     'agent_compact', 'agent_set_auto_compaction', 'agent_abort_retry', 'agent_get_session_stats', 'agent_get_state',
+     'agent_get_messages', 'agent_get_goal', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
+     'agent_clone', 'agent_get_fork_messages', 'agent_set_session_name',
++    'agent_get_session_defaults', 'agent_set_session_defaults',
+     'ask_user_draft_read', 'ask_user_draft_write', 'ask_user_draft_delete',
+     'agent_complete_ask_user',
+   ]) {
+diff --git a/extensions/agent-mode/index.ts b/extensions/agent-mode/index.ts
+index dee4ac66..83409fd2 100644
+--- a/extensions/agent-mode/index.ts
++++ b/extensions/agent-mode/index.ts
+@@ -1,9 +1,10 @@
+-// agent-mode: 统一的模式系统（Agent / Ask / Debug / Plan / Brainstorm，互斥）。
++// agent-mode: 统一的模式系统（Agent / Ask / Debug / Plan / Brainstorm / Ultra，互斥）。
+ //
+ //   - Agent ：默认，完整工具集，无额外约束。
+ //   - Ask   ：只读问答。只读检索 + bash（写由只读 OS 沙箱执行，升权经用户批准）；禁 写/编辑/MCP。
+ //   - Debug ：完整工具集 + 调试方法论 prompt。
+ //   - Plan  ：只读调研 + upsert_plan 写结构化 Plan；侧栏审阅 / 修改后「确认执行」自动切 Agent 开跑。
++//   - Ultra ：完整工具集 + 内置调度规则（按需派工、自己完成简单任务、模型先发现再选）。
+ //
+ // 工具 gate 走两道：setActiveTools 限制 LLM 可见工具（主） + tool_call hook 兜底拦截
+ // （防止动态注册的工具绕过）。当前模式经 ctx.ui.setStatus("agent-mode", <mode>) 推到前端，
+@@ -21,6 +22,7 @@ import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
+ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+ import { Type } from "typebox";
+ import { getConfig, watchConfig } from "../_shared/runtime-config.js";
++import { readSessionPreferences, SESSION_PREFERENCES_ENTRY } from "../_shared/session-preferences.js";
+ import { currentSessionId } from "../_shared/workspace-context.js";
+ import {
+   type AgentMode,
+@@ -70,6 +72,7 @@ import {
+   truncationNotice,
+   type RawAskUserParams,
+ } from "./questions.js";
++import { applyUltraRules, isSubagentSession, subagentProbeOf } from "./ultra-rules.js";
+ 
+ function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
+   return m.role === "assistant" && Array.isArray(m.content);
+@@ -157,6 +160,18 @@ export default function (pi: ExtensionAPI) {
+       ...(plan ? { plan, planSeenRev } : {}),
+     } satisfies PersistedState);
+ 
++  /**
++   * 缺模式字段的会话首次继承时把初值写进 canonical 条目，冷恢复不再跟着那时的项目默认改。
++   * 写失败只记日志：内存里已钉住，本轮继续按会话运行，不能把整次 session_start 打挂。
++   */
++  const solidifyInitialMode = (mode: AgentMode) => {
++    try {
++      pi.appendEntry(SESSION_PREFERENCES_ENTRY, { mode, revision: 1 });
++    } catch (err) {
++      console.error("[agent-mode] 固化初始模式失败（仅内存生效）：", err);
++    }
++  };
++
+   const pushPlan = (ctx: ExtensionContext, reason: PlanStatusPayload["reason"]) => {
+     ctx.ui.setStatus("agent-plan", JSON.stringify({ plan: plan ?? null, reason } satisfies PlanStatusPayload));
+   };
+@@ -524,10 +539,10 @@ export default function (pi: ExtensionAPI) {
+     gateToolCall(liveMode(ctx?.cwd), event.toolName, event.input),
+   );
+ 
+-  pi.on("before_agent_start", async () => {
++  pi.on("before_agent_start", async (event, ctx) => {
+     upsertedThisRun = false;
++    let live = liveMode();
+     if (sessionCtx) {
+-      let live = liveMode();
+       // 兜底：未确认的计划不允许经任何路径进入能动手的模式（宿主切换已先拦一道）。
+       if (isExecutingMode(live) && isUnconfirmed(plan)) {
+         setAgentMode("plan", projectCwd(sessionCtx), sessionId);
+@@ -536,7 +551,17 @@ export default function (pi: ExtensionAPI) {
+       }
+       if (live !== currentMode) applyMode(live, sessionCtx, { silent: true });
+     }
+-    // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，此处不再注入。
++    // Ultra 内置调度规则：按当轮真实模式增删 systemPromptOptions.contextFiles。
++    // 子代理会话（含模式继承成 ultra 的）不注入，避免子代理变成递归编排主代理。
++    // 放在 plan 上下文 / custom 回合的分支之前，保证每条返回路径都带上它；
++    // 也先按固定 path 移除旧条目，切出 ultra 后复用的同一 options 对象不残留。
++    const options = (event as { systemPromptOptions?: { contextFiles?: Array<{ path: string; content: string }> } })
++      .systemPromptOptions;
++    if (options) {
++      applyUltraRules(options, { mode: live, subagent: isSubagentSession(subagentProbeOf(ctx)) });
++    }
++    // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，此处不再注入；
++    // Ultra 的调度规则走 contextFiles（ultra-rules.ts），因此关掉 Fable 也仍然生效。
+     if (plan?.status === "executing") {
+       if (skipNextExecutionContext) {
+         skipNextExecutionContext = false;
+@@ -616,14 +641,19 @@ export default function (pi: ExtensionAPI) {
+       setAgentMode(parseModeArg(getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "") ?? DEFAULT_MODE, projectCwd(ctx));
+     }
+     if (sessionId && !hasAgentMode(projectCwd(ctx), sessionId)) {
+-      // 会话自己记的模式优先（宿主切换写的 session-controls 与本扩展的 agent-mode 取最近一条）；
++      // 会话自己记的模式优先（宿主切换写的 session-controls、本扩展的 agent-mode 条目，
++      // 以及冷恢复时的 canonical session-preferences 条目，都按文件顺序取最近一条）；
+       // 没有时继承 ALS 里的父会话（子代理），再退项目默认。
+-      const own = persistedMode(entries);
++      const own = readSessionPreferences(entries).mode;
+       const parent = currentSessionId();
+       const inherited = parent && parent !== sessionId && hasAgentMode(projectCwd(ctx), parent)
+         ? getAgentMode(projectCwd(ctx), parent)
+         : undefined;
+-      applyMode(own ?? inherited ?? getDefaultAgentMode(projectCwd(ctx)), ctx, { silent: true, persist: false });
++      const initial = own ?? inherited ?? getDefaultAgentMode(projectCwd(ctx));
++      applyMode(initial, ctx, { silent: true, persist: false });
++      // 缺模式字段的历史会话首次继承要把初值固化：否则冷恢复会按那时的项目默认重新继承。
++      // 会话自己有旧条目时不动（那条条目本身就是它的记录）。
++      if (!own) solidifyInitialMode(initial);
+       return;
+     }
+ 
+diff --git a/extensions/approval/index.ts b/extensions/approval/index.ts
+index ea72bad5..056b5b85 100644
+--- a/extensions/approval/index.ts
++++ b/extensions/approval/index.ts
+@@ -1,7 +1,8 @@
+ // approval：审批策略（readonly/ask/auto/workspace/full）按会话生效 + 状态回推。
+ // 策略本体在 _shared/approval（进程内共享），供 safety / 沙箱消费者读取。
+-// 桌面切换走宿主 agent_set_approval：写该会话的进程内内存 + 会话条目 session-controls，
+-// 并更新项目默认档（只给新会话继承）。session_start 把本会话的档钉进内存，之后项目默认档变化不再影响它。
++// 桌面切换走宿主 agent_set_approval：写该会话的进程内内存 + 会话条目 session-preferences，
++// 不再改项目默认。session_start 把本会话的档钉进内存，之后项目默认档变化不再影响它。
++// 缺档位的历史会话首次继承项目默认时把初值固化进 canonical 条目（只一次），冷恢复不再重新继承。
+ import { projectCwd } from "../_shared/session-cwd.js";
+ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+ import {
+@@ -14,19 +15,14 @@ import {
+   setApprovalPolicy,
+ } from "../_shared/approval.js";
+ import { getConfig, watchConfig } from "../_shared/runtime-config.js";
++import { readSessionPreferences, SESSION_PREFERENCES_ENTRY } from "../_shared/session-preferences.js";
+ import { currentCwd, currentSessionId } from "../_shared/workspace-context.js";
+ 
+ type SessionEntry = { type: string; customType?: string; data?: unknown };
+ 
+-/** 会话里最近一条宿主写的 session-controls 审批档。旧版全局 approval 条目不算会话自己的选择。 */
++/** 会话里最近一条审批档：canonical 条目与宿主写的 session-controls 一起按文件顺序取最近。 */
+ export function persistedApproval(entries: SessionEntry[]): ApprovalPolicy | undefined {
+-  for (let i = entries.length - 1; i >= 0; i--) {
+-    const e = entries[i];
+-    if (e.type !== "custom" || e.customType !== "session-controls") continue;
+-    const parsed = parseApproval((e.data as { approval?: string } | undefined)?.approval);
+-    if (parsed) return parsed;
+-  }
+-  return undefined;
++  return readSessionPreferences(entries).approval;
+ }
+ 
+ function legacyApproval(entries: SessionEntry[]): ApprovalPolicy | undefined {
+@@ -45,6 +41,17 @@ export default function (pi: ExtensionAPI) {
+     ctx.ui.setStatus("approval-policy-default", getDefaultApprovalPolicy(workspaceCwd));
+   };
+ 
++  /**
++   * 缺档位的会话首次继承时固化初值。写失败只记日志：内存已钉住，不能让整个 session_start 抛错。
++   */
++  const solidifyInitialApproval = (policy: ApprovalPolicy) => {
++    try {
++      pi.appendEntry(SESSION_PREFERENCES_ENTRY, { approval: policy, revision: 1 });
++    } catch (err) {
++      console.error("[approval] 固化初始档位失败（仅内存生效）：", err);
++    }
++  };
++
+   // 盘上的项目默认档变了：只灌项目默认，不碰已钉住档位的会话。
+   // 每个会话（含子代理）各订一份，会话结束必须退订，否则越积越多、还会作用在已销毁的会话上。
+   const unwatch = watchConfig((next) => {
+@@ -75,7 +82,9 @@ export default function (pi: ExtensionAPI) {
+         ? getApprovalPolicy(projectCwd(ctx), parent)
+         : undefined;
+       const own = persistedApproval(entries);
+-      setApprovalPolicy(own ?? inherited ?? getDefaultApprovalPolicy(projectCwd(ctx)), projectCwd(ctx), sessionId);
++      const initial = own ?? inherited ?? getDefaultApprovalPolicy(projectCwd(ctx));
++      setApprovalPolicy(initial, projectCwd(ctx), sessionId);
++      if (!own) solidifyInitialApproval(initial);
+     }
+     push(ctx);
+   });

@@ -74,7 +74,7 @@ describe('SETTINGS_SCHEMA general', () => {
       label: '增强提示词结合项目（实验）',
       type: 'boolean',
       default: '0',
-      description: '打开后允许查阅会话目标、wiki/记忆和代码图；更慢，且依赖索引。默认关',
+      description: '打开后允许查阅会话目标、Wiki 和代码图；更慢，且依赖索引。默认关',
     });
   });
 
@@ -189,16 +189,17 @@ describe('subagent max depth', () => {
 });
 
 describe('AgentData settings', () => {
+  it('不再提供已裁撤的 Memory 开关', () => {
+    const fields = SETTINGS_SCHEMA.flatMap((category) => [...(category.fields ?? []), ...(category.sections ?? []).flatMap((section) => section.fields)]);
+    expect(fields.filter((field) => field.key.startsWith('MEMORY_'))).toEqual([]);
+  });
   const category = () => SETTINGS_SCHEMA.find((item) => item.id === 'agentData');
   const fields = () => category()?.sections?.flatMap((section) => section.fields) ?? [];
 
-  it('在能力分组提供记忆开关、模型和 Wiki 抽取设置', () => {
+  it('在能力分组提供模型和 Wiki 抽取设置', () => {
     expect(category()).toMatchObject({ title: 'AgentData', group: '能力' });
-    expect(category()?.sections?.map((section) => section.title)).toEqual(['记忆', '模型', 'Wiki 抽取']);
+    expect(category()?.sections?.map((section) => section.title)).toEqual(['模型', 'Wiki 抽取']);
     expect(fields().map((field) => field.key)).toEqual([
-      'MEMORY_AUTO_INJECT',
-      'MEMORY_AUTO_CAPTURE',
-      'MEMORY_EXTRACT',
       'agentDataModel',
       'KNOWLEDGE_WIKI_INGEST_MODE',
       'KNOWLEDGE_WIKI_INGEST_CONCURRENCY',
@@ -206,18 +207,7 @@ describe('AgentData settings', () => {
     ]);
   });
 
-  it('记忆开关默认开，模型留空走应用默认模型', () => {
-    expect(fields().find((field) => field.key === 'MEMORY_AUTO_INJECT')).toMatchObject({
-      type: 'boolean',
-      default: '1',
-      label: '自动注入记忆',
-    });
-    expect(fields().find((field) => field.key === 'MEMORY_AUTO_CAPTURE')).toMatchObject({ type: 'boolean', default: '1' });
-    expect(fields().find((field) => field.key === 'MEMORY_EXTRACT')).toMatchObject({
-      type: 'boolean',
-      default: '1',
-      description: expect.stringContaining('仍保存原文'),
-    });
+  it('Wiki 模型留空走应用默认模型', () => {
     expect(fields().find((field) => field.key === 'agentDataModel')).toMatchObject({
       type: 'model',
       effect: 'instant',
@@ -255,5 +245,89 @@ describe('AgentData settings', () => {
     expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_CONCURRENCY: '11' })).toMatch(/1 到 10/);
     expect(validateSettingValues({ KNOWLEDGE_LLM_GLOBAL_CONCURRENCY: '21' })).toMatch(/1 到 20/);
     expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_MODE: 'batch' })).toMatch(/两段式|单段式/);
+  });
+});
+
+describe('Ultra settings group', () => {
+  const category = () => SETTINGS_SCHEMA.find((item) => item.id === 'ultra');
+  const sections = () => category()?.sections ?? [];
+  const fields = () => sections().flatMap((section) => section.fields);
+  const all = () => SETTINGS_SCHEMA.flatMap((c) => [...(c.fields ?? []), ...(c.sections ?? []).flatMap((s) => s.fields)]);
+
+  it('is its own group next to 子代理, not an extra switch on the ordinary subagent settings', () => {
+    expect(category()).toMatchObject({ id: 'ultra', title: 'Ultra Mode', group: '能力' });
+    const ids = SETTINGS_SCHEMA.map((c) => c.id);
+    expect(ids.indexOf('ultra')).toBe(ids.indexOf('subagent') + 1);
+    // Ultra 自己一套键，不额外加普通子代理的开关
+    expect(all().filter((f) => f.key.startsWith('ULTRA_')).map((f) => f.key)).toEqual([
+      'ULTRA_SUBAGENT_MODEL',
+      'ULTRA_SUBAGENT_MODEL_SCOUT',
+      'ULTRA_SUBAGENT_MODEL_WORKER',
+      'ULTRA_SUBAGENT_MODEL_PLANNER',
+      'ULTRA_SUBAGENT_MODEL_REVIEWER',
+      'ULTRA_SUBAGENT_MODEL_ALLOWLIST',
+    ]);
+  });
+
+  it('uses the model / model-list field types and never falls back to ordinary SUBAGENT keys', () => {
+    const modelKeys = ['ULTRA_SUBAGENT_MODEL', 'ULTRA_SUBAGENT_MODEL_SCOUT', 'ULTRA_SUBAGENT_MODEL_WORKER', 'ULTRA_SUBAGENT_MODEL_PLANNER', 'ULTRA_SUBAGENT_MODEL_REVIEWER'];
+    for (const key of modelKeys) {
+      const field = fields().find((f) => f.key === key)!;
+      expect(field.type).toBe('model');
+      expect(field.showWhen).toBeUndefined();
+      expect(field.description).toContain('当前主模型');
+      expect(field.description).not.toMatch(/SUBAGENT_MODEL_CHEAP|SUBAGENT_MODEL_STRONG/);
+    }
+    expect(fields().find((f) => f.key === 'ULTRA_SUBAGENT_MODEL_ALLOWLIST')?.type).toBe('model-list');
+    for (const field of fields()) expect(field.showWhen).toBeUndefined();
+  });
+
+  it('documents the empty-value chain and the cheap / strong aliases', () => {
+    const defaults = fields().find((f) => f.key === 'ULTRA_SUBAGENT_MODEL')!;
+    expect(defaults.description).toContain('Ultra 默认');
+    for (const role of ['SCOUT', 'WORKER', 'PLANNER', 'REVIEWER']) {
+      const field = fields().find((f) => f.key === `ULTRA_SUBAGENT_MODEL_${role}`)!;
+      expect(field.description).toContain('Ultra 默认');
+      expect(field.description).toContain('当前主模型');
+    }
+    const allowlist = fields().find((f) => f.key === 'ULTRA_SUBAGENT_MODEL_ALLOWLIST')!;
+    const text = allowlist.description!.toLowerCase();
+    expect(text).toContain('cheap');
+    expect(text).toContain('scout');
+    expect(text).toContain('strong');
+    expect(text).toContain('worker');
+  });
+
+  it('accepts empty model values (no validation of the "provider/id" shape in the schema)', () => {
+    expect(validateSettingValues({ ULTRA_SUBAGENT_MODEL: '', ULTRA_SUBAGENT_MODEL_ALLOWLIST: '' })).toBeUndefined();
+    expect(validateSettingValues({ ULTRA_SUBAGENT_MODEL_SCOUT: 'openai/gpt-5' })).toBeUndefined();
+    expect(validateSettingValues({ ULTRA_SUBAGENT_MODEL_ALLOWLIST: JSON.stringify(['a/b']) })).toBeUndefined();
+  });
+});
+
+describe('subagent settings scope after Ultra split', () => {
+  const sub = () => SETTINGS_SCHEMA.find((item) => item.id === 'subagent')!;
+  const section = (title: string) => sub().sections?.find((s) => s.title === title)?.fields ?? [];
+  const category = () => SETTINGS_SCHEMA.find((item) => item.id === 'ultra')!;
+
+  it('marks the shared executor limits as shared with Ultra instead of adding a second set', () => {
+    for (const sectionTitle of ['并发与上限', '超时与回收']) {
+      for (const field of section(sectionTitle)) {
+        if (field.type === 'select') continue; // 运行位置是执行器资源，文案已注明共用
+        expect(field.description).toContain('Ultra');
+      }
+    }
+    // 上限值本身没变
+    expect(section('并发与上限').find((f) => f.key === 'SUBAGENT_MAX_WORKERS')).toMatchObject({ default: '2', placeholder: '2' });
+    expect(section('并发与上限').find((f) => f.key === 'SUBAGENT_MAX_DEPTH')).toMatchObject({ default: '2', placeholder: '2' });
+    // 不新增第二套资源配置：Ultra 分组里只有模型键
+    expect((category().sections ?? []).flatMap((s) => s.fields).every((f) => f.type === 'model' || f.type === 'model-list')).toBe(true);
+  });
+
+  it('marks the ordinary model strategy as non-Ultra only', () => {
+    const modelFields = section('模型策略');
+    for (const field of modelFields) {
+      expect(field.description).toContain('非 Ultra');
+    }
   });
 });

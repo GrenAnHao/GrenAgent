@@ -49,19 +49,25 @@ const styles = createStaticStyles(({ css }) => ({
 
     display: flex;
     flex-direction: column;
-    gap: 13px;
+    gap: 10px;
 
-    padding: 13px 13px 8px;
+    padding: 14px 14px 10px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
+    border-radius: 16px;
 
-    background: ${cssVar.colorBgElevated};
-    box-shadow: ${cssVar.boxShadowSecondary};
+    background: var(--gren-composer-bg, ${cssVar.colorBgElevated});
+    box-shadow: var(--gren-composer-shadow, ${cssVar.boxShadowSecondary});
 
     transition: border-color 0.15s ease;
 
     &:focus-within {
-      border-color: ${cssVar.colorBorder};
+      border-color: color-mix(in srgb, var(--gren-accent, ${cssVar.colorPrimary}) 40%, ${cssVar.colorBorderSecondary});
+    }
+
+    @container empty-chat (max-width: 620px) {
+      padding: 12px 12px 9px;
+      border-radius: 14px;
+      gap: 8px;
     }
   `,
   dock: css`
@@ -122,10 +128,13 @@ const styles = createStaticStyles(({ css }) => ({
 
     overflow-y: auto;
 
-    /* 空闲高度跟着列宽走，让输入框的长宽比在窄列下不塌成方块：宽列仍保持原先约 105 的手感，
-       窄列压到 72（约三行）——真要输入更多内容时本来就会顶到 max-height 自行长高。 */
-    min-height: clamp(72px, 12cqw, 108px);
+    /* 空闲时保持紧凑，多行内容仍可自然长到 max-height。 */
+    min-height: clamp(56px, 8cqw, 72px);
     max-height: 300px;
+
+    [data-chat-empty='true'] & {
+      min-height: clamp(40px, 8cqw, 72px);
+    }
 
     cursor: text;
   `,
@@ -237,6 +246,8 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   });
 
   useEffect(() => {
+    // 空态整组使用原生滚动；只有消息态才把正文边界滚轮转给对话列表。
+    if (!scrollTranscript) return;
     const el = draftRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {

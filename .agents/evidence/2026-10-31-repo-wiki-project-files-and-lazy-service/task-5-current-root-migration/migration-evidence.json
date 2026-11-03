@@ -1,0 +1,17 @@
+{
+  "seededLegacyProjects": 7,
+  "migratedProject": "cc2ceb8b52ca596e9900bb04",
+  "portableId": "legacy-1",
+  "diskProjectId": "legacy-1",
+  "legacySha256Unchanged": "cd003b66a178578f4ec7d463c6171df005ae5fd60db07bbabde9eb0e7896cce2",
+  "unhydratedRoots": [
+    "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\Pi-repowiki-integration\\repo-wiki-lazy-WuMvQq\\project-2",
+    "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\Pi-repowiki-integration\\repo-wiki-lazy-WuMvQq\\project-3",
+    "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\Pi-repowiki-integration\\repo-wiki-lazy-WuMvQq\\project-4",
+    "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\Pi-repowiki-integration\\repo-wiki-lazy-WuMvQq\\project-5",
+    "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\Pi-repowiki-integration\\repo-wiki-lazy-WuMvQq\\project-6",
+    "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\Pi-repowiki-integration\\repo-wiki-lazy-WuMvQq\\project-7"
+  ],
+  "otherSixDocumentDirectoriesAbsent": true,
+  "authorityModelCalls": 0
+}

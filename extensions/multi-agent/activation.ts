@@ -4,7 +4,9 @@ import {
   getAgentDir,
   SessionManager,
   type ExtensionUIContext,
+  type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
 import {
   SubagentError,
@@ -19,6 +21,13 @@ import { attachSessionCwd } from "../_shared/session-cwd.js";
 import { registerChildApprovalRoute } from "../_shared/approval-route.js";
 import { sharedModelRuntime } from "../_shared/shared-model-runtime.js";
 import { registerParentSessionHost, sendSettlementToParent } from "./parent-host.js";
+import {
+  bindRoutingDomain,
+  routingModeFromMeta,
+  routingWorkspaceContext,
+  type RoutingMode,
+} from "../_shared/ultra-context.js";
+import { runInWorkspace, type WorkspaceContext } from "../_shared/workspace-context.js";
 import { __resetLeakOwnerForTest, leakedErrorText, onLeakedError, runAsChild } from "../_shared/leak-owner.js";
 import { abortQuietly, errorText, Teardown } from "./teardown.js";
 import { formatSettlementNotice, type SettlementNotice } from "./settlement-notice.js";
@@ -58,6 +67,8 @@ export interface Activation {
   ownedChildren: Set<string>;
   depth: number;
   parentActivationId?: string;
+  /** 这个子会话固定的路由域（启动时定，驻留续聊 / send_message 投递都按它跑）。 */
+  routingMode: RoutingMode;
   sessionManager?: {
     appendCustomEntry: (type: string, data: unknown) => void;
     getEntries: () => unknown[];
@@ -103,6 +114,7 @@ interface ResidentSession {
   parentSessionPath: string;
   workspace: string;
   depth: number;
+  routingMode: RoutingMode;
   session: AgentSessionLike;
   sessionManager?: Activation["sessionManager"];
   lastUsed: number;
@@ -136,6 +148,7 @@ function parkResident(act: ActivationRecord): boolean {
     parentSessionPath: act.parentSessionPath,
     workspace: act.workspace,
     depth: act.depth,
+    routingMode: act.routingMode,
     session: act.session,
     sessionManager: act.sessionManager,
     lastUsed: Date.now(),
@@ -222,6 +235,25 @@ const noopUi: ExtensionUIContext = {
   getToolsExpanded: () => false,
   setToolsExpanded: () => {},
 };
+
+/** 激活的域上下文：键集照旧（继承面不变），只把域键换成这个子会话自己固定的那一份。 */
+function domainOf(
+  workspace: string,
+  cwd: string,
+  mode: RoutingMode,
+  config: Readonly<Record<string, string>> | undefined = undefined,
+): WorkspaceContext {
+  return routingWorkspaceContext(mode, { workspace, cwd, ...(config ? { config } : {}) });
+}
+
+function domainCwd(sessionManager: Activation["sessionManager"] | undefined): string {
+  return sessionCwd(sessionManager);
+}
+
+/** 投递面（prompt / sendCustomMessage）在这个子会话自己的域里执行。 */
+function inDomain<T>(domain: WorkspaceContext, fn: () => T): T {
+  return runInWorkspace(domain, fn);
+}
 
 function isSessionIdle(session: AgentSessionLike): boolean {
   const idle = (session as IdleAwareSession).isIdle;
@@ -502,10 +534,15 @@ export function installActivation(input: {
   deliverFallback?: (notice: SettlementNotice) => void;
   /** 结算后留在驻留池（进程内会话）。默认 false。 */
   keepResident?: boolean;
+  /** 启动时固定的路由域；省略时从会话的 subagent_meta 读（旧会话 ordinary）。 */
+  routingMode?: RoutingMode;
 }): Activation {
   if (activations.has(input.childId)) {
     throw new SubagentError(`duplicate activation for child ${input.childId}`, "DUPLICATE_CHILD");
   }
+  const routingMode =
+    input.routingMode ?? routingModeFromMeta(lastSubagentMeta(input.sessionManager?.getEntries?.() ?? []));
+  const domain = domainOf(input.workspace, domainCwd(input.sessionManager), routingMode);
   const act: ActivationRecord = {
     childId: input.childId,
     sessionPath: input.sessionPath,
@@ -515,7 +552,20 @@ export function installActivation(input: {
     mode: "continuable",
     session: input.session,
     sessionManager: input.sessionManager,
-    inbox: new SubagentInbox(input.session, (error) => deliveryFailed(input.childId, error)),
+    routingMode,
+    // 续聊 / 驻留之后的每一轮都在这个域里起，不跟着投递方（父会话）当下的 ALS。
+    inbox: new SubagentInbox(
+      {
+        get isStreaming() {
+          return input.session.isStreaming;
+        },
+        get pendingMessageCount() {
+          return input.session.pendingMessageCount;
+        },
+        prompt: (text, opts) => inDomain(domain, () => input.session.prompt(text, opts)),
+      },
+      (error) => deliveryFailed(input.childId, error),
+    ),
     announced: input.announced === true,
     ownedChildren: new Set(),
     depth: input.depth ?? 0,
@@ -551,9 +601,11 @@ export function installActivation(input: {
     isDraining: () => act.inbox.closing !== undefined,
     // 不等结果：结算通知是尽力投递，worker 已经退出时这里的拒绝要吞掉，不能变成未处理的 rejection。
     sendMessage: (msg, opts) =>
-      runAsChild(act.childId, () => {
-        void Promise.resolve(act.session.sendCustomMessage?.(msg, opts)).catch(() => {});
-      }),
+      runAsChild(act.childId, () =>
+        inDomain(domain, () => {
+          void Promise.resolve(act.session.sendCustomMessage?.(msg, opts)).catch(() => {});
+        }),
+      ),
     prompt: (text, delivery) => runAsChild(act.childId, () => deliverToChild(act.childId, text, delivery)),
   });
   // 驻留后续聊、冷恢复都重新装 Activation，所以审批路由跟着 Activation 登记。
@@ -749,11 +801,72 @@ function metaString(data: Record<string, unknown>, key: string): string | undefi
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+type SessionLog = {
+  getBranch?: () => unknown[];
+  getEntries: () => unknown[];
+};
+
+/** 会话最后记下的实际模型：优先 model_change（分支），退回 subagent_meta.model（启动时请求的路由）。 */
+function lastRecordedModel(
+  sessionManager: SessionLog,
+  meta: Record<string, unknown>,
+): { provider: string; id: string; source: string } | undefined {
+  let entries: unknown[] = [];
+  try {
+    const branch = typeof sessionManager.getBranch === "function" ? sessionManager.getBranch() : undefined;
+    entries = Array.isArray(branch) ? branch : sessionManager.getEntries();
+  } catch {
+    entries = [];
+  }
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i] as { type?: string; provider?: unknown; modelId?: unknown } | undefined;
+    if (entry?.type !== "model_change") continue;
+    if (typeof entry.provider === "string" && entry.provider.trim() && typeof entry.modelId === "string" && entry.modelId.trim()) {
+      return { provider: entry.provider, id: entry.modelId, source: "the session model_change" };
+    }
+  }
+  const recorded = metaString(meta, "model")?.trim();
+  if (recorded) {
+    const slash = recorded.indexOf("/");
+    if (slash > 0 && slash < recorded.length - 1) {
+      return { provider: recorded.slice(0, slash), id: recorded.slice(slash + 1), source: "subagent_meta.model" };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Ultra 子会话续聊不许自动换模（SDK 在历史模型不可用 / 缺认证时会回退到别的模型）。
+ * 这里按会话记录把模型显式解析回来：必须在当前目录可用且已配认证，否则明确报错、不启动。
+ */
+function resumeUltraModel(
+  runtime: Pick<ModelRuntime, "getModel" | "hasConfiguredAuth">,
+  recorded: { provider: string; id: string; source: string },
+): Model<Api> {
+  const route = `${recorded.provider}/${recorded.id}`;
+  const model = runtime.getModel?.(recorded.provider, recorded.id);
+  if (!model) {
+    throw new Error(
+      `ultra sub-agent: cannot resume with ${recorded.source} ${route}: the model is not available in this workspace. ` +
+        "Ultra sessions keep their routed model and do not switch to another one; restore that provider/model or spawn a new sub-agent.",
+    );
+  }
+  if (!runtime.hasConfiguredAuth(recorded.provider)) {
+    throw new Error(
+      `ultra sub-agent: cannot resume with ${recorded.source} ${route}: provider ${recorded.provider} has no configured credentials. ` +
+        "Ultra sessions keep their routed model and do not switch to another one; configure the provider or spawn a new sub-agent.",
+    );
+  }
+  return model;
+}
+
 export interface ResumedChildSession {
   session: AgentSessionLike;
   sessionManager: NonNullable<Activation["sessionManager"]>;
   /** 会话头里的原始目录。 */
   cwd: string;
+  /** 这个子会话固定的路由域；worker 里接着用它，不随父会话后来切模式改变。 */
+  routingMode: RoutingMode;
   /** 撤掉打开时登记的审批路由（worker 进程里由 worker-host 在 dispose 时调用）。 */
   unsub: () => void;
 }
@@ -765,40 +878,79 @@ export async function openResumedChildSession(
 ): Promise<ResumedChildSession> {
   const sessionManager = opened ?? SessionManager.open(sessionPath);
   const cwd = sessionCwd(sessionManager);
-  const modelRuntime = sharedModelRuntime();
-  const services = await createAgentSessionServices({
+  const meta = lastSubagentMeta(sessionManager.getEntries()) ?? {};
+  // 域按会话自己落的标记重建（旧会话没有标记 → ordinary），不看父会话当下的模式。
+  const routingMode = routingModeFromMeta(meta);
+  // SDK 扩展初始化与后续新轮都在这个子会话自己的域里跑：父会话可能已经切了模式、换了 ALS，
+  // 而子会话的选模来源必须还是它启动时那一份。
+  const domain = routingWorkspaceContext(routingMode, {
+    workspace: metaString(meta, "workspace") ?? cwd,
     cwd,
-    agentDir: getAgentDir(),
-    ...(modelRuntime ? { modelRuntime } : {}),
   });
-  const { session } = await createAgentSessionFromServices({
-    services,
-    sessionManager,
-  });
+  const modelRuntime = sharedModelRuntime();
+  const services = await runInWorkspace(domain, () =>
+    createAgentSessionServices({
+      cwd,
+      agentDir: getAgentDir(),
+      ...(modelRuntime ? { modelRuntime } : {}),
+    }),
+  );
+  // Ultra 续聊沿用会话记录里的模型（不自动换模）；普通旧恢复保持原行为，不显式传模型。
+  // 档位不在这里传：SDK 按会话里的记录恢复，已被选模钳制过一次的不会被重新放大。
+  const resumedModel =
+    routingMode === "ultra"
+      ? runInWorkspace(domain, () => {
+          const recorded = lastRecordedModel(sessionManager as unknown as SessionLog, meta);
+          if (!recorded) {
+            throw new Error(
+              "ultra sub-agent: cannot resume without a recorded model. Ultra sessions keep their routed model and do not switch to another one; spawn a new sub-agent instead.",
+            );
+          }
+          return resumeUltraModel(
+            services.modelRuntime as unknown as Pick<ModelRuntime, "getModel" | "hasConfiguredAuth">,
+            recorded,
+          );
+        })
+      : undefined;
+  const { session } = await runInWorkspace(domain, () =>
+    createAgentSessionFromServices({
+      services,
+      sessionManager,
+      ...(resumedModel ? { model: resumedModel } : {}),
+    }),
+  );
   installToolRefreshBatching(session);
   // 子会话切过工作目录的，按会话里的 working_directory 记录原地切回去。
   attachSessionCwd(session);
-  await session.bindExtensions({
-    uiContext: noopUi,
-    mode: "rpc",
-    commandContextActions: {
-      waitForIdle: () => session.waitForIdle(),
-      newSession: async () => ({ cancelled: true }),
-      fork: async () => ({ cancelled: true }),
-      navigateTree: async () => ({ cancelled: true }),
-      switchSession: async () => ({ cancelled: true }),
-      reload: async () => {},
-    },
-    shutdownHandler: () => {},
-  });
-  const meta = lastSubagentMeta(sessionManager.getEntries()) ?? {};
+  await runInWorkspace(domain, () =>
+    session.bindExtensions({
+      uiContext: noopUi,
+      mode: "rpc",
+      commandContextActions: {
+        waitForIdle: () => session.waitForIdle(),
+        newSession: async () => ({ cancelled: true }),
+        fork: async () => ({ cancelled: true }),
+        navigateTree: async () => ({ cancelled: true }),
+        switchSession: async () => ({ cancelled: true }),
+        reload: async () => {},
+      },
+      shutdownHandler: () => {},
+    }),
+  );
   const unsub = registerChildApprovalRoute({
     sessionPath,
     parentSessionPath: metaString(meta, "parentSessionPath") ?? metaString(meta, "parentSession"),
     agentId: metaString(meta, "agentId") ?? "",
     label: metaString(meta, "label") ?? "",
   });
-  return { session: session as AgentSessionLike, sessionManager, cwd, unsub };
+  return {
+    // 之后的 prompt / followUp / send_message 也按这个域执行，而不是投递时父会话的 ALS。
+    session: bindRoutingDomain(session, domain) as AgentSessionLike,
+    sessionManager,
+    cwd,
+    routingMode,
+    unsub,
+  };
 }
 
 /** 不唤醒地投递（send_message wake: false）时写进对方上下文的那条消息。 */
@@ -842,14 +994,18 @@ export function deliverWithoutWaking(
       }
       if (!act.session.sendCustomMessage) throw new SubagentError(`child ${childId} cannot take messages`, "NO_ACTIVATION");
       const running = act.session.isStreaming === true;
-      await act.session.sendCustomMessage(input.message, { triggerTurn: false });
+      await inDomain(domainOf(act.workspace, domainCwd(act.sessionManager), act.routingMode), () =>
+        act.session.sendCustomMessage!(input.message, { triggerTurn: false }),
+      );
       return running ? "next-step" : "appended";
     }
     const warm = residents.get(childId);
     if (warm) {
       // 驻留的会话还持有 JSONL：只能经它写，不能绕过它直接追加文件。
       if (!warm.session.sendCustomMessage) throw new SubagentError(`child ${childId} cannot take messages`, "NO_ACTIVATION");
-      await warm.session.sendCustomMessage(input.message, { triggerTurn: false });
+      await inDomain(domainOf(warm.workspace, domainCwd(warm.sessionManager), warm.routingMode), () =>
+        warm.session.sendCustomMessage!(input.message, { triggerTurn: false }),
+      );
       // 刚收到消息，多半很快会被叫醒：不要马上被挤出驻留池。
       warm.lastUsed = Date.now();
       return "appended";
@@ -902,6 +1058,7 @@ async function resumeAndDeliver(
       ...(warm.sessionManager ? { sessionManager: warm.sessionManager } : {}),
       announced: false,
       depth: warm.depth,
+      routingMode: warm.routingMode,
       keepResident: true,
       ...parentLink,
     });
@@ -932,6 +1089,7 @@ async function resumeAndDeliver(
     session,
     sessionManager: resumed.sessionManager,
     announced: false,
+    routingMode: resumed.routingMode,
     keepResident: meta.backend !== "worker",
     depth: typeof meta.depth === "number" ? meta.depth : 0,
     ...(link.senderActivationId && activations.has(link.senderActivationId)

@@ -51,6 +51,12 @@ export const styles = createStaticStyles(({ css }) => ({
     padding-inline: max(24px, (100% - 1180px) / 2);
     @media (max-width: 800px) { padding-inline: 16px; }
   `,
+  workspacePanel: css`
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  `,
   pathSummary: css`
     display: block;
     min-width: 0;

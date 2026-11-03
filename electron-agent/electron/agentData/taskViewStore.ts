@@ -4,9 +4,11 @@ import { parseJobMetadata } from './jobStore';
 import { operationResource, operationText } from './operationsProjection';
 import type { TaskDetail, TaskListInput, TaskPage, TaskRef, TaskView } from './operationsContracts';
 
-const labels: Record<string, string> = { 'wiki.sync': 'Wiki 同步', 'wiki.ingest': 'Wiki 资料提取', 'codegraph.sync': '代码索引同步', wiki_page_generate: 'Wiki 页面生成', memory_extract: '记忆提取', memory_deduplicate: '记忆去重', memory_scene: '记忆场景', memory_persona: '记忆原则', memory_consolidate: '记忆整理' };
-const stages = new Set(['已选择资料', '正在选择资料', '正在扫描', '正在读取', '正在生成', '正在发布', '已处理', '正在构建', '已完成']);
+const labels: Record<string, string> = { 'wiki.sync': 'Wiki 同步', 'wiki.ingest': 'Wiki 资料提取', 'codegraph.sync': '代码索引同步', 'repoWiki.generate': 'Repo Wiki 文档生成', 'repoWiki.native': 'Repo Wiki 文档生成', wiki_page_generate: 'Wiki 页面生成' };
+const stages = new Set(['已选择资料', '正在选择资料', '排队等待', '正在恢复', '正在分析', '正在扫描', '正在读取', '正在规划', '正在生成', '正在校验', '正在发布', '已处理', '正在构建', '已完成']);
 const active = new Set(['pending', 'queued', 'running', 'blocked']);
+const kernelRow = "(source='user' AND (kind='repoWiki.native' OR COALESCE(json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,'$.repoWiki')='object',0)))";
+const activeRow = `(status IN ('pending','queued','running','blocked') OR (status='paused' AND ${kernelRow}))`;
 interface Cursor { v: 1; updatedAt: number; source: TaskRef['source']; id: string; filterHash: string; signature: string }
 type Row = Record<string, unknown>;
 
@@ -23,13 +25,13 @@ export class TaskViewStore {
     const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(100, Math.trunc(input.limit!))) : 50;
     const conditions: string[] = []; const parameters: SQLInputValue[] = [];
     if (input.source) { conditions.push('source=?'); parameters.push(input.source); }
-    if (input.group) conditions.push(`status ${input.group === 'active' ? 'IN' : 'NOT IN'} ('pending','queued','running','blocked')`);
+    if (input.group) conditions.push(input.group === 'active' ? activeRow : `NOT ${activeRow}`);
     if (input.workspace !== undefined) { conditions.push('workspace=?'); parameters.push(input.workspace); }
     if (query) {
       conditions.push("(id LIKE ? ESCAPE '\\' OR kind LIKE ? ESCAPE '\\' OR label LIKE ? ESCAPE '\\' OR resource_name LIKE ? ESCAPE '\\' OR workspace LIKE ? ESCAPE '\\')");
       const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`; parameters.push(pattern, pattern, pattern, pattern, pattern);
     }
-    const activeConditions = ["status IN ('pending','queued','running','blocked')", ...conditions];
+    const activeConditions = [activeRow, ...conditions];
     const activeParameters = [...parameters];
     if (input.cursor !== undefined) {
       const cursor = this.decodeCursor(input.cursor, filterHash);
@@ -39,9 +41,10 @@ export class TaskViewStore {
     const union = this.union();
     const rows = this.db.prepare(`SELECT * FROM (${union}) ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''} ORDER BY updated_at DESC,source ASC,id ASC LIMIT ?`).all(...parameters, limit + 1) as Row[];
     const activeCount = Number(this.db.prepare(`SELECT count(*) AS count FROM (${union}) WHERE ${activeConditions.join(' AND ')}`).get(...activeParameters)!.count);
+    const pollingCount = Number(this.db.prepare(`SELECT count(*) AS count FROM (${union}) WHERE ${[...activeConditions, `NOT (${kernelRow} AND status IN ('paused','blocked'))`].join(' AND ')}`).get(...activeParameters)!.count);
     const hasMore = rows.length > limit; const selected = rows.slice(0, limit);
     const last = selected.at(-1);
-    return { items: selected.map((row) => this.map(row)), activeCount, ...(hasMore && last ? { nextCursor: this.encodeCursor(last, filterHash) } : {}) };
+    return { items: selected.map((row) => this.map(row)), activeCount, pollingCount, ...(hasMore && last ? { nextCursor: this.encodeCursor(last, filterHash) } : {}) };
   }
 
   read(ref: TaskRef): TaskView | undefined {
@@ -56,41 +59,24 @@ export class TaskViewStore {
     if (ref.source === 'system') {
       const input = "CASE WHEN json_valid(input) THEN input ELSE '{}' END";
       const output = "CASE WHEN json_valid(output) THEN output ELSE '{}' END";
-      const scenes = `json_extract(${output},'$.scenes')`;
-      const row = this.db.prepare(`SELECT kind,json_extract(${input},'$.kbId') AS kbId,json_extract(${input},'$.sourceId') AS sourceId,
+      const row = this.db.prepare(`SELECT json_extract(${input},'$.kbId') AS kbId,json_extract(${input},'$.sourceId') AS sourceId,
         json_extract(${input},'$.sourceRevision') AS sourceRevision,json_extract(${input},'$.expectedModel') AS model,
-        json_extract(${input},'$.mode') AS mode,json_extract(${input},'$.source') AS memorySource,
-        json_extract(${input},'$.sessionId') AS sessionId,json_extract(${input},'$.userId') AS userId,
-        json_extract(${input},'$.generation') AS generation,json_extract(${input},'$.maxScenes') AS maxScenes,
-        json_array_length(json_extract(${input},'$.memories')) AS memoryCount,
-        COALESCE(json_array_length(json_extract(${input},'$.scenes')),json_extract(${input},'$.sceneCount')) AS sceneCount,
-        json_extract(${input},'$.changedSceneCount') AS changedSceneCount,json_extract(${input},'$.totalProcessed') AS totalProcessed,
         json_extract(${output},'$.succeeded') AS succeeded,json_extract(${output},'$.skipped') AS skipped,
-        json_extract(${output},'$.failed') AS failed,json_extract(${output},'$.generated') AS generated,
-        json_array_length(json_extract(${output},'$.l1')) AS l1Count,json_array_length(${output}) AS decisionCount,
-        (SELECT COUNT(*) FROM json_each(${scenes}) WHERE COALESCE(json_extract(value,'$.action'),'write')!='delete' AND COALESCE(json_extract(value,'$.content'),'')!='[DELETED]') AS written,
-        (SELECT COUNT(*) FROM json_each(${scenes}) WHERE json_extract(value,'$.action')='delete' OR json_extract(value,'$.content')='[DELETED]') AS deleted,
-        CASE WHEN json_type(${output},'$.persona_update_request')='text' AND length(trim(json_extract(${output},'$.persona_update_request')))>0 THEN 1 ELSE 0 END AS personaUpdateRequested,
-        CASE WHEN json_type(${output},'$.content')='text' AND length(trim(json_extract(${output},'$.content')))>0 THEN 1 ELSE 0 END AS wrotePersona
+        json_extract(${output},'$.failed') AS failed,json_extract(${output},'$.generated') AS generated
         FROM service_tasks WHERE id=?`).get(ref.id) as Row;
       if (this.hasTable('wiki_task_targets')) {
         const target = this.db.prepare("SELECT kb_id,source_id FROM wiki_task_targets WHERE task_source='service_task' AND task_id=? ORDER BY kb_id,source_id LIMIT 1").get(ref.id);
         if (target) { row.kbId = target.kb_id; if (target.source_id) row.sourceId = target.source_id; }
       }
-      const kind = String(row.kind ?? view.kind);
-      if (kind.startsWith('memory_')) {
-        detail.inputSummary = memoryInputSummary(row);
-        detail.outputSummary = memoryOutputSummary(kind, row);
-        const processed = memoryProcessed(kind, detail.outputSummary);
-        if (processed !== undefined && view.status === 'completed') { detail.processed = processed; detail.total = processed; }
-      } else {
-        detail.inputSummary = safeSummary(row, ['kbId', 'sourceId', 'model'], ['sourceRevision']);
-        detail.outputSummary = safeSummary(row, [], ['succeeded', 'skipped', 'failed', 'generated']);
-      }
+      detail.inputSummary = safeSummary(row, ['kbId', 'sourceId', 'model'], ['sourceRevision']);
+      detail.outputSummary = safeSummary(row, [], ['succeeded', 'skipped', 'failed', 'generated']);
     } else {
       const row = this.db.prepare('SELECT metadata FROM agent_jobs WHERE id=?').get(ref.id);
       const metadata = parseJobMetadata(row?.metadata);
       detail.inputSummary = { ...(view.resource ? { resource: view.resource } : {}), ...(view.workspace ? { workspace: view.workspace } : {}) };
+      if (metadata?.payload && 'projectId' in metadata.payload) {
+        Object.assign(detail.inputSummary, { projectId: metadata.payload.projectId, language: metadata.payload.language, target: metadata.payload.target, force: metadata.payload.force });
+      }
       if (metadata?.payload && 'sourceIds' in metadata.payload) detail.inputSummary.sourceCount = metadata.payload.sourceIds.length;
       if (this.hasTable('wiki_ingest_runs')) {
         const run = this.db.prepare("SELECT model,CASE WHEN json_valid(summary) THEN summary ELSE '{}' END AS summary FROM wiki_ingest_runs WHERE job_id=?").get(ref.id);
@@ -117,30 +103,27 @@ export class TaskViewStore {
   private union(): string {
     const metadata = "CASE WHEN json_valid(j.metadata) THEN j.metadata ELSE '{}' END";
     const label = (alias: string) => `CASE ${alias}.kind ${Object.entries(labels).map(([kind, name]) => `WHEN '${kind}' THEN '${name}'`).join(' ')} ELSE ${alias}.kind END`;
-    const lease = this.hasTable('wiki_task_targets') ? "EXISTS(SELECT 1 FROM wiki_task_targets t WHERE t.task_source='agent_job' AND t.task_id=j.id AND t.active=1)" : '0';
+    const wikiLease = this.hasTable('wiki_task_targets') ? "EXISTS(SELECT 1 FROM wiki_task_targets t WHERE t.task_source='agent_job' AND t.task_id=j.id AND t.active=1)" : '0';
+    const nativeLease = this.hasTable('agent_job_leases') ? "EXISTS(SELECT 1 FROM agent_job_leases l WHERE l.task_id=j.id AND l.pinned=1)" : '0';
+    const lease = `(${wikiLease} OR ${nativeLease})`;
+    const nativeReference = this.hasTable('native_wiki_projection') ? 'EXISTS(SELECT 1 FROM native_wiki_projection n WHERE n.task_id=j.id)' : '0';
     const user = `SELECT 'user' AS source,j.id,j.kind,${label('j')} AS label,j.workspace,j.state AS status,j.progress,j.error,j.metadata,
       CASE WHEN json_type(${metadata},'$.resourceName')='text' THEN json_extract(${metadata},'$.resourceName') END AS resource_name,
-      NULL AS kb_id,NULL AS attempts,${lease} AS active_lease,j.created_at,j.updated_at FROM agent_jobs j`;
+      NULL AS kb_id,NULL AS attempts,${lease} AS active_lease,${nativeReference} AS native_reference,j.created_at,j.updated_at FROM agent_jobs j`;
     if (!this.hasTable('service_tasks')) return user;
-    // 记忆任务的 input 是整段对话（单条可达数 MB），且从不带 kbId。attempts / error / created_at / updated_at
-    // 在表里排在 input 之后，直接扫表读它们也要走完 input 的溢出页链。记忆任务单独一支，只引用
-    // service_tasks_task_view 覆盖索引里的列，整支不碰表行。否则每次列表和计数都要在主进程同步读完
-    // 全部历史载荷（实测 50 MB 时单次 300~600 ms，AgentData 页面进入和切换都会卡住）。
-    const memoryKind = "s.kind LIKE 'memory\\_%' ESCAPE '\\'";
     const input = "CASE WHEN json_valid(s.input) THEN s.input ELSE '{}' END";
     const target = this.hasTable('wiki_task_targets') ? "(SELECT t.kb_id FROM wiki_task_targets t WHERE t.task_source='service_task' AND t.task_id=s.id ORDER BY t.kb_id LIMIT 1)" : 'NULL';
-    const system = (kbId: string, where: string) => `SELECT 'system' AS source,s.id,s.kind,${label('s')} AS label,s.source_project_id AS workspace,s.status,NULL AS progress,
-      s.error,NULL AS metadata,NULL AS resource_name,${kbId} AS kb_id,
-      s.attempts,0 AS active_lease,s.created_at,s.updated_at FROM service_tasks s WHERE ${where}`;
-    return `${user} UNION ALL ${system(target, memoryKind)} UNION ALL ${system(
-      `COALESCE(${target},CASE WHEN json_type(${input},'$.kbId')='text' THEN json_extract(${input},'$.kbId') END)`, `NOT (${memoryKind})`,
-    )}`;
+    return `${user} UNION ALL SELECT 'system' AS source,s.id,s.kind,${label('s')} AS label,s.source_project_id AS workspace,s.status,NULL AS progress,
+      s.error,NULL AS metadata,NULL AS resource_name,
+      COALESCE(${target},CASE WHEN json_type(${input},'$.kbId')='text' THEN json_extract(${input},'$.kbId') END) AS kb_id,
+      s.attempts,0 AS active_lease,0 AS native_reference,s.created_at,s.updated_at FROM service_tasks s`;
   }
 
   private map(row: Row): TaskView {
     const source = row.source as TaskRef['source']; const metadata = parseJobMetadata(row.metadata);
     const corrupt = source === 'user' && row.metadata != null && metadata === undefined;
     const kind = String(row.kind); const status = String(row.status) as TaskView['status'];
+    const rowActive = active.has(status) || (status === 'paused' && (Boolean(metadata?.repoWiki) || kind === 'repoWiki.native'));
     const workspace = operationText(row.workspace, 'project');
     let resource: TaskView['resource'];
     if (source === 'user') {
@@ -155,17 +138,23 @@ export class TaskViewStore {
     if (corrupt) error = '任务元数据损坏，已使用安全视图';
     else if (row.error) error = safeError(row.error);
     else if (metadata?.cancellationError) error = '取消请求失败，可再次尝试';
-    return { ref: { source, id: String(row.id) }, key: `${source}:${row.id}`, kind, label: String(row.label), status, workspace, resource,
+    const repoPayload = kind === 'repoWiki.generate' && metadata?.payload && 'projectId' in metadata.payload ? metadata.payload : undefined;
+    if (resource?.type === 'repoWiki' && !resource.language && repoPayload) resource = { ...resource, language: repoPayload.language };
+    return { ref: { source, id: String(row.id) }, key: `${source}:${row.id}`, kind, label: metadata?.repoWiki?.key.domain === 'cards' ? 'Repo Wiki 知识卡生成' : repoPayload?.target === 'cards' ? 'Repo Wiki 卡片生成' : String(row.label), status, workspace, resource,
       resourceName: operationText(metadata?.resourceName, 'text'),
+      ...(kind === 'repoWiki.native' && metadata?.nativeWiki ? { nativeWiki: metadata.nativeWiki } : {}),
+      message: operationText(metadata?.message, 'text'), currentPage: operationText(metadata?.currentPage, 'text'),
       stage: safeStage(metadata?.stage) ?? (source === 'user' && kind === 'codegraph.sync' && status === 'running' ? '正在构建' : undefined) ?? systemStage(source, status),
-      progress: measurable ? Math.round(metadata.processed! / metadata.total! * 100) : source === 'system' && status === 'completed' ? 100 : undefined,
+      progress: metadata?.repoWiki ? status === 'completed' ? 100 : metadata.repoWiki.counts.planned > 0 ? Math.min(99, Math.floor(metadata.repoWiki.counts.prepared / metadata.repoWiki.counts.planned * 100)) : undefined
+        : kind === 'repoWiki.generate' && typeof row.progress === 'number' && Number.isFinite(row.progress) ? Math.max(0, Math.min(100, row.progress))
+        : measurable ? Math.round(metadata.processed! / metadata.total! * 100) : source === 'system' && status === 'completed' ? 100 : undefined,
       processed: source === 'user' ? metadata?.processed : undefined, total: source === 'user' ? metadata?.total : undefined,
       // 「已请求取消、等执行器确认」只对还在跑的任务有意义：落定后库里的标记不清，这里不再当成正在取消。
-      cancellationRequested: source === 'user' && active.has(status) && metadata?.cancellationRequested === true, retryOf: operationText(metadata?.retryOf, 'identifier'),
+      cancellationRequested: source === 'user' && rowActive && metadata?.cancellationRequested === true, retryOf: operationText(metadata?.retryOf, 'identifier'),
       attempts: source === 'system' ? Number(row.attempts) : undefined,
       error,
       createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
-      capabilities: { cancel: false, retry: false, remove: source === 'user' && !active.has(status) && !Boolean(row.active_lease) } };
+      capabilities: { cancel: false, retry: false, remove: source === 'user' && !rowActive && !Boolean(row.active_lease) && !Boolean(row.native_reference), ...(row.native_reference ? { removeReason: 'native_referenced' as const } : {}) } };
   }
 
   private hasTable(table: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)); }
@@ -191,30 +180,6 @@ function systemStage(source: TaskRef['source'], status: string): string | undefi
   if (source !== 'system') return undefined;
   if (status === 'running') return '正在生成';
   if (status === 'completed') return '已完成';
-  return undefined;
-}
-function memoryInputSummary(row: Row): Record<string, unknown> {
-  const summary = safeSummary(row, ['mode', 'sessionId', 'userId', 'generation'], ['maxScenes', 'memoryCount', 'sceneCount', 'changedSceneCount', 'totalProcessed']);
-  const source = operationText(row.memorySource, 'identifier');
-  if (source !== undefined) summary.source = source;
-  return summary;
-}
-function memoryOutputSummary(kind: string, row: Row): Record<string, unknown> {
-  if (kind === 'memory_extract') return safeSummary(row, [], ['l1Count']);
-  if (kind === 'memory_scene') {
-    const summary = safeSummary(row, [], ['written', 'deleted']);
-    if (Number(row.personaUpdateRequested) === 1) summary.personaUpdateRequested = true;
-    return summary;
-  }
-  if (kind === 'memory_persona') return Number(row.wrotePersona) === 1 ? { wrotePersona: true } : {};
-  if (kind === 'memory_deduplicate') return safeSummary(row, [], ['decisionCount']);
-  return {};
-}
-function memoryProcessed(kind: string, summary: Record<string, unknown>): number | undefined {
-  if (kind === 'memory_scene') return Number(summary.written ?? 0) + Number(summary.deleted ?? 0);
-  if (kind === 'memory_extract' && summary.l1Count !== undefined) return Number(summary.l1Count);
-  if (kind === 'memory_deduplicate' && summary.decisionCount !== undefined) return Number(summary.decisionCount);
-  if (kind === 'memory_persona' && summary.wrotePersona === true) return 1;
   return undefined;
 }
 function safeStage(value: unknown): string | undefined { return typeof value === 'string' && stages.has(value) ? value : undefined; }

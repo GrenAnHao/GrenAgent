@@ -6,6 +6,42 @@ import { agentDataApi } from '../../lib/agentData';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
 import { deferred, systemTask, task, taskDetail } from './operationsTestData';
 import type { TaskDetail, TaskView } from '../../../electron/agentData/operationsContracts';
+import type { RepoWikiKnowledgeSnapshot } from '../../../shared/knowledgeKernelContracts';
+
+it('shows concurrent knowledge items instead of a misleading single current document', async () => {
+  const knowledge: RepoWikiKnowledgeSnapshot = { version: 1, key: { workspaceInstanceId: 'i', projectId: 'p', portableProjectId: 'p', branch: 'main', language: 'zh', domain: 'wiki' }, content: { state: 'available', publishedCount: 4, preparedCount: 2, expectedCount: 6 }, run: { taskId: task.ref.id, revision: 5, phase: 'generate', state: 'running', currentItem: '系统架构', counts: { planned: 6, prepared: 2, failed: 1, blocked: 0, published: 0 }, capabilities: { pause: true, resume: false, cancel: true, repair: false, reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready' } };
+  Object.assign(knowledge.run!, { activeItems: [
+    { phase: 'generate', itemId: 'generate:architecture', title: '系统架构' },
+    { phase: 'generate', itemId: 'generate:api', title: 'API 参考' },
+    { phase: 'generate', itemId: 'generate:usage', title: '使用指南' },
+  ] });
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, status: 'running', currentPage: '系统架构', knowledge } as TaskDetail);
+  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
+  expect(await screen.findByText('处理中 3 篇')).toBeInTheDocument();
+  fireEvent.click(screen.getByText('处理中 3 篇'));
+  expect(screen.getByLabelText('正在处理的内容')).toHaveTextContent('系统架构API 参考使用指南');
+  expect(screen.queryByText('当前文档')).toBeNull();
+});
+
+it('does not let an older task-list projection overwrite the newer knowledge revision from detail', async () => {
+  const knowledge: RepoWikiKnowledgeSnapshot = { version: 1, key: { workspaceInstanceId: 'i', projectId: 'p', portableProjectId: 'p', branch: 'main', language: 'en', domain: 'wiki' }, content: { state: 'available', publishedCount: 4, preparedCount: 2, expectedCount: 3 }, run: { taskId: task.ref.id, revision: 5, phase: 'generate', state: 'paused', counts: { planned: 3, prepared: 2, failed: 1, blocked: 0, published: 0 }, capabilities: { pause: false, resume: true, cancel: true, repair: false, reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready' } };
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, knowledge } as TaskDetail);
+  const old = structuredClone(knowledge); old.run!.revision = 4; old.content.preparedCount = 0;
+  render(<TaskDetailDrawer taskRef={task.ref} taskView={{ ...task, knowledge: old } as TaskView} onClose={vi.fn()} />);
+  await screen.findByTestId('task-knowledge-summary'); expect(screen.getByTestId('task-knowledge-summary')).toHaveTextContent('任务版本5'); expect(screen.getByTestId('task-knowledge-summary')).toHaveTextContent('已准备2 / 3'); expect(screen.getByTestId('task-knowledge-summary')).toHaveTextContent('生成文档中');
+});
+it.each(['paused', 'failed'] as const)('does not call a stopped knowledge item a current document in %s', async state => {
+  const knowledge: RepoWikiKnowledgeSnapshot = { version: 1, key: { workspaceInstanceId: 'i', projectId: 'p', portableProjectId: 'p', branch: 'main', language: 'zh', domain: 'wiki' }, content: { state: 'available', publishedCount: 4, preparedCount: 2, expectedCount: 6 }, run: { taskId: task.ref.id, revision: 5, phase: 'generate', state, currentItem: '陈旧项目', counts: { planned: 6, prepared: 2, failed: 1, blocked: 0, published: 0 }, capabilities: { pause: false, resume: state === 'paused', cancel: state === 'paused', repair: state === 'failed', reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready' } };
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, status: state, currentPage: '陈旧项目', knowledge } as TaskDetail);
+  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
+  await screen.findByTestId('task-knowledge-summary');
+  expect(screen.queryByText('当前文档')).toBeNull(); expect(screen.queryByText('陈旧项目')).toBeNull();
+});
+it('echoes optional frozen kernel model identity and plan token from retry preflight', async () => {
+  vi.mocked(agentDataApi.tasks.previewRetry).mockResolvedValue({ ref: task.ref, label: task.label, callsModel: true, model: 'provider/model', modelIdentity: 'digest-v1', planToken: 'plan-v1', targetCount: 1 } as any);
+  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />); await screen.findByText('任务信息'); fireEvent.click(screen.getByRole('button', { name: '重试任务' })); await screen.findByText('provider/model'); fireEvent.click(screen.getByRole('button', { name: '确认重试' }));
+  await waitFor(() => expect(agentDataApi.tasks.retry).toHaveBeenCalledWith(task.ref, { expectedModel: 'provider/model', expectedModelIdentity: 'digest-v1', expectedPlanToken: 'plan-v1' }));
+});
 vi.mock('../../lib/agentData', () => ({ agentDataApi: {
   tasks: { read: vi.fn(), previewRetry: vi.fn(), retry: vi.fn() },
   jobs: { cancel: vi.fn() },
@@ -61,6 +97,49 @@ it('confirms current Wiki model and target count then tracks a new ID without ch
   expect(screen.getByText('来源读取失败')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /查看新任务/ })).toBeInTheDocument();
 });
+it.each([{ target: 'wiki', content: 'Wiki 文档' }, { target: 'cards', content: '知识卡片' }])('confirms Repo Wiki $target retry without requiring a source count', async ({ target, content }) => {
+  const repoTask: TaskDetail = { ...taskDetail, kind: 'repoWiki.generate', label: `Repo Wiki ${content}生成`, workspace: 'D:/Repo',
+    resource: { type: 'repoWiki', id: 'D:/Repo', language: 'en' }, inputSummary: { projectId: 'project-en', language: 'en', target } };
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue(repoTask);
+  vi.mocked(agentDataApi.tasks.previewRetry).mockResolvedValue({ ref: repoTask.ref, label: repoTask.label, callsModel: true, resource: repoTask.resource, model: 'fixture/knowledge-model' });
+  const onTrack = vi.fn();
+  render(<TaskDetailDrawer taskRef={repoTask.ref} onClose={vi.fn()} onTrack={onTrack} />);
+  fireEvent.click(await screen.findByRole('button', { name: '重试任务' }));
+  expect(await screen.findByText('fixture/knowledge-model')).toBeInTheDocument();
+  const scope = screen.getByText(/将为工作区/);
+  expect(scope).toHaveTextContent('D:/Repo');
+  expect(scope).toHaveTextContent('语言：en');
+  expect(scope).toHaveTextContent(`重新生成 ${content}`);
+  expect(scope).toHaveTextContent('可能产生模型费用');
+  expect(screen.getByText(/新建任务，保留旧记录/)).toBeInTheDocument();
+  expect(screen.queryByText(/份来源/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '确认重试' }));
+  await waitFor(() => expect(agentDataApi.tasks.retry).toHaveBeenCalledWith(repoTask.ref, { expectedModel: 'fixture/knowledge-model' }));
+  expect(onTrack).toHaveBeenCalledWith({ source: 'user', id: 'new-id' });
+  expect(screen.getByText('来源读取失败')).toBeInTheDocument();
+});
+it('still refuses a legacy Wiki model retry whose source count is unknown', async () => {
+  vi.mocked(agentDataApi.tasks.previewRetry).mockResolvedValue({ ref: task.ref, label: task.label, callsModel: true, resource: task.resource, model: 'fixture/provider-model' });
+  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: '重试任务' }));
+  expect(await screen.findByText('无法确认模型或处理范围，请重新读取')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '确认重试' })).toBeNull();
+  expect(agentDataApi.tasks.retry).not.toHaveBeenCalled();
+});
+it('scrolls the opened retry confirmation into the current drawer view', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+  const scrolled: Array<{ element: HTMLElement; options: ScrollIntoViewOptions }> = [];
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value(this: HTMLElement, options: ScrollIntoViewOptions) { scrolled.push({ element: this, options }); } });
+  try {
+    render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '重试任务' }));
+    const confirm = await screen.findByRole('button', { name: '确认重试' });
+    await waitFor(() => expect(scrolled.some(({ element, options }) => element.contains(confirm) && options.block === 'nearest')).toBe(true));
+  } finally {
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', descriptor);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  }
+});
 it('retains confirmation when the backend reports a changed model instead of resubmitting automatically', async () => {
   vi.mocked(agentDataApi.tasks.retry).mockRejectedValueOnce(new Error('模型配置已变化，请重新确认'));
   render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
@@ -95,26 +174,26 @@ it('navigates to the related resource with the typed reference', async () => {
   expect(onNavigate).toHaveBeenCalledWith({ view: 'wiki', kbId: 'kb-a' });
 });
 it('shows a project resource path as the target instead of calling it removed', async () => {
-  const memory = {
+  const projectTask = {
     ...systemTask,
-    kind: 'memory_scene',
-    label: '记忆场景',
+    kind: 'codegraph.sync',
+    label: '代码索引同步',
     status: 'completed' as const,
     resource: { type: 'project' as const, id: 'D:/System Dir/Downloads/Python代码' },
     resourceName: undefined,
     workspace: 'D:/System Dir/Downloads/Python代码',
     stage: '已完成',
     progress: 100,
-    inputSummary: { mode: 'work', memoryCount: 1 },
+    inputSummary: { fileCount: 1 },
     outputSummary: { written: 1, deleted: 0 },
     events: [],
   };
-  vi.mocked(agentDataApi.tasks.read).mockResolvedValue(memory);
-  render(<TaskDetailDrawer taskRef={memory.ref} onClose={vi.fn()} />);
-  expect(await screen.findByRole('heading', { name: '记忆场景' })).toBeInTheDocument();
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue(projectTask);
+  render(<TaskDetailDrawer taskRef={projectTask.ref} onClose={vi.fn()} />);
+  expect(await screen.findByRole('heading', { name: '代码索引同步' })).toBeInTheDocument();
   expect(screen.getAllByText('D:/System Dir/Downloads/Python代码').length).toBeGreaterThan(0);
   expect(screen.queryByText(/资源已移除/)).toBeNull();
-  expect(screen.getByText(/"memoryCount": 1/)).toBeInTheDocument();
+  expect(screen.getByText(/"fileCount": 1/)).toBeInTheDocument();
   expect(screen.queryByText('未提供阶段')).toBeNull();
   expect(screen.queryByText('未提供百分比')).toBeNull();
 });
@@ -149,4 +228,20 @@ it('cancels from the drawer after rechecking capability', async () => {
   // 初次读取 + 取消前复查 + 取消后重读详情。
   await waitFor(() => expect(agentDataApi.tasks.read).toHaveBeenCalledTimes(3));
   expect(onRefresh).toHaveBeenCalled();
+});
+
+it('separates execution completion from partial native coverage and projection failure', async () => {
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, kind: 'repoWiki.native', status: 'completed', error: undefined,
+    nativeWiki: { engine: 'qoder-wiki-local-v1', operationId: 'op', revision: 3, publication: { id: 'pub', coverage: { published: 9, readable: 10, failed: ['a', 'b'], partial: true }, projection: { status: 'error' } } } } as TaskDetail);
+  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
+  const summary = await screen.findByTestId('task-native-wiki-summary');
+  expect(summary).toHaveTextContent('部分覆盖'); expect(summary).toHaveTextContent('9'); expect(summary).toHaveTextContent('10');
+  expect(summary).toHaveTextContent('2'); expect(summary).toHaveTextContent('投影失败');
+});
+
+it('uses a newer same-revision native projection repair from the task list', async () => {
+  const native = { engine: 'qoder-wiki-local-v1' as const, operationId: 'op', revision: 3, publication: { id: 'pub', coverage: { published: 9, readable: 10, failed: ['a', 'b'], partial: true }, projection: { status: 'error' as const } } };
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, updatedAt: 2, nativeWiki: native });
+  render(<TaskDetailDrawer taskRef={task.ref} taskView={{ ...task, updatedAt: 3, nativeWiki: { ...native, publication: { ...native.publication, projection: { status: 'ready' } } } }} onClose={vi.fn()} />);
+  expect(await screen.findByTestId('task-native-wiki-summary')).toHaveTextContent('已投影');
 });

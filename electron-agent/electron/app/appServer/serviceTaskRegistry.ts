@@ -13,46 +13,7 @@ const goalJudgeOutput = z.object({
   blockageFingerprint: z.string().max(400).optional(),
 }).strict().refine((value) => value.verdict !== 'pass' || value.missing.length === 0, 'a passing judge cannot report missing items');
 
-const l1RecordForRegistry = z.object({
-  content: z.string().min(1),
-  type: z.string().min(1),
-  priority: z.number().optional(),
-  scene_name: z.string().optional(),
-  source_message_ids: z.array(z.string()).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-export const memoryExtractionOutput = z.object({
-  l1: z.array(l1RecordForRegistry).optional(),
-  l2: z.string().optional(),
-  l3: z.string().optional(),
-}).strict();
-export const memoryDedupOutput = z.array(z.object({
-  record_id: z.string().min(1),
-  action: z.enum(['store', 'update', 'merge', 'skip']),
-  target_ids: z.array(z.string()).optional().default([]),
-  merged_content: z.string().optional(),
-  merged_type: z.string().optional(),
-  merged_priority: z.number().optional(),
-  merged_timestamps: z.array(z.string()).optional(),
-})).max(200);
-export const memorySceneOutput = z.object({
-  scenes: z.array(z.object({
-    filename: z.string().min(1),
-    action: z.enum(['write', 'delete']).optional(),
-    content: z.string().optional(),
-  })).max(50),
-  persona_update_request: z.string().optional(),
-}).strict();
-export const memoryPersonaOutput = z.object({
-  content: z.string().min(1),
-}).strict();
-
 export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
-  { kind: 'memory_extract', inputSchema: anyObject, outputSchema: memoryExtractionOutput, timeoutMs: KIND_TIMEOUT_MS.memory_extract, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: memoryDedupOutput, timeoutMs: KIND_TIMEOUT_MS.memory_deduplicate, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_scene', inputSchema: anyObject, outputSchema: memorySceneOutput, timeoutMs: KIND_TIMEOUT_MS.memory_scene, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_persona', inputSchema: anyObject, outputSchema: memoryPersonaOutput, timeoutMs: KIND_TIMEOUT_MS.memory_persona, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'thread_title_generate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'context_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },

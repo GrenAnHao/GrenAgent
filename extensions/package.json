@@ -2,13 +2,15 @@
   "name": "pi-extensions-pack",
   "version": "0.1.0",
   "license": "PolyForm-Noncommercial-1.0.0",
-  "description": "GrenAgent Pi extensions with local memory and knowledge modules.",
+  "description": "GrenAgent Pi extensions with local knowledge and code retrieval modules.",
   "type": "module",
+  "scripts": {
+    "postinstall": "node ../cli/scripts/patch-pi-shell.mjs . && node ../cli/scripts/patch-pi-edit-preview.mjs ."
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
     "rag",
-    "memory",
     "web",
     "image",
     "multi-agent"
@@ -25,9 +27,9 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.3.0",
-    "@earendil-works/pi-ai": "1.3.0",
-    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "vitest": "^4.1.9"
   },
   "dependencies": {

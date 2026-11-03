@@ -1,11 +1,11 @@
 # fable-behavior
 
-GrenAgent 行为核：每轮 `before_agent_start` 注入身份、语气、自主、拒绝与当前模式片（`display: false`）。工具目录和参数纪律不在这里，走 Pi 的 `promptSnippet` / `promptGuidelines` 与各扩展每轮 hint。
+GrenAgent 行为核：每轮 `before_agent_start` 注入身份、语气、自主与当前模式片（`display: false`）。工具目录和参数纪律不在这里，走 Pi 的 `promptSnippet` / `promptGuidelines` 与各扩展每轮 hint。行为层不写拒绝清单。
 
 ## 默认注入
 
-- Kernel：`identity`（只补 GrenAgent 产品句，不复述官方「You are an expert coding assistant」） / `tone` / `mistakes` / `file-verify` / `coding-harness` / `autonomy` / `refusal`
-- 当前模式片：`ask` / `plan` / `debug` / `brainstorm`（Agent 默认无额外片；`ask_user` 纪律只在工具 Guidelines）
+- Kernel：`identity`（只补 GrenAgent 产品句，不复述官方「You are an expert coding assistant」） / `tone` / `mistakes` / `file-verify` / `coding-harness` / `autonomy`
+- 当前模式片：`ask` / `plan` / `debug` / `ultra`（Agent 默认无额外片；`ask_user` 纪律只在工具 Guidelines）
 - `session_start` 播种 `scout` / `planner` / `reviewer` / `worker`
 - `fable_behavior_ref`：按需取 Tier-3 全文（引用格式、版权、前端设计等）
 
@@ -54,7 +54,7 @@ The shared seeder lives in `extensions/_shared/seed-agents.ts`.
 | `fable-behavior` | Identity, tone, autonomy, mode, seed |
 | `diagram-hint` | Mermaid / KaTeX rendering |
 | `agent-mode` | Tool whitelist + plan execution checklist |
-| RAG / memory injections | Retrieved facts for this turn |
+| RAG injections | Retrieved facts for this turn |
 
 When rules conflict, **project rules win**.
 

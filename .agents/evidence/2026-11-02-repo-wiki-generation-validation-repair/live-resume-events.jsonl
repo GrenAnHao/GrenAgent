@@ -1,0 +1,2 @@
+{"time":"2026-11-02T09:39:08.871Z","taskId":"f2cca0ce-1ed0-4687-9f2f-c4b6b71a0f93","state":"paused","phase":"generate","item":"npf-cli.ts：命令装配、四道闸、status 相位机、doctor、selftest","counts":{"planned":16,"prepared":10,"failed":1,"blocked":0,"published":0}}
+{"time":"2026-11-02T09:40:15.095Z","taskId":"f2cca0ce-1ed0-4687-9f2f-c4b6b71a0f93","state":"blocked","phase":"generate","item":"分发层：install.mjs 与 uninstall.mjs","counts":{"planned":16,"prepared":11,"failed":1,"blocked":4,"published":0},"error":{"code":"BUDGET_EXHAUSTED","message":"Budget exhausted","retriable":false}}

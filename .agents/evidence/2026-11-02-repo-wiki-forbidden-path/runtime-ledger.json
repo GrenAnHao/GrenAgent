@@ -1,0 +1,696 @@
+{
+  "captured_at": "2026-11-02T06:14:34.344608+00:00",
+  "source_database": "C:\\Users\\rxstudio\\AppData\\Roaming\\electron-agent\\agent-data.db",
+  "task": {
+    "id": "b80713ac-1c72-469d-b186-467ffb0177eb",
+    "kind": "repoWiki.generate",
+    "workspace": "D:\\System Dir\\Downloads\\note-pocock-flow",
+    "state": "failed",
+    "progress": 0,
+    "created_at": 1793599705392,
+    "updated_at": 1793599728771,
+    "phase": "overview",
+    "currentItem": "项目概览",
+    "counts": {
+      "planned": 0,
+      "prepared": 0,
+      "failed": 1,
+      "blocked": 0,
+      "published": 0
+    },
+    "outcome": "partial",
+    "error": {
+      "code": "FORBIDDEN_PATH",
+      "message": "FORBIDDEN_PATH",
+      "retriable": false
+    },
+    "created_at_utc": "2026-11-02T06:08:25.392000+00:00",
+    "updated_at_utc": "2026-11-02T06:08:48.771000+00:00"
+  },
+  "execution_counts": [
+    {
+      "kind": "model",
+      "state": "settled",
+      "n": 6
+    },
+    {
+      "kind": "time",
+      "state": "settled",
+      "n": 13
+    },
+    {
+      "kind": "tool",
+      "state": "dispatched",
+      "n": 1
+    },
+    {
+      "kind": "tool",
+      "state": "settled",
+      "n": 17
+    }
+  ],
+  "build_items": [
+    {
+      "phase": "prepare",
+      "item_id": "prepare",
+      "state": "prepared",
+      "attempt": 1,
+      "error": null,
+      "evidence": [],
+      "updated_at": 1793599707919
+    },
+    {
+      "phase": "overview",
+      "item_id": "overview",
+      "state": "failed",
+      "attempt": 1,
+      "error": {
+        "code": "FORBIDDEN_PATH",
+        "message": "FORBIDDEN_PATH",
+        "retriable": false
+      },
+      "evidence": [
+        {
+          "path": "README.md",
+          "startLine": 1,
+          "endLine": 103,
+          "kind": "read"
+        },
+        {
+          "path": "SKILL.md",
+          "startLine": 1,
+          "endLine": 52,
+          "kind": "read"
+        },
+        {
+          "path": "npf-workflow.md",
+          "startLine": 1,
+          "endLine": 126,
+          "kind": "read"
+        },
+        {
+          "path": "NOTE-CONTRACT.md",
+          "startLine": 1,
+          "endLine": 54,
+          "kind": "read"
+        },
+        {
+          "path": "scripts/npf-cli.ts",
+          "startLine": 1,
+          "endLine": 140,
+          "kind": "read"
+        },
+        {
+          "path": "notes/METHOD.md",
+          "startLine": 1,
+          "endLine": 193,
+          "kind": "read"
+        },
+        {
+          "path": "bin/npf",
+          "startLine": 1,
+          "endLine": 8,
+          "kind": "read"
+        },
+        {
+          "path": "install.sh",
+          "startLine": 1,
+          "endLine": 11,
+          "kind": "read"
+        },
+        {
+          "path": "examples/README.md",
+          "startLine": 1,
+          "endLine": 151,
+          "kind": "read"
+        },
+        {
+          "path": "scripts/evidence-lib.ts",
+          "startLine": 1,
+          "endLine": 109,
+          "kind": "read"
+        },
+        {
+          "path": "scripts/promote-lib.ts",
+          "startLine": 1,
+          "endLine": 154,
+          "kind": "read"
+        },
+        {
+          "path": "scripts/npf-cli.ts",
+          "startLine": 140,
+          "endLine": 469,
+          "kind": "read"
+        },
+        {
+          "path": "scripts/install.mjs",
+          "startLine": 1,
+          "endLine": 120,
+          "kind": "read"
+        },
+        {
+          "path": "scripts/npf-cli.ts",
+          "startLine": 470,
+          "endLine": 794,
+          "kind": "read"
+        },
+        {
+          "path": "VERSION",
+          "startLine": 1,
+          "endLine": 2,
+          "kind": "read"
+        },
+        {
+          "path": "templates/AGENTS.section.md",
+          "startLine": 1,
+          "endLine": 21,
+          "kind": "read"
+        },
+        {
+          "path": "notes/scripts/verify-agent-note-tree.ts",
+          "startLine": 1,
+          "endLine": 57,
+          "kind": "read"
+        }
+      ],
+      "updated_at": 1793599728768
+    }
+  ],
+  "model_usage_sum": {
+    "inputTokens": 44001,
+    "outputTokens": 1066,
+    "totalTokens": 57959
+  },
+  "execution_requests": [
+    {
+      "request_id": "dbba6b18-ebb4-4deb-98ae-3029ef216c5a",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599708370,
+      "updated_at": 1793599708514
+    },
+    {
+      "request_id": "fb860f3e-ae90-4397-9041-b444a2149d04",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "model",
+      "state": "settled",
+      "actual": {
+        "inputTokens": 10846,
+        "outputTokens": 206,
+        "totalTokens": 11206
+      },
+      "created_at": 1793599709595,
+      "updated_at": 1793599712931
+    },
+    {
+      "request_id": "5df4e11a-a5c5-416e-8d94-c5b8a05d31e8",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599709601,
+      "updated_at": 1793599712927
+    },
+    {
+      "request_id": "e963d560-8c10-4f25-ba07-f17f6d0cf761",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599712938,
+      "updated_at": 1793599713023
+    },
+    {
+      "request_id": "52324179-fa1c-4fdb-a2ed-31d6bfe930ef",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 7399,
+        "resultBytes": 7399
+      },
+      "created_at": 1793599712945,
+      "updated_at": 1793599712957
+    },
+    {
+      "request_id": "e126c3ae-83b0-46e1-9dd7-06fbabd11c3f",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 3395,
+        "resultBytes": 3395
+      },
+      "created_at": 1793599712963,
+      "updated_at": 1793599712977
+    },
+    {
+      "request_id": "4d28a38a-7698-4e23-a35d-4400ea0779af",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 7867,
+        "resultBytes": 7867
+      },
+      "created_at": 1793599712983,
+      "updated_at": 1793599712994
+    },
+    {
+      "request_id": "f279af9c-059f-457d-a64b-7fccb3747399",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 5213,
+        "resultBytes": 5213
+      },
+      "created_at": 1793599713001,
+      "updated_at": 1793599713016
+    },
+    {
+      "request_id": "4a5d820a-7eac-49e9-a7f1-7b97bcadb405",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "model",
+      "state": "settled",
+      "actual": {
+        "inputTokens": 7081,
+        "outputTokens": 200,
+        "totalTokens": 8510
+      },
+      "created_at": 1793599713035,
+      "updated_at": 1793599715554
+    },
+    {
+      "request_id": "92e600f0-2dd5-4821-a1f3-560a90d36424",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599713039,
+      "updated_at": 1793599715550
+    },
+    {
+      "request_id": "1d59da95-53ec-48ca-8c65-080ffebf0fde",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599715579,
+      "updated_at": 1793599715669
+    },
+    {
+      "request_id": "fecb8f41-9a89-41b0-b4b1-4b38af055b64",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 6478,
+        "resultBytes": 6478
+      },
+      "created_at": 1793599715586,
+      "updated_at": 1793599715598
+    },
+    {
+      "request_id": "9abaa9df-42fa-4dcd-833c-047b68e748b8",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 15729,
+        "resultBytes": 15729
+      },
+      "created_at": 1793599715605,
+      "updated_at": 1793599715619
+    },
+    {
+      "request_id": "fbf4a918-7a57-403d-bb96-852d822a7ffa",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 388,
+        "resultBytes": 388
+      },
+      "created_at": 1793599715626,
+      "updated_at": 1793599715640
+    },
+    {
+      "request_id": "3ec346eb-02ba-4bc9-b065-a5ce216a58e8",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 590,
+        "resultBytes": 590
+      },
+      "created_at": 1793599715647,
+      "updated_at": 1793599715663
+    },
+    {
+      "request_id": "6bcb38a8-673c-4aa7-a5dc-46a2587c27e2",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "model",
+      "state": "settled",
+      "actual": {
+        "inputTokens": 6711,
+        "outputTokens": 140,
+        "totalTokens": 8784
+      },
+      "created_at": 1793599715680,
+      "updated_at": 1793599718243
+    },
+    {
+      "request_id": "1e61d373-70ac-4845-946e-92d67f8236f7",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599715684,
+      "updated_at": 1793599718238
+    },
+    {
+      "request_id": "15f9e980-ab93-4d74-b7b9-bbe1a95f34e6",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599718617,
+      "updated_at": 1793599718679
+    },
+    {
+      "request_id": "03fd98b0-93d1-4b45-8d10-d5a267c3293f",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 4637,
+        "resultBytes": 4637
+      },
+      "created_at": 1793599718623,
+      "updated_at": 1793599718637
+    },
+    {
+      "request_id": "1f376c40-7550-47dd-b405-1844c4b7d701",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 4673,
+        "resultBytes": 4673
+      },
+      "created_at": 1793599718643,
+      "updated_at": 1793599718655
+    },
+    {
+      "request_id": "8c2d3fed-d841-4d17-bfaa-e7b7100c11d2",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 7637,
+        "resultBytes": 7637
+      },
+      "created_at": 1793599718662,
+      "updated_at": 1793599718674
+    },
+    {
+      "request_id": "712e12a3-1aa1-4d3b-aa72-e8a47a611470",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "model",
+      "state": "settled",
+      "actual": {
+        "inputTokens": 5296,
+        "outputTokens": 167,
+        "totalTokens": 8062
+      },
+      "created_at": 1793599718688,
+      "updated_at": 1793599721325
+    },
+    {
+      "request_id": "dea26bf3-ed20-4154-8df1-169269dd429a",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599718693,
+      "updated_at": 1793599721321
+    },
+    {
+      "request_id": "fbd3b7d6-88ca-4fc1-b9df-c08c6639e1f2",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599721645,
+      "updated_at": 1793599721691
+    },
+    {
+      "request_id": "bfad5f69-6e54-4174-9ad3-437baa1e7a51",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 17011,
+        "resultBytes": 17011
+      },
+      "created_at": 1793599721653,
+      "updated_at": 1793599721666
+    },
+    {
+      "request_id": "30201c7e-5c69-41b3-b9fb-4e44daa00d10",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 6083,
+        "resultBytes": 6083
+      },
+      "created_at": 1793599721672,
+      "updated_at": 1793599721684
+    },
+    {
+      "request_id": "2be8edc3-8617-48d3-997e-6233a181cf61",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "model",
+      "state": "settled",
+      "actual": {
+        "inputTokens": 7353,
+        "outputTokens": 177,
+        "totalTokens": 10654
+      },
+      "created_at": 1793599721702,
+      "updated_at": 1793599724198
+    },
+    {
+      "request_id": "65df9911-9c40-4e69-b437-35ba57d7bea5",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599721706,
+      "updated_at": 1793599724194
+    },
+    {
+      "request_id": "38514eb1-63a9-423a-8636-ee2b26219e33",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599724644,
+      "updated_at": 1793599724712
+    },
+    {
+      "request_id": "ae6cffd7-2e6e-41f5-9f27-0e01985c2e6a",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 19139,
+        "resultBytes": 19139
+      },
+      "created_at": 1793599724650,
+      "updated_at": 1793599724663
+    },
+    {
+      "request_id": "8c697b82-006b-4925-9260-b1fed8ad5eee",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 6,
+        "resultBytes": 6
+      },
+      "created_at": 1793599724670,
+      "updated_at": 1793599724684
+    },
+    {
+      "request_id": "8ebb980f-f8f9-4fe9-bbba-a97adaf6a2b2",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 2342,
+        "resultBytes": 2342
+      },
+      "created_at": 1793599724691,
+      "updated_at": 1793599724704
+    },
+    {
+      "request_id": "c76b4324-a039-402c-85aa-ff363f390b60",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "model",
+      "state": "settled",
+      "actual": {
+        "inputTokens": 6714,
+        "outputTokens": 176,
+        "totalTokens": 10743
+      },
+      "created_at": 1793599724727,
+      "updated_at": 1793599727741
+    },
+    {
+      "request_id": "b335950f-c48d-45e6-8004-59e670663034",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599724730,
+      "updated_at": 1793599727737
+    },
+    {
+      "request_id": "b0a6f2d6-e467-445a-92be-17ba88bbcbc4",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "time",
+      "state": "settled",
+      "actual": {
+        "activeTimeMs": 5000
+      },
+      "created_at": 1793599728539,
+      "updated_at": 1793599728763
+    },
+    {
+      "request_id": "cc04e05d-1369-48b7-b304-5db964c2008d",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "settled",
+      "actual": {
+        "readBytes": 1951,
+        "resultBytes": 1951
+      },
+      "created_at": 1793599728730,
+      "updated_at": 1793599728743
+    },
+    {
+      "request_id": "977005f2-8110-41c9-ba20-229a09fe6457",
+      "phase": "overview",
+      "item_id": "overview",
+      "attempt": 1,
+      "kind": "tool",
+      "state": "dispatched",
+      "actual": null,
+      "created_at": 1793599728748,
+      "updated_at": 1793599728754
+    }
+  ],
+  "denied_path": null,
+  "denied_path_note": "FORBIDDEN_PATH only; rejected tool arguments and concrete path were not persisted in inspected tables/logs."
+}

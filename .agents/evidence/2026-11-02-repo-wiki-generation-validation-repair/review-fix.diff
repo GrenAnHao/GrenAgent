@@ -1,0 +1,132 @@
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\markdownLinks.ts" b/electron-agent/electron/agentData/knowledgeKernel/markdownLinks.ts
+index 2baed62f..139af5ee 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\markdownLinks.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/markdownLinks.ts
+@@ -28,7 +28,7 @@ function destination(markdown:string,node:Link|Definition):{start?:number;end?:n
+  return {start:start+from,end:start+offset};
+ }
+ export function replaceMarkdownLinks(markdown:string,replacements:Array<MarkdownLink & {url:string}>,removed:MarkdownLink[]=[]):string{
+- const edits:Array<{start:number;end:number;text:string}>=[];for(const item of replacements)if(item.start!==undefined&&item.end!==undefined)edits.push({start:item.start,end:item.end,text:item.url});for(const item of removed)if(item.linkStart!==undefined&&item.linkEnd!==undefined)edits.push({start:item.linkStart,end:item.linkEnd,text:item.text??''});
++ const edits:Array<{start:number;end:number;text:string}>=[];const destinations=new Set<number>();for(const item of replacements)if(item.start!==undefined&&item.end!==undefined&&!destinations.has(item.start)){destinations.add(item.start);edits.push({start:item.start,end:item.end,text:item.url});}for(const item of removed)if(item.linkStart!==undefined&&item.linkEnd!==undefined)edits.push({start:item.linkStart,end:item.linkEnd,text:item.text??''});
+  for(const edit of edits.sort((a,b)=>b.start-a.start))markdown=markdown.slice(0,edit.start)+edit.text+markdown.slice(edit.end);
+  return markdown;
+ }
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\validation.ts" b/electron-agent/electron/agentData/knowledgeKernel/validation.ts
+index 276625e3..bb9a2b1e 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\validation.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/validation.ts
+@@ -34,7 +34,7 @@ export function normalizeStageSources(phase: Phase, payload: unknown, files: Rec
+   const replacements=[];const remove=[];
+   for(const link of markdownLinks(result.markdown)){
+    const target=resolveWikiLink(link.url,context.pageId);
+-   const path=target.kind==='source'?target.path:target.kind==='page'&&!context.pageIds?.includes(target.pageId)&&!target.path.split('/').includes('..')?target.path.replace(/^(?:\.\/)+/,''):undefined;
++   const path=target.kind==='source'?target.path:target.kind==='page'&&!context.pageIds?.includes(target.pageId)?(files[target.resolvedPath]?target.resolvedPath:!target.path.split('/').includes('..')?target.path.replace(/^(?:\.\/)+/,''):target.resolvedPath):undefined;
+    if(!path||!files[path]){if(target.kind==='source')remove.push(link);continue;}
+    const start=target.kind==='source'?target.start:undefined,end=target.kind==='source'?target.end:undefined;
+    const range=observedRanges.find(r=>r.path===path&&(start===undefined||r.start<=start)&&(end===undefined||r.end>=end));
+@@ -98,6 +98,7 @@ export class StageValidationError extends Error {
+ }
+ export function stageFailure(error:unknown):{code:string;message:string;retriable:boolean}{
+  if(error instanceof StageValidationError)return {code:error.code,message:error.message.slice(0,500),retriable:false};
+- const raw=error instanceof Error?error.message:'';const code=/^[A-Z][A-Z0-9_]{0,99}$/.test(raw)?raw:'STAGE_FAILED';
+- return {code,message:`Stage failed (${code})`,retriable:false};
++ const diagnostic=error&&typeof error==='object'&&'code' in error?error as {code?:unknown;retriable?:unknown}:undefined;
++ const raw=typeof diagnostic?.code==='string'?diagnostic.code:error instanceof Error?error.message:'';const code=/^[A-Z][A-Z0-9_]{0,99}$/.test(raw)?raw:'STAGE_FAILED';
++ return {code,message:code==='BUDGET_EXHAUSTED'?'Budget exhausted':`Stage failed (${code})`,retriable:diagnostic?.retriable===true};
+ }
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\validation.test.ts" b/electron-agent/electron/agentData/knowledgeKernel/validation.test.ts
+index 38847359..e66559fd 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\validation.test.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/validation.test.ts
+@@ -31,10 +31,29 @@ describe('rendered Markdown link validation',()=>{
+   const result=normalize(markdown);expect(result.markdown).toContain('`[fake](source:unread.md#L1)`');expect(result.markdown).toContain('source:README.md#L2-L4');
+   expect(()=>validateStageResult(request,result)).not.toThrow();
+  });
++ it('rewrites a shared reference destination only once without corrupting either link',()=>{
++  const result=normalize('[one][readme] and [two][readme]\n\n[readme]: README.md#purpose');
++  expect(result.markdown).toBe('[one][readme] and [two][readme]\n\n[readme]: source:README.md#L2-L8');
++  expect(()=>validateStageResult(request,result)).not.toThrow();
++ });
++ it('resolves nested source paths safely while prioritizing real Wiki pages',()=>{
++  const nested={...request,pageId:'chapters/start',pageIds:['chapters/start','README']};
++  const cited=normalizeStageSources('generate',page('[read](../README.md#purpose)'),files,observedRanges,{...nested,pageIds:['chapters/start']}) as ReturnType<typeof page>;
++  expect(cited.markdown).toBe('[read](source:README.md#L2-L8)');
++  expect(()=>validateStageResult({...nested,pageIds:['chapters/start']},cited)).not.toThrow();
++  const wiki=normalizeStageSources('generate',page('[read](../README.md#purpose)'),files,observedRanges,nested) as ReturnType<typeof page>;
++  expect(wiki.markdown).toBe('[read](../README.md#purpose)');expect(()=>validateStageResult(nested,wiki)).not.toThrow();
++  const ambiguousFiles={...files,'chapters/README.md':{hash:'nested',lines:3}};
++  const ambiguous=normalizeStageSources('generate',page('[read](README.md)'),ambiguousFiles,observedRanges,nested) as ReturnType<typeof page>;
++  expect(ambiguous.markdown).toBe('[read](README.md)');expect(()=>validateStageResult({...nested,files:ambiguousFiles},ambiguous)).toThrow('INVALID_PAGE_LINK');
++  const escape=normalizeStageSources('generate',page('[escape](../../README.md)'),files,observedRanges,nested) as ReturnType<typeof page>;
++  expect(escape.markdown).toBe('[escape](../../README.md)');expect(()=>validateStageResult(nested,escape)).toThrow('INVALID_PAGE_LINK');
++ });
+  it('keeps machine error codes separate and reports only safe relative page and target details',()=>{
+   try{validateStageResult(request,page('[missing](missing.md?token=secret#anchor)'));throw new Error('expected failure');}catch(error){
+    expect(error).toMatchObject({code:'INVALID_PAGE_LINK'});expect((error as Error).message).toContain('modules/intro');expect((error as Error).message).toContain('missing.md');expect((error as Error).message).not.toContain('secret');
+   }
++  expect(stageFailure({code:'C:\\private\\repo\\file.md?token=secret',message:'secret',retriable:true})).toEqual({code:'STAGE_FAILED',message:'Stage failed (STAGE_FAILED)',retriable:true});
+   expect(stageFailure(new Error('C:\\private\\repo\\file.md?token=secret'))).toEqual({code:'STAGE_FAILED',message:'Stage failed (STAGE_FAILED)',retriable:false});
+  });
+ });
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.ts" b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+index 966d5335..12e496d0 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+@@ -100,7 +100,7 @@ export class KnowledgeKernelCoordinator {
+   return {graph,failed,blockedError,failedError};
+  }
+  private localResult(taskId:string,fence:ExecutionFence,node:StageNode,attempt:number,payload:Record<string,unknown>):StageExecutionResult{return {version:1,taskId,fence,phase:node.phase,itemId:node.id,stageAttempt:attempt,sequence:0,inputHash:node.inputHash,outputHash:hashKnowledgePayload(payload),payload,evidence:[],dependencies:[],disposition:'prepared'};}
+- private async runStage(taskId:string,fence:ExecutionFence,node:StageNode,graph:StageGraph,prepared:Prepared,snapshotId:string,binding:KnowledgeModelBinding,signal:AbortSignal):Promise<StageExecutionResult>{const store=this.options.store;const metaAtStart=store.getTask(taskId)!.metadata!.repoWiki!;const attempt=store.beginAttempt(taskId,node.phase,node.id,fence,node.inputHash,metaAtStart.executionPolicy?{stageKind:node.kind as KnowledgeStageKind}:undefined);const deps=node.deps.map(id=>{const n=graph.nodes.find(x=>x.id===id)!;const a=store.readCheckpoint({taskId,phase:n.phase,itemId:id});return {phase:n.phase,itemId:id,outputHash:a.outputHash};});const pageIds=graph.domain==='cards'?graph.nodes.filter(n=>n.phase==='generate').map(n=>n.definition?.id??'repository'):graph.leaves;const pageId=node.definition?.id??'repository';const context={snapshotId,files:prepared.source.files,authorConstraints:JSON.stringify(prepared.plan),dependencies:Object.fromEntries(deps.map(d=>[d.itemId,store.readCheckpoint({taskId,phase:d.phase,itemId:d.itemId}).payload])),language:prepared.language,pageIds,definitions:graph.definitions,relationTypes:['uses','contains','depends_on','calls']};const prompt=stagePrompt(node,context);const meta=store.getTask(taskId)!.metadata!.repoWiki!;const remaining=store.budgetRemaining(taskId,node.phase,node.id);remaining.unit.maxTotalTokens=Math.min(remaining.unit.maxTotalTokens,remaining.run.maxTotalTokens);const req:StageExecutionRequest={version:1,taskId,key:meta.key,fence,phase:node.phase,itemId:node.id,attempt,inputHash:node.inputHash,sourceSnapshotId:snapshotId,binding,budget:remaining,input:{root:prepared.root,manifest:Object.entries(prepared.source.files).map(([path,f])=>({path,hash:f.hash})),systemPrompt:prompt.system,userPrompt:prompt.user,dependencies:deps}};const result=await this.options.executeStage(req,signal);const observedRanges=result.evidence.filter(e=>e.kind==='read'&&e.startLine!==undefined&&e.endLine!==undefined).map(e=>({path:e.path,start:e.startLine!,end:e.endLine!}));if(result.disposition!=='prepared')return {...result,dependencies:deps};const originalPayload=result.payload;try{const payload=normalizeStageSources(node.phase,originalPayload,prepared.source.files,observedRanges,{pageId,pageIds});const normalized={...result,payload,outputHash:hashKnowledgePayload(payload),dependencies:deps};validateStageResult({phase:node.phase,files:prepared.source.files,pageIds,pageId,endpoints:graph.definitions.map(d=>d.id),relationTypes:['uses','contains','depends_on','calls'],observedRanges},payload);return normalized;}catch(error){const failure=stageFailure(error);return {...result,payload:originalPayload,outputHash:hashKnowledgePayload(originalPayload),dependencies:deps,disposition:'failed',error:failure};}}
++ private async runStage(taskId:string,fence:ExecutionFence,node:StageNode,graph:StageGraph,prepared:Prepared,snapshotId:string,binding:KnowledgeModelBinding,signal:AbortSignal):Promise<StageExecutionResult>{const store=this.options.store;const metaAtStart=store.getTask(taskId)!.metadata!.repoWiki!;const attempt=store.beginAttempt(taskId,node.phase,node.id,fence,node.inputHash,metaAtStart.executionPolicy?{stageKind:node.kind as KnowledgeStageKind}:undefined);const deps=node.deps.map(id=>{const n=graph.nodes.find(x=>x.id===id)!;const a=store.readCheckpoint({taskId,phase:n.phase,itemId:id});return {phase:n.phase,itemId:id,outputHash:a.outputHash};});const pageIds=graph.domain==='cards'?graph.nodes.filter(n=>n.phase==='generate').map(n=>n.definition?.id??'repository'):graph.leaves;const pageId=node.definition?.id??'repository';const context={snapshotId,files:prepared.source.files,authorConstraints:JSON.stringify(prepared.plan),dependencies:Object.fromEntries(deps.map(d=>[d.itemId,store.readCheckpoint({taskId,phase:d.phase,itemId:d.itemId}).payload])),language:prepared.language,pageIds,definitions:graph.definitions,relationTypes:['uses','contains','depends_on','calls']};const prompt=stagePrompt(node,context);const meta=store.getTask(taskId)!.metadata!.repoWiki!;const remaining=store.budgetRemaining(taskId,node.phase,node.id);remaining.unit.maxTotalTokens=Math.min(remaining.unit.maxTotalTokens,remaining.run.maxTotalTokens);const req:StageExecutionRequest={version:1,taskId,key:meta.key,fence,phase:node.phase,itemId:node.id,attempt,inputHash:node.inputHash,sourceSnapshotId:snapshotId,binding,budget:remaining,input:{root:prepared.root,manifest:Object.entries(prepared.source.files).map(([path,f])=>({path,hash:f.hash})),systemPrompt:prompt.system,userPrompt:prompt.user,dependencies:deps}};const result=await this.options.executeStage(req,signal);const observedRanges=result.evidence.filter(e=>e.kind==='read'&&e.startLine!==undefined&&e.endLine!==undefined).map(e=>({path:e.path,start:e.startLine!,end:e.endLine!}));if(result.disposition!=='prepared')return {...result,dependencies:deps,...(result.error?{error:stageFailure(result.error)}:{})};const originalPayload=result.payload;try{const payload=normalizeStageSources(node.phase,originalPayload,prepared.source.files,observedRanges,{pageId,pageIds});const normalized={...result,payload,outputHash:hashKnowledgePayload(payload),dependencies:deps};validateStageResult({phase:node.phase,files:prepared.source.files,pageIds,pageId,endpoints:graph.definitions.map(d=>d.id),relationTypes:['uses','contains','depends_on','calls'],observedRanges},payload);return normalized;}catch(error){const failure=stageFailure(error);return {...result,payload:originalPayload,outputHash:hashKnowledgePayload(originalPayload),dependencies:deps,disposition:'failed',error:failure};}}
+  private reusePublished(taskId:string,fence:ExecutionFence,node:StageNode,graph:StageGraph,prepared:Prepared,reusable:string[],reusedHashes:Map<string,string>):StageExecutionResult|undefined {
+   const store=this.options.store;const baseline=prepared.baseline;let saved=(baseline?.checkpoints??[]).find((item:{phase:string;itemId:string})=>item.phase===node.phase&&item.itemId===node.id) as {payload:unknown;outputHash?:string;evidence:StageExecutionResult['evidence'];dependencies:StageExecutionResult['dependencies']}|undefined;
+   if(node.phase==='generate'){const id=node.definition?.id??'repository';if(!reusable.includes(id))return;const page=prepared.published.pages[id];const manifest=page?.inputManifest;if(!page||!manifest)return;const oldHashes=baseline?.sourceSnapshot?.hashes??{};const sources=(page.sources??[]).map((s:{path:string;start_line:number;end_line:number})=>({path:s.path,hash:oldHashes[s.path],start:s.start_line,end:s.end_line}));saved={payload:{markdown:page.baseline,sources},outputHash:manifest.outputHash,evidence:manifest.evidence??[],dependencies:manifest.dependencies??[]};}
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.test.ts" b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+index b56babe3..683084a0 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\electron\\agentData\\knowledgeKernel\\coordinator.test.ts"
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+@@ -26,6 +26,14 @@ it.each([false,true])('records rejected page links as repairable candidates with
+  finally{await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
+ },30000);
+ 
++it.each([[false,'failed'],[true,'failed'],[false,'blocked'],[true,'blocked']] as const)('sanitizes returned v2=%s disposition=%s stage diagnostics',async(useV2,disposition)=>{
++ const base=mkdtempSync(join(tmpdir(),'knowledge-returned-error-')),root=join(base,'src');mkdirSync(root);writeFileSync(join(root,'readme.md'),'# project\n');const engine=new WorkspaceEngine(join(base,'data'));const db=new DatabaseSync(':memory:');const store=new KnowledgeBuildStore(db,{controllerEpoch:'epoch'});const project=new KnowledgeProjectPort(engine);const p=engine.create_project(root,'en');const source=await project.prepare(p.id,'wiki');
++ const executeStage=async(req:StageExecutionRequest):Promise<StageExecutionResult>=>({version:1,taskId:req.taskId,fence:req.fence,phase:req.phase,itemId:req.itemId,stageAttempt:req.attempt,sequence:1,inputHash:req.inputHash,outputHash:hashKnowledgePayload(null),payload:null,evidence:[],dependencies:[],disposition,error:{code:disposition==='blocked'?'BUDGET_EXHAUSTED':'MODEL_ERROR',message:'C:\\private\\secret.md?token=hidden',retriable:true}});
++ const c=new KnowledgeKernelCoordinator({store,project,bindModel:async()=>binding,executeStage,abortStage:async()=>{},pipelineConfigHash:useV2?'knowledge-kernel-qoder-v2':'knowledge-kernel-v1'});
++ try{const started=await c.start({version:1,requestId:'returned',projectId:p.id,domain:'wiki',language:'en',intent:'generate',confirmExternal:true,expectedModelIdentity:knowledgeModelIdentity(binding),expectedPlanToken:source.planToken});await viWait(()=>store.getTask(started.run!.taskId)?.state===disposition);const job=store.getTask(started.run!.taskId)!;const item=store.listItems(job.id).find(i=>i.phase==='overview')!;expect(item.state).toBe(disposition);const saved=JSON.parse((db.prepare('SELECT error FROM knowledge_build_items WHERE task_id=? AND phase=?').get(job.id,'overview') as {error:string}).error);expect(saved).toMatchObject({code:disposition==='blocked'?'BUDGET_EXHAUSTED':'MODEL_ERROR',retriable:true});for(const value of [JSON.stringify(saved),JSON.stringify(job.metadata?.repoWiki?.error)]){expect(value).not.toContain('secret.md');expect(value).not.toContain('hidden');}}
++ finally{await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
++},30000);
++
+ it.each([false,true])('settles an interrupted stage as terminal under its active fence (v2=%s)',async useV2=>{
+  const base=mkdtempSync(join(tmpdir(),'knowledge-stage-error-')),root=join(base,'src');mkdirSync(root);writeFileSync(join(root,'readme.md'),'# project\n');const engine=new WorkspaceEngine(join(base,'data'));const db=new DatabaseSync(':memory:');const store=new KnowledgeBuildStore(db,{controllerEpoch:'epoch'});const project=new KnowledgeProjectPort(engine);const p=engine.create_project(root,'en');const source=await project.prepare(p.id,'wiki');const pipelineConfigHash=useV2?'knowledge-kernel-qoder-v2':'knowledge-kernel-v1';
+  const executeStage=async(req:StageExecutionRequest):Promise<StageExecutionResult>=>{if(req.phase==='overview')throw new Error('C:\\private\\repo\\secret.md?token=hidden');let payload:unknown={valid:true};return {version:1,taskId:req.taskId,fence:req.fence,phase:req.phase,itemId:req.itemId,stageAttempt:req.attempt,sequence:1,inputHash:req.inputHash,outputHash:hashKnowledgePayload(payload),payload,evidence:[],dependencies:[],disposition:'prepared'};};const c=new KnowledgeKernelCoordinator({store,project,bindModel:async()=>binding,executeStage,abortStage:async()=>{},pipelineConfigHash});
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\shared\\wikiLinks.ts" b/electron-agent/shared/wikiLinks.ts
+index fd6ca8d7..747e41c6 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\electron-agent\\shared\\wikiLinks.ts"
++++ b/electron-agent/shared/wikiLinks.ts
+@@ -1,5 +1,5 @@
+ export type WikiLink =
+-  | { kind: 'page'; pageId: string; path: string; hash?: string }
++  | { kind: 'page'; pageId: string; path: string; resolvedPath: string; hash?: string }
+   | { kind: 'source'; path: string; start?: number; end?: number }
+   | { kind: 'anchor'; hash: string }
+   | { kind: 'external'; url: string }
+@@ -25,5 +25,5 @@ export function resolveWikiLink(href: string, currentPageId?: string): WikiLink
+   const parts=currentPageId?.split('/').slice(0,-1)??[];
+   for(const part of path.split('/')){if(part==='.'||part==='')continue;if(part==='..'){if(!parts.length)return {kind:'invalid'};parts.pop();}else parts.push(part);}
+   const pageId=parts.join('/').replace(/\.md$/,'');
+-  return pageId ? {kind:'page',pageId,path,...(hash!==undefined?{hash}:{})} : {kind:'invalid'};
++  return pageId ? {kind:'page',pageId,path,resolvedPath:parts.join('/'),...(hash!==undefined?{hash}:{})} : {kind:'invalid'};
+ }
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\.agents\\notes\\proposed\\bug-fix\\2026-11-02-repo-wiki-generation-validation-repair.md" b/.agents/notes/proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md
+index 5b0bab9e..0ae1cd3f 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\review-preimage\\.agents\\notes\\proposed\\bug-fix\\2026-11-02-repo-wiki-generation-validation-repair.md"
++++ b/.agents/notes/proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md
+@@ -34,3 +34,7 @@ Status: proposed
+ ## Risks
+ 
+ 历史失败项没有保存正文，不能恢复不存在的候选；只能复用其已 prepared 项。解析/导航要保持一致，详情不包含 query 凭据、绝对路径或完整 prompt。测试证据保存于 `.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/`。
++
++## 审查修复边界
++
++引用式链接共用 definition 时只改写该目标一次。相对来源先按当前 Wiki 页目录安全归一化，越根拒绝，匹配真实 Wiki 页优先；原有不含 `..` 的仓库根路径引用仍可按 manifest 与 Read 证据识别。模型执行返回的 failed / blocked 诊断与异常走同一安全边界，保留合法错误码、原 disposition 和 retriable，不落原始异常文字。

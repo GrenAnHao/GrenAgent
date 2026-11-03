@@ -27,6 +27,8 @@ AgentData（sqlite 存储、扩展的 RPC 服务、记忆与 Wiki 的后台任�
 
 主进程启动时拉起 agentdata-host 子进程（同一份 Electron 可执行文件加 `ELECTRON_RUN_AS_NODE=1`，Node IPC，`serialization: 'advanced'`，`RpcPeer`，进程树守卫，不带 V8 参数），由它独占 `agent-data.db`。入口 `electron/agentDataProcess/hostEntry.ts`，构建产物 `out/main/agentdata-host.js`（已进 `asarUnpack`）。一个实例，所有工作区共用。
 
+[长期记忆裁撤](../simplification/2026-10-31-remove-agentdata-memory.md)移除 Memory 存储、任务及定时器；本篇共享宿主与唯一数据库持有者的决定继续成立。上文 Memory 耗时只保留为迁移前的历史样本。
+
 - 默认 child 模式；`GREN_AGENTDATA_PROCESS=inproc` 退回主进程内（与原来同一份装配），作为生产退路保留一个发布周期，之后只留给测试。
 - 两种模式共用 `agentDataProcess/assemble.ts` 装配运行时：`SystemWorkerManager`、`CodeGraphJobs`、`codeRetrieval`、注入的 socket 方法接法完全相同。
 - codegraph-host 改由 agentdata-host 拉起（孙进程），CodeGraph 任务回写状态走运行时的进程内入口 `requestJobAdmin`，不再绕 TCP。见 [CodeGraph 运行在 codegraph-host 子进程](./2026-10-16-codegraph-host-process.md)。
@@ -41,12 +43,12 @@ flowchart LR
   end
   subgraph ADH["agentdata-host 子进程: 唯一打开 agent-data.db"]
     RT["AgentDataRuntime: 管道服务 / 令牌 / 路由"]
-    ST["Thread / Memory / Wiki / Task / Audit / ToolPermission"]
+    ST["Thread / Wiki / Task / Audit / ToolPermission"]
     SW["SystemWorkerManager + TaskQueue + 定时器"]
     CJ["CodeGraphJobs + codeRetrieval"]
   end
   subgraph AH["agent-host 子进程"]
-    EX["memory / wiki-rag / code-retrieval / safety 扩展"]
+    EX["wiki-rag / code-retrieval / safety 扩展"]
   end
   CGH["codegraph-host 孙进程"]
   DB[("agent-data.db")]
@@ -62,7 +64,7 @@ flowchart LR
 
 ### 四条通道（名字只从 `agentDataProcess/contract.ts` 取）
 
-1. **扩展与主进程的 socket 类请求 → agentdata-host**：命名管道（Windows `\\.\pipe\grenagent-agentdata-<主进程 pid>-<随机>`，POSIX 为 `os.tmpdir()` 下 0700 子目录里的 socket），帧格式、令牌校验、方法分派与原来的环回 TCP 完全一样。端点 JSON 多了可选的 `path` 字段，`host/port` 留给 inproc；`agentData/client.ts` 与 `extensions/memory/client.ts`（wiki-rag、code-retrieval、desktop-control 复用它）有 `path` 时连管道。
+1. **扩展与主进程的 socket 类请求 → agentdata-host**：命名管道（Windows `\\.\pipe\grenagent-agentdata-<主进程 pid>-<随机>`，POSIX 为 `os.tmpdir()` 下 0700 子目录里的 socket），帧格式、令牌校验、方法分派与原来的环回 TCP 完全一样。端点 JSON 多了可选的 `path` 字段，`host/port` 留给 inproc；`agentData/client.ts` 与 `extensions/_shared/agent-data-client.ts`（wiki-rag、code-retrieval、desktop-control 复用它）有 `path` 时连管道。
 2. **主进程 → agentdata-host（管理面，私有 IPC）**：`agentdata.admin`（原 `requestAdmin` 的全部方法，错误形状仍是 `Error("CODE: message")`）、`agentdata.registerWorkspace`、`agentdata.registerKnownWorkspace`、`agentdata.resolveDiagnosticPath`、`agentdata.plugins.load/save`、`host.shutdown`。这些方法故意不暴露在 socket 上。
 3. **agentdata-host → 主进程（反向端口）**：`main.model.describe / complete / abort`、`main.resolveSession`、`main.method`（`turn.start` / `permission.authorize` / `mcp.state.publish`）。模型调用的 `signal` 变成 `main.model.abort { requestId }`；`onUsage` 变成主进程在同一 IPC 通道上先于应答发出的 `agentdata.model.usage` 事件，失败的调用也记账（`ModelRuntimeHost.completeSimple` 在校验文本之前就回调 `onUsage`）。
 4. **agentdata-host → 主进程（诊断）**：`agentdata.diag`，每 10 秒 `agentdata-host-sample`（内存、事件循环延迟、M0 的 `agentData` 方法耗时），以及转记 codegraph-host 的采样与退出；退出记 `agentdata-host-exit`。

@@ -33,6 +33,12 @@ describe('resolveMarkdownLink', () => {
     expect(resolveMarkdownLink('D:\\other\\a.md', win)).toMatchObject({ kind: 'unsupported' });
   });
 
+  it('Windows 链接的 /盘符:/ 前缀归一化后仍遵守项目边界', () => {
+    expect(resolveMarkdownLink('/C:/repo/docs/b.md', win)).toEqual({ kind: 'file', path: 'C:\\repo\\docs\\b.md', rel: 'docs/b.md' });
+    expect(resolveMarkdownLink('/D:/other/a.md', win)).toMatchObject({ kind: 'unsupported' });
+    expect(resolveMarkdownLink('/C:/repo/../outside.md', win)).toMatchObject({ kind: 'unsupported' });
+  });
+
   it('指向项目根自己时 rel 为空', () => {
     expect(resolveMarkdownLink('../', { root: '/repo', filePath: '/repo/docs/a.md' })).toEqual({ kind: 'file', path: '/repo', rel: '' });
   });

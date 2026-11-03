@@ -1,6 +1,6 @@
 import { Button, Flexbox, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { BookCheck, Plus, ScrollText, Server, Sparkles, SquareSlash } from 'lucide-react';
+import { BookCheck, ChevronRight, Plus, ScrollText, Server, Sparkles, SquareSlash } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { probeMcpServer, readMcpPolicy, readMcpToolsCache, writeMcpPolicy } from '../../lib/mcpPolicyIo';
 import { pi, type McpConfigScope } from '../../lib/pi';
@@ -10,7 +10,8 @@ import { useSettingsForm } from '../settings/useSettingsForm';
 import { AddMcpModal } from './AddMcpModal';
 import { AuditModal } from './AuditModal';
 import { CommandsPanel } from './CommandsPanel';
-import { McpServerCard } from './McpServerCard';
+import { ExtensionPageHeader } from './ExtensionPageHeader';
+import { McpWorkbench } from './McpWorkbench';
 import { NativeSkillsPanel } from './NativeSkillsPanel';
 import { RulesPanel } from './RulesPanel';
 import {
@@ -19,11 +20,9 @@ import {
   type McpEntry,
 } from './mcpConfig';
 import { parsePolicyDoc, serializePolicyDoc, setToolPerm, setToolRules, type Perm } from './mcpPolicy';
-import { getCacheEntry, getCachedTools, parseToolsCache, toProbeConfigJson, type CacheEntry } from './mcpToolsCache';
+import { parseToolsCache, toProbeConfigJson, type CacheEntry } from './mcpToolsCache';
 import { ToolPermissionModal } from './ToolPermissionModal';
 import { useAskConfirm } from '../../components/askConfirm';
-
-const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 /** 稳定空数组回退：避免 selector 未命中时每次返回新引用触发 useSyncExternalStore 无限循环。 */
 const EMPTY_SERVERS: McpServerStatus[] = [];
@@ -31,43 +30,94 @@ const EMPTY_SERVERS: McpServerStatus[] = [];
 const styles = createStaticStyles(({ css }) => ({
   panel: css`
     height: 100%;
+    min-width: 0;
     min-height: 0;
+    container-type: inline-size;
+    container-name: extensions-module;
+    background: var(--gren-content-bg, ${cssVar.colorBgLayout});
+  `,
+  layout: css`
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+
+    @container extensions-module (max-width: 900px) { flex-direction: column; }
   `,
   header: css`
-    position: relative;
-    z-index: 1;
     display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    height: 50px;
-    padding-inline: 20px;
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
-    background: ${cssVar.colorBgContainer};
+    flex: 0 0 140px;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    padding: 22px 12px;
+    background: var(--gren-sidebar-bg, ${cssVar.colorBgContainer});
+
+    @container extensions-module (max-width: 900px) {
+      flex: 0 0 auto;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+    }
+  `,
+  navTitle: css`
+    padding-inline: 10px;
+    color: ${cssVar.colorText};
+    font-size: 13px;
+    font-weight: 500;
+
+    @container extensions-module (max-width: 430px) { display: none; }
   `,
   tabBar: css`
     display: flex;
-    align-items: stretch;
-    height: 100%;
-    gap: 2px;
+    flex-direction: column;
+    gap: 4px;
+
+    @container extensions-module (max-width: 900px) { flex-direction: row; flex-wrap: wrap; gap: 2px; }
   `,
   tab: css`
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    height: 100%;
-    padding-inline: 12px;
-    margin-block-end: -1px;
+    gap: 8px;
+    min-height: 36px;
+    padding: 8px 10px;
     border: 0;
-    border-block-end: 2px solid transparent;
+    border-radius: 7px;
     background: transparent;
-    color: ${cssVar.colorTextTertiary};
-    font-size: 14px;
+    color: ${cssVar.colorTextSecondary};
+    font-size: 13px;
     cursor: pointer;
+
+    &:hover { background: ${cssVar.colorFillTertiary}; }
   `,
   tabActive: css`
-    border-block-end-color: ${cssVar.colorPrimary};
+    background: ${cssVar.colorPrimaryBg};
     color: ${cssVar.colorText};
-    font-weight: 600;
+    font-weight: 500;
+  `,
+  content: css`
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  `,
+  breadcrumb: css`
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 46px;
+    padding-inline: 24px;
+    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+    color: ${cssVar.colorTextSecondary};
+    font-size: 12px;
+
+    > span:last-child { color: ${cssVar.colorText}; }
+    @container extensions-module (max-width: 900px) { display: none; }
   `,
   errorBar: css`
     flex: 0 0 auto;
@@ -77,74 +127,38 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 13px;
   `,
   body: css`
+    display: flex;
     flex: 1;
+    flex-direction: column;
+    min-width: 0;
     min-height: 0;
     overflow-y: auto;
-    padding: 28px 32px 40px;
+    padding: 26px 24px 28px;
+    container-type: inline-size;
+    container-name: extension-content;
+
+    &[data-page='mcp'] { overflow: hidden; }
+
+    @container extensions-module (max-width: 540px) { padding: 20px 14px; }
   `,
   inner: css`
-    width: 100%;
-  `,
-  // 命令 / 规则：左右分栏撑到面板底边，列表和编辑区各自滚动
-  bodyFill: css`
-    display: flex;
-    flex-direction: column;
-  `,
-  innerFill: css`
     display: flex;
     flex: 1 0 auto;
     flex-direction: column;
-  `,
-  heroBar: css`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  `,
-  hero: css`
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  `,
-  heroIcon: css`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    flex: 0 0 auto;
-    border-radius: 8px;
-    background: ${cssVar.colorFillTertiary};
-    color: ${cssVar.colorText};
-  `,
-  heroTitle: css`
-    display: inline-flex;
-    align-items: center;
-    font-size: 20px;
-    font-weight: 600;
-    color: ${cssVar.colorText};
-  `,
-  count: css`
-    margin-inline-start: 8px;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: ${cssVar.colorFillSecondary};
-    color: ${cssVar.colorTextSecondary};
-    font-size: 13px;
-    font-weight: 500;
-  `,
-  heroDesc: css`
-    margin-block: 8px 20px;
-    font-size: 14px;
-    line-height: 1.55;
-    color: ${cssVar.colorTextSecondary};
-  `,
-  code: css`
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: ${cssVar.colorFillTertiary};
-    font-family: ${mono};
-    font-size: 12px;
+    width: 100%;
+    max-width: 1280px;
+    min-width: 0;
+    margin-inline: auto;
+
+    [data-page='mcp'] > & {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    /* 技能页：页头和工具行不动，只有技能目录滚动；目录保底高度放不下时才整页滚动。 */
+    [data-page='skills'] > & {
+      flex: 1 1 0px;
+    }
   `,
   empty: css`
     display: flex;
@@ -171,7 +185,6 @@ export function ExtensionsPanel() {
   const existingNames = entries.map((entry) => entry.name);
 
   const [tab, setTab] = useState<'mcp' | 'skills' | 'commands' | 'rules'>('mcp');
-  const fill = tab === 'commands' || tab === 'rules';
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<(McpEntry & { scope: McpConfigScope }) | undefined>(undefined);
   const touchedRef = useRef(false);
@@ -211,7 +224,6 @@ export function ExtensionsPanel() {
   };
 
   useEffect(() => {
-    if (mcpLoading) return;
     let cancelled = false;
     void readMcpPolicy()
       .then((text) => {
@@ -228,6 +240,9 @@ export function ExtensionsPanel() {
     void writeMcpPolicy(serializePolicyDoc(next)).catch(() => {});
   };
   const onPermChange = (fullName: string, perm: Perm) => writePolicy(setToolPerm(policyRaw, fullName, perm));
+  // 一次写入整组，避免逐个调用 onPermChange 时都基于同一份旧 policyRaw、只留下最后一个。
+  const onPermChangeMany = (fullNames: string[], perm: Perm) =>
+    writePolicy(fullNames.reduce((raw, fullName) => setToolPerm(raw, fullName, perm), policyRaw));
 
   const reloadCache = async () => {
     try {
@@ -332,31 +347,36 @@ export function ExtensionsPanel() {
 
   return (
     <Flexbox className={styles.panel} data-testid="extensions-panel">
-      <div className={styles.header}>
+      <div className={styles.layout}>
+      <nav className={styles.header} aria-label="扩展页面">
+        <span className={styles.navTitle}>扩展</span>
         <div className={styles.tabBar}>
-          <button type="button" className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`} data-testid="ext-tab-mcp" onClick={() => setTab('mcp')}>
+          <button type="button" className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`} aria-current={tab === 'mcp' ? 'page' : undefined} data-testid="ext-tab-mcp" onClick={() => setTab('mcp')}>
             <Icon icon={Server} size={16} />
             MCP
           </button>
-          <button type="button" className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`} data-testid="ext-tab-skills" onClick={() => setTab('skills')}>
+          <button type="button" className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`} aria-current={tab === 'skills' ? 'page' : undefined} data-testid="ext-tab-skills" onClick={() => setTab('skills')}>
             <Icon icon={Sparkles} size={16} />
             技能
           </button>
-          <button type="button" className={`${styles.tab} ${tab === 'commands' ? styles.tabActive : ''}`} data-testid="ext-tab-commands" onClick={() => setTab('commands')}>
+          <button type="button" className={`${styles.tab} ${tab === 'commands' ? styles.tabActive : ''}`} aria-current={tab === 'commands' ? 'page' : undefined} data-testid="ext-tab-commands" onClick={() => setTab('commands')}>
             <Icon icon={SquareSlash} size={16} />
             命令
           </button>
-          <button type="button" className={`${styles.tab} ${tab === 'rules' ? styles.tabActive : ''}`} data-testid="ext-tab-rules" onClick={() => setTab('rules')}>
+          <button type="button" className={`${styles.tab} ${tab === 'rules' ? styles.tabActive : ''}`} aria-current={tab === 'rules' ? 'page' : undefined} data-testid="ext-tab-rules" onClick={() => setTab('rules')}>
             <Icon icon={BookCheck} size={16} />
             规则
           </button>
         </div>
-      </div>
+      </nav>
+
+      <div className={styles.content}>
+      <div className={styles.breadcrumb}><span>扩展</span><ChevronRight size={12} /><span>{{ mcp: 'MCP', skills: '技能', commands: '命令', rules: '规则' }[tab]}</span></div>
 
       {(error || mcpError) && <div className={styles.errorBar}>{error || mcpError}</div>}
 
-      <div className={`${styles.body} ${fill ? styles.bodyFill : ''}`}>
-        <div className={`${styles.inner} ${fill ? styles.innerFill : ''}`}>
+      <div className={styles.body} data-testid="extensions-body" data-page={tab}>
+        <div className={styles.inner}>
           {tab === 'commands' ? (
             <CommandsPanel workspace={workspace} onResourcesChanged={bumpResources} />
           ) : tab === 'rules' ? (
@@ -364,17 +384,7 @@ export function ExtensionsPanel() {
           ) : tab === 'skills' ? (
             <NativeSkillsPanel values={values} setValue={setValue} onChanged={markChanged} />
           ) : <>
-          <div className={styles.heroBar}>
-            <div className={styles.hero}>
-              <span className={styles.heroIcon}>
-                <Icon icon={Server} size={20} />
-              </span>
-              <span className={styles.heroTitle}>
-                MCP 服务器
-                {entries.length > 0 ? <span className={styles.count}>{entries.length}</span> : null}
-              </span>
-            </div>
-            <Flexbox horizontal align="center" gap={8}>
+          <ExtensionPageHeader title="MCP" count={entries.length} description="连接外部工具，管理工具权限。开关与权限即时生效。" actions={<>
               <Button
                 icon={<ScrollText size={15} />}
                 data-testid="mcp-audit-open"
@@ -393,11 +403,7 @@ export function ExtensionsPanel() {
               >
                 添加 MCP
               </Button>
-            </Flexbox>
-          </div>
-          <div className={styles.heroDesc}>
-            连接外部 MCP server，其工具以 <code className={styles.code}>mcp__server__tool</code> 暴露给 agent。点「重载」重新连接并刷新工具（即时生效）。
-          </div>
+            </>} />
 
           {!mcpLoading && entries.length === 0 ? (
             <div className={styles.empty} data-testid="mcp-empty">
@@ -405,39 +411,15 @@ export function ExtensionsPanel() {
               <span>未配置 MCP server，点右上「添加 MCP」</span>
             </div>
           ) : (
-            entries.map((entry) => {
-              const runtime = runtimeServers.find((server) => server.name === entry.name);
-              const runtimeStatus = runtime?.status === 'needs-login' || (runtime?.loginUrl && runtime.status !== 'connected')
-                ? 'needs-login'
-                : runtime?.status;
-              return (
-                <McpServerCard
-                  key={entry.name}
-                  name={entry.name}
-                  config={entry.config}
-                  enabled={entry.enabled}
-                  scope={entry.scope}
-                  cachedTools={getCachedTools(toolsCache, entry.name)}
-                  runtimeStatus={runtimeStatus}
-                  runtimeToolNames={runtime?.toolNames}
-                  loginUrl={runtime?.loginUrl}
-                  exposure={runtime?.exposure}
-                  auth={runtime?.auth}
-                  probing={probing.has(entry.name)}
-                  probeError={getCacheEntry(toolsCache, entry.name)?.ok === false ? getCacheEntry(toolsCache, entry.name)?.error : undefined}
-                  policyRaw={policyRaw}
-                  onToggle={(enabled) => handleToggleMcp(entry, enabled)}
-                  onEdit={() => {
+            <McpWorkbench
+              workspace={workspace} entries={entries} runtimeServers={runtimeServers} toolsCache={toolsCache} probing={probing} policyRaw={policyRaw}
+              onToggle={handleToggleMcp}
+              onEdit={(entry) => {
                     setEditing(entry);
                     setModalOpen(true);
-                  }}
-                  onDelete={() => handleDeleteMcp(entry)}
-                  onReload={() => void reloadOne(entry.name)}
-                  onPermChange={onPermChange}
-                  onOpenRules={(fullName) => setRulesTarget(fullName)}
-                />
-              );
-            })
+              }}
+              onDelete={handleDeleteMcp} onReload={(name) => void reloadOne(name)} onPermChange={onPermChange} onPermChangeMany={onPermChangeMany} onOpenRules={setRulesTarget}
+            />
           )}
 
           <AddMcpModal
@@ -462,6 +444,8 @@ export function ExtensionsPanel() {
           <AuditModal open={auditOpen} onClose={() => setAuditOpen(false)} />
           </>}
         </div>
+      </div>
+      </div>
       </div>
     </Flexbox>
   );

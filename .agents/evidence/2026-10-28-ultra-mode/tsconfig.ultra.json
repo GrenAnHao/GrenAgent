@@ -1,0 +1,45 @@
+{
+  "extends": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "types": [
+      "node",
+      "vite/client"
+    ]
+  },
+  "files": [
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\_shared\\ultra-context.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\agent-mode\\modes.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\agent-mode\\planState.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\agent-mode\\index.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\agent-mode\\ultra-rules.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\context-rules\\index.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\context-rules\\rules.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\fable-behavior\\loader.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\index.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\routing.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\model-selection.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\list-models-tool.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\tasks.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\agents.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\embedded-runner.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\activation.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\worker-host.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\worker-session.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\extensions\\multi-agent\\worker-protocol.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\stores\\modeStore.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\chat\\input\\actions\\ModeAction.tsx",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\settings\\settingsSchema.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\extensions\\RulesPanel.tsx",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\extensions\\libraryStyles.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\lib\\promptLibraryIo.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\electron\\app\\promptLibraryService.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\electron\\ipc\\register.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\electron\\agent\\copyPiAdjacentAssets.ts",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\scenarios\\ultra-mode.tsx",
+    "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\scenarios\\prompt-library-panel.tsx"
+  ],
+  "references": []
+}

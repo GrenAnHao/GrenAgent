@@ -63,7 +63,7 @@ const uiEvents = vi.hoisted(() => [] as unknown[]);
 vi.mock("./embedded-events.js", () => ({ emitEmbeddedSubagentEvent: (event: unknown) => uiEvents.push(event) }));
 
 import { spawn } from "node:child_process";
-import { openWorkerChildSession, workerSlotsInUse } from "./worker-session.js";
+import { openWorkerChildSession, resumeWorkerChildSession, workerSlotsInUse } from "./worker-session.js";
 import { onLeakedError } from "../_shared/leak-owner.js";
 import { __resetApprovalRoutesForTest, registerTopApprovalRoute } from "../_shared/approval-route.js";
 
@@ -72,6 +72,7 @@ const busy = { isStreaming: true, isIdle: false, pendingMessageCount: 0 };
 
 function prepared() {
   return {
+    routingMode: "ordinary" as const,
     childConfig: { PI_RUNTIME_CONFIG: "/tmp/rc.json" },
     parentPath: "/ws/parent.jsonl",
     workspace: "/ws",
@@ -322,5 +323,61 @@ describe("approvals from a worker child", () => {
     await openWorkerChildSession({ cwd: "/ws", task: "t", agentId: "sa-1" }, prepared());
     request(child, 904, "approval", { requestId: "r3", sessionPath: "/ws/gone.jsonl", title: "x", options: [], chain: [], timeoutMs: 1000 });
     await expect(replyTo(child, 904)).resolves.toEqual({ outcome: "unavailable" });
+  });
+});
+
+describe("routing domain across the worker boundary", () => {
+  beforeEach(() => {
+    config.values = {};
+    uiEvents.length = 0;
+    spawned.children.length = 0;
+  });
+
+  it("sends the prepared routing mode with open, so the worker writes the same domain into subagent_meta", async () => {
+    const child = nextChild();
+    await openWorkerChildSession(
+      { cwd: "/ws", task: "t", agentId: "sa-1" },
+      { ...prepared(), routingMode: "ultra" },
+    );
+    const open = child.sent.find((m) => m.method === "open")!;
+    expect((open.params!.prepared as Record<string, unknown>).routingMode).toBe("ultra");
+  });
+
+  it("keeps an old host payload working: routingMode is optional and the worker falls back to the child config", async () => {
+    const child = nextChild();
+    // 旧宿主不发这一项：类型上可选，宿主照常起 worker，worker 侧按派生配置里的域键回退。
+    const { routingMode: _dropped, ...oldPayload } = prepared();
+    await openWorkerChildSession({ cwd: "/ws", task: "t", agentId: "sa-1" }, oldPayload);
+    const open = child.sent.find((m) => m.method === "open")!;
+    expect((open.params!.prepared as Record<string, unknown>).routingMode).toBeUndefined();
+  });
+
+  it("resume reports the domain the worker rebuilt from the session log", async () => {
+    nextChild((method) => {
+      if (method === "resume") {
+        return {
+          sessionId: "sa-1",
+          sessionPath: "/ws/s/sa-1.jsonl",
+          cwd: "/ws",
+          entries: [{ type: "custom", customType: "subagent_meta", data: { mode: "continuable", routingMode: "ultra" } }],
+          state: idle,
+          routingMode: "ultra",
+        };
+      }
+      return null;
+    });
+    const resumed = await resumeWorkerChildSession("/ws/s/sa-1.jsonl", "sa-1");
+    expect(resumed.routingMode).toBe("ultra");
+  });
+
+  it("a legacy worker child without a domain on the wire resumes as ordinary", async () => {
+    nextChild((method) => {
+      if (method === "resume") {
+        return { sessionId: "sa-1", sessionPath: "/ws/s/sa-1.jsonl", cwd: "/ws", entries: [], state: idle };
+      }
+      return null;
+    });
+    const resumed = await resumeWorkerChildSession("/ws/s/sa-1.jsonl", "sa-1");
+    expect(resumed.routingMode).toBe("ordinary");
   });
 });

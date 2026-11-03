@@ -11,9 +11,8 @@ Status: implemented
 ## Decision
 
 - 主进程启动自研 Agent Data Runtime：`127.0.0.1` 随机端口 JSONL RPC，`randomBytes(32)` token 鉴权；数据在 `<应用数据目录>/agent-data.db`（`node:sqlite`）。
-- 组成：`memoryStore`（分级记忆、活动分支会话捕获）、`wikiEngine`（每库 `<应用数据目录>/wiki/<wikiId>/`）、`jobStore`（任务、version 乐观锁配置、审计）。
+- 组成：`wikiEngine`（每库 `<应用数据目录>/wiki/<wikiId>/`）、`jobStore`（任务、version 乐观锁配置、审计），以及线程与工具权限。长期记忆按[裁撤决定](../simplification/2026-10-31-remove-agentdata-memory.md)移除，共享宿主和数据库保留。
 - endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS / 子代理 env，扩展反向调用。
-- 作用域：L1 限来源项目，L2/L3 全局（规格 `docs/superpowers/specs/2026-09-04-agent-data-global-scope-design.md`）。
 
 ### 涉及文件
 
@@ -31,7 +30,7 @@ Status: implemented
 ## Alternatives considered
 
 - **继续用 TencentDB 托管运行时**：现成的分层记忆与知识检索。放弃理由：通用平台，很多功能与自有 harness 冲突；改为吸收其功能内核（用户说明）。
-- 记忆提示词仍沿用 TencentDB 的 L1 提取等设计，见 [记忆管线对齐上游](./2026-09-18-memory-pipeline-upstream-aligned.md)。
+- 已移除的长期记忆曾沿用 TencentDB 的 L1 提取等设计，历史取舍见[记忆管线](../../archived/architecture/2026-09-18-memory-pipeline-upstream-aligned.md)；保留的 Wiki 与通用输出解析仍按实际来源保留声明。
 
 ## Consequences
 

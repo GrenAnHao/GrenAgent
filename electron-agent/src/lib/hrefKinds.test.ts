@@ -38,6 +38,19 @@ describe('classifyHref', () => {
     expect(classifyHref('/docs/a.md')).toMatchObject({ kind: 'path', rooted: true });
   });
 
+  it.each([
+    '/D:/OneDrive/Project%20Files/Pi/README.md',
+    '/D%3A/OneDrive/Project%20Files/Pi/README.md',
+    'D%3A/OneDrive/Project%20Files/Pi/README.md',
+  ])('Windows 会话链接恢复真实盘符路径：%s', (href) => {
+    expect(classifyHref(href)).toEqual({ kind: 'path', path: 'D:/OneDrive/Project Files/Pi/README.md', hash: '', rooted: true });
+  });
+
+  it('POSIX 根路径不剥离，Windows 链接仍保留 query/hash 规则', () => {
+    expect(classifyHref('/docs/guide.md')).toMatchObject({ path: '/docs/guide.md', rooted: true });
+    expect(classifyHref('/D:/repo/a.md?plain=1#intro')).toEqual({ kind: 'path', path: 'D:/repo/a.md', rooted: true, hash: 'intro' });
+  });
+
   it('坏的百分号编码不抛错，原样保留', () => {
     expect(classifyHref('./100%.md')).toMatchObject({ kind: 'path', path: './100%.md' });
   });

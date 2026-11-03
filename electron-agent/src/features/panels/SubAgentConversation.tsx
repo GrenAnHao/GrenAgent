@@ -17,6 +17,7 @@ import { useChildSessionBinding } from './useChildSessionBinding';
 import { useSubAgentLive } from '../../hooks/useSubAgentLive';
 import { useSubAgentLiveStore } from '../../stores/subagentLiveStore';
 import { PendingResponseStatus } from '../chat/PendingResponseStatus';
+import { AgentIdentityContext } from '../chat/AgentCommunicationCard';
 
 /** 列表末尾留白（px）：贴底跟随时最新内容停在这段空白之上。 */
 const TAIL_SPACE = 96;
@@ -216,18 +217,20 @@ export function SubAgentConversation({
   );
 
   return (
-    <ChatMessageItems
-      messages={display}
-      unitsByMessage={subAgents.unitsByMessage}
-      hiddenSpawnIds={subAgents.hidden}
-      spawnOverlay={subAgents.overlay}
-      answeredQuestions={answeredQuestions}
-      virtualizeTurnRows
-      sessionLive={status === 'running'}
-      footer={footer}
-      paddingInline={16}
-      resetKey={sessionPath ?? task}
-      data-testid={testId}
-    />
+    <AgentIdentityContext.Provider value={agentId || undefined}>
+      <ChatMessageItems
+        messages={display}
+        unitsByMessage={subAgents.unitsByMessage}
+        hiddenSpawnIds={subAgents.hidden}
+        spawnOverlay={subAgents.overlay}
+        answeredQuestions={answeredQuestions}
+        virtualizeTurnRows
+        sessionLive={status === 'running'}
+        footer={footer}
+        paddingInline={16}
+        resetKey={sessionPath ?? task}
+        data-testid={testId}
+      />
+    </AgentIdentityContext.Provider>
   );
 }

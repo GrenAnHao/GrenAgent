@@ -1,0 +1,529 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:42284) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48552) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/features/chat/messagePrecompute.test.ts (10 tests | 6 failed) 24ms
+     × 空数组不丢失单任务：启动成功 11ms
+     × 空数组不丢失单任务：启动前拒绝 1ms
+     × 空 tasks 不覆盖 chain，单步链式保留逐项结果身份 4ms
+     × 混合 task/tasks 不遗漏顶层任务，编号、模型及详情索引对应后端顺序 2ms
+     × 单元素 tasks 与顶层 task 一样保留单代理结果身份 2ms
+     × wait 并回同一张启动卡片，并带上结果正文 1ms
+ ❯ |renderer| src/features/chat/SubAgentGroupInline.test.tsx (8 tests | 2 failed) 1993ms
+     × 调用级错误原文可见，不依赖是否已有任务行 (0) 442ms
+     × 调用级错误原文可见，不依赖是否已有任务行 (1) 232ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/features/chat/messagePrecompute.test.ts > computeSubAgentUnits > 空数组不丢失单任务：启动成功
+ FAIL  |renderer| src/features/chat/messagePrecompute.test.ts > computeSubAgentUnits > 空数组不丢失单任务：启动前拒绝
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/features/chat/messagePrecompute.test.ts:23:19
+     21|     const message = { ...tool('empty', 'spawn_agent'), args: { action:…
+     22|     const units = computeSubAgentUnits([message]).unitsByMessage.get('…
+     23|     expect(units).toHaveLength(1);
+       |                   ^
+     24|     expect(units?.[0]).toMatchObject({ no: 1, unit: { task: '审查接口', ti…
+     25|     if (status === 'done') expect(units?.[0].unit.agentId).toBe('sa-em…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  |renderer| src/features/chat/messagePrecompute.test.ts > computeSubAgentUnits > 空 tasks 不覆盖 chain，单步链式保留逐项结果身份
+AssertionError: expected [] to deeply equal [ { no: 1, unit: { …(5) } } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "no": 1,
+-     "unit": {
+-       "agentId": "sa-step",
+-       "key": "chain#0",
+-       "status": "done",
+-       "subIndex": 0,
+-       "task": "链式步骤",
+-     },
+-   },
+- ]
++ []
+
+ ❯ src/features/chat/messagePrecompute.test.ts:30:73
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  |renderer| src/features/chat/messagePrecompute.test.ts > computeSubAgentUnits > 混合 task/tasks 不遗漏顶层任务，编号、模型及详情索引对应后端顺序
+AssertionError: expected [ { no: 1, task: 'B', …(3) } ] to deeply equal [ { no: 1, task: 'A', …(3) }, …(1) ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "model": "p/a",
++     "model": "p/b",
+      "no": 1,
+      "subIndex": 0,
+-     "task": "A",
+-     "title": "任务 A",
+-   },
+-   {
+-     "model": "p/b",
+-     "no": 2,
+-     "subIndex": 1,
+      "task": "B",
+      "title": "任务 B",
+    },
+  ]
+
+ ❯ src/features/chat/messagePrecompute.test.ts:38:132
+     36|     const message = { ...tool('mixed', 'spawn_agent'), args: { title: …
+     37|     const units = computeSubAgentUnits([message]).unitsByMessage.get('…
+     38|     expect(units?.map(({ no, unit }) => ({ no, task: unit.task, title:…
+       |                                                                                                                                    ^
+     39|       { no: 1, task: 'A', title: '任务 A', model: 'p/a', subIndex: 0 },
+     40|       { no: 2, task: 'B', title: '任务 B', model: 'p/b', subIndex: 1 },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  |renderer| src/features/chat/messagePrecompute.test.ts > computeSubAgentUnits > 单元素 tasks 与顶层 task 一样保留单代理结果身份
+AssertionError: expected { key: 'one#0', subIndex: +0, …(3) } to match object { subIndex: null, …(2) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "agentId": "sa-one",
+-   "subIndex": null,
++   "subIndex": 0,
+    "title": "唯一标题",
+  }
+
+ ❯ src/features/chat/messagePrecompute.test.ts:46:81
+     44|   it('单元素 tasks 与顶层 task 一样保留单代理结果身份', () => {
+     45|     const message = { ...tool('one', 'spawn_agent'), args: { tasks: [{…
+     46|     expect(computeSubAgentUnits([message]).unitsByMessage.get('one')?.…
+       |                                                                                 ^
+     47|   });
+     48|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  |renderer| src/features/chat/messagePrecompute.test.ts > computeSubAgentUnits > wait 并回同一张启动卡片，并带上结果正文
+TypeError: Cannot read properties of undefined (reading 'unit')
+ ❯ src/features/chat/messagePrecompute.test.ts:89:46
+     87|     expect(index.hidden.has('m2')).toBe(true);
+     88|     expect(index.unitsByMessage.has('m2')).toBe(false);
+     89|     expect(index.unitsByMessage.get('m1')![0].unit.task).toBe(task);
+       |                                              ^
+     90|     expect(index.unitsByMessage.get('m1')![0].no).toBe(1);
+     91|     const text = (index.overlay.get('m1')?.result as { content?: Array…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  |renderer| src/features/chat/SubAgentGroupInline.test.tsx > SubAgentGroupInline chain status > 调用级错误原文可见，不依赖是否已有任务行 (0)
+TestingLibraryElementError: Unable to find an element by: [data-testid="subagent-group-error"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-19u5a7b ant-app css-var-_r_1_"[39m
+      [33mstyle[39m=[32m"isolation: isolate; min-height: inherit; width: inherit;"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mid[39m=[32m"lobe-ui-theme-app"[39m
+        [33mstyle[39m=[32m"display: contents;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-zi6dsr"[39m
+          [33mdata-testid[39m=[32m"subagent-group"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-kceo5s"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"anticon"[39m
+              [33mrole[39m=[32m"img"[39m
+              [33mstyle[39m=[32m"flex: 0 0 auto; color: var(--ant-color-text-secondary);"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-rows-3 lucide-panels-top-bottom"[39m
+                [33mfill[39m=[32m"transparent"[39m
+                [33mheight[39m=[32m"14"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"14"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"18"[39m
+                  [33mrx[39m=[32m"2"[39m
+                  [33mwidth[39m=[32m"18"[39m
+                  [33mx[39m=[32m"3"[39m
+                  [33my[39m=[32m"3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M21 9H3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M21 15H3"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"acss-1wtj4ai"[39m
+            [36m>[39m
+              [0m并行子代理[0m
+              [0m [0m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-qm12v1"[39m
+              [36m>[39m
+                [0m· [0m
+                [0m0[0m
+                [0m [0m
+                [0m个[0m
+              [36m</span>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-rwduxt"[39m
+          [36m/>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mdata-lobe-portal-host[39m=[32m""[39m
+          [33mstyle[39m=[32m"height: 0px; left: 0px; position: fixed; right: 0px; top: 0px; z-index: 1100;"[39m
+        [36m/>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/features/chat/SubAgentGroupInline.test.tsx:40:19
+     38|     wrap(<SubAgentGroupInline messageId="rejected" toolCallId="reject-…
+     39|       result={{ isError: true, content: [{ type: 'text', text: '子代理已被禁…
+     40|     expect(screen.getByTestId('subagent-group-error')).toHaveTextConte…
+       |                   ^
+     41|   });
+     42|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  |renderer| src/features/chat/SubAgentGroupInline.test.tsx > SubAgentGroupInline chain status > 调用级错误原文可见，不依赖是否已有任务行 (1)
+TestingLibraryElementError: Unable to find an element by: [data-testid="subagent-group-error"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-19u5a7b ant-app css-var-_r_3_"[39m
+      [33mstyle[39m=[32m"isolation: isolate; min-height: inherit; width: inherit;"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mid[39m=[32m"lobe-ui-theme-app"[39m
+        [33mstyle[39m=[32m"display: contents;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-zi6dsr"[39m
+          [33mdata-testid[39m=[32m"subagent-group"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-kceo5s"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"anticon"[39m
+              [33mrole[39m=[32m"img"[39m
+              [33mstyle[39m=[32m"flex: 0 0 auto; color: var(--ant-color-text-secondary);"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-rows-3 lucide-panels-top-bottom"[39m
+                [33mfill[39m=[32m"transparent"[39m
+                [33mheight[39m=[32m"14"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"14"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"18"[39m
+                  [33mrx[39m=[32m"2"[39m
+                  [33mwidth[39m=[32m"18"[39m
+                  [33mx[39m=[32m"3"[39m
+                  [33my[39m=[32m"3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M21 9H3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M21 15H3"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"acss-1wtj4ai"[39m
+            [36m>[39m
+              [0m并行子代理[0m
+              [0m [0m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-qm12v1"[39m
+              [36m>[39m
+                [0m· [0m
+                [0m2[0m
+                [0m [0m
+                [0m个[0m
+                [36m<span[39m
+                  [33mclass[39m=[32m"acss-ttrpmp"[39m
+                [36m>[39m
+                  [0m · [0m
+                  [0m2[0m
+                  [0m 个失败[0m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-rwduxt"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"acss-52vpdl"[39m
+              [33mdata-testid[39m=[32m"subagent-group-row-1"[39m
+              [33mtitle[39m=[32m"在右侧面板查看该子代理详情"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"anticon"[39m
+                [33mrole[39m=[32m"img"[39m
+                [33mstyle[39m=[32m"flex: 0 0 auto; color: var(--ant-color-error);"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-circle-x lucide-x-circle"[39m
+                  [33mfill[39m=[32m"transparent"[39m
+                  [33mheight[39m=[32m"14"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"14"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"12"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"10"[39m
+                  [36m/>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m15 9-6 6"[39m
+                  [36m/>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m9 9 6 6"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-1q4dqyl"[39m
+              [36m>[39m
+                [0m#[0m
+                [0m1[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-bopoav"[39m
+              [36m>[39m
+                [0mA[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-1m1cuss"[39m
+              [36m>[39m
+                [0m出错[0m
+              [36m</span>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"lobe-flex acss-1jlw75u"[39m
+                [33mdata-base-ui-tooltip-trigger[39m=[32m""[39m
+                [33mid[39m=[32m"base-ui-_r_5_"[39m
+                [33mrole[39m=[32m"button"[39m
+                [33mstyle[39m=[32m"--lobe-flex: none; --lobe-flex-direction: row; --lobe-flex-justify: center; --lobe-flex-align: center; border-radius: 4px; height: 24px; width: 24px;"[39m
+                [33mtabindex[39m=[32m"0"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"anticon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                  [33mstyle[39m=[32m"pointer-events: none;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-panel-right-open"[39m
+                    [33mfill[39m=[32m"transparent"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<rect[39m
+                      [33mheight[39m=[32m"18"[39m
+                      [33mrx[39m=[32m"2"[39m
+                      [33mwidth[39m=[32m"18"[39m
+                      [33mx[39m=[32m"3"[39m
+                      [33my[39m=[32m"3"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M15 3v18"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"m10 15-3-3 3-3"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"acss-52vpdl"[39m
+              [33mdata-testid[39m=[32m"subagent-group-row-2"[39m
+              [33mtitle[39m=[32m"在右侧面板查看该子代理详情"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"anticon"[39m
+                [33mrole[39m=[32m"img"[39m
+                [33mstyle[39m=[32m"flex: 0 0 auto; color: var(--ant-color-error);"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-circle-x lucide-x-circle"[39m
+                  [33mfill[39m=[32m"transparent"[39m
+                  [33mheight[39m=[32m"14"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"14"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"12"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"10"[39m
+                  [36m/>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m15 9-6 6"[39m
+                  [36m/>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m9 9 6 6"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-1q4dqyl"[39m
+              [36m>[39m
+                [0m#[0m
+                [0m2[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-bopoav"[39m
+              [36m>[39m
+                [0mB[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"acss-1m1cuss"[39m
+              [36m>[39m
+                [0m出错[0m
+              [36m</span>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"lobe-flex acss-1jlw75u"[39m
+                [33mdata-base-ui-tooltip-trigger[39m=[32m""[39m
+                [33mid[39m=[32m"base-ui-_r_7_"[39m
+                [33mrole[39m=[32m"button"[39m
+                [33mstyle[39m=[32m"--lobe-flex: none; --lobe-flex-direction: row; --lobe-flex-justify: center; --lobe-flex-align: center; border-radius: 4px; height: 24px; width: 24px;"[39m
+                [33mtabindex[39m=[32m"0"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"anticon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                  [33mstyle[39m=[32m"pointer-events: none;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-panel-right-open"[39m
+                    [33mfill[39m=[32m"transparent"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<rect[39m
+                      [33mheight[39m=[32m"18"[39m
+                      [33mrx[39m=[32m"2"[39m
+                      [33mwidth[39m=[32m"18"[39m
+                      [33mx[39m=[32m"3"[39m
+                      [33my[39m=[32m"3"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M15 3v18"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"m10 15-3-3 3-3"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mdata-lobe-portal-host[39m=[32m""[39m
+          [33mstyle[39m=[32m"height: 0px; left: 0px; position: fixed; right: 0px; top: 0px; z-index: 1100;"[39m
+        [36m/>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/features/chat/SubAgentGroupInline.test.tsx:40:19
+     38|     wrap(<SubAgentGroupInline messageId="rejected" toolCallId="reject-…
+     39|       result={{ isError: true, content: [{ type: 'text', text: '子代理已被禁…
+     40|     expect(screen.getByTestId('subagent-group-error')).toHaveTextConte…
+       |                   ^
+     41|   });
+     42|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  8 failed | 10 passed (18)
+   Start at  13:51:28
+   Duration  39.18s (transform 947ms, setup 14.35s, import 25.41s, tests 2.02s, environment 8.57s)
+

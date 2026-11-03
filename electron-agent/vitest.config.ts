@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 /**
  * 测试按进程侧分成两个 project：electron/ 是主进程与 IPC 代码，跑在 node 环境；
@@ -14,6 +14,8 @@ export default defineConfig({
         test: {
           name: 'main',
           include: ['electron/**/*.test.ts'],
+          // This OS-child flow needs the temporary build supplied by test:repo-wiki-flow.
+          exclude: [...configDefaults.exclude, 'electron/app/repoWikiFlow.integration.test.ts'],
           environment: 'node',
         },
       },

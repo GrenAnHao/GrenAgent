@@ -189,7 +189,7 @@ describe('TaskQueue', () => {
     const queue = new TaskQueue({ storage, registry, execute: async () => ({}) });
     expect(queue.findPending('test', (task) => (task.input as { fingerprint: string }).fingerprint === 'same')).toMatchObject({ id: 'running' });
     expect(queue.findPending('test', (task) => (task.input as { fingerprint: string }).fingerprint === 'other')).toMatchObject({ id: 'queued' });
-    expect(queue.findPending('memory_extract', () => true)).toBeUndefined();
+    expect(queue.findPending('missing_kind', () => true)).toBeUndefined();
     storage.close();
   });
 });

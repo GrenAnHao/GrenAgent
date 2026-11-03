@@ -1,0 +1,32 @@
+{
+  "shellBytecode": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\armin-ubs4djsZ.jsc",
+  "sha256": "1f78dfc44e1a0dde1e31b8e2ded648b4f76a637f8d0f19387508004e6aea2b6d",
+  "buildTime": "2026-11-01T12:34:59.633Z",
+  "correctedFallbackPresent": true,
+  "requiredResources": [
+    "main.js",
+    "main.jsc",
+    "agent-host.js",
+    "agent-host.jsc",
+    "pi-worker.js",
+    "pi-worker.jsc",
+    "bytecode-loader.cjs",
+    "package.json",
+    "runner.py",
+    "runner.mjs",
+    "pi-job-guard.exe",
+    "pi-sandbox-win.exe",
+    "pi-sandbox-launch.exe",
+    "prompts",
+    "texts",
+    "ultra-rules.md",
+    "chunks/runner.py",
+    "chunks/runner.mjs",
+    "chunks/pi-sandbox-win.exe",
+    "chunks/pi-sandbox-launch.exe",
+    "chunks/prompts",
+    "chunks/texts",
+    "chunks/ultra-rules.md"
+  ],
+  "scope": "Production resource/path inspection; shell execution is independently verified on the actual installed SDKs. No production app was started."
+}

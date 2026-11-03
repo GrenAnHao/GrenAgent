@@ -18,6 +18,7 @@ import batchTools from "./batch-tools/index.js";
 import diagnostics from "./diagnostics/index.js";
 import afterToolFeedback from "./after-tool-feedback/index.js";
 import headerPlaceholders from "./header-placeholders/index.js";
+import fastMode from "./fast-mode/index.js";
 import goal, { pluginManifest as goalManifest } from "./goal/index.js";
 import imageGen from "./image-gen/index.js";
 import sessionMemory from "./session-memory/index.js";
@@ -33,6 +34,7 @@ import codeExec from "./code-exec/index.js";
 import hashline from "./hashline/index.js";
 import dap from "./dap/index.js";
 import fableBehavior from "./fable-behavior/index.js";
+import gptWithTaste from "./gpt-with-taste/index.js";
 import diagramHint from "./diagram-hint/index.js";
 import safety from "./safety/index.js";
 import approval from "./approval/index.js";
@@ -44,12 +46,12 @@ import visualCompanion from "./visual-companion/index.js";
 import webFetch from "./web-fetch/index.js";
 import webSearch, { pluginManifest as webSearchManifest } from "./web-search/index.js";
 import resourceManager from "./resource-manager/index.js";
-import memory from "./memory/index.js";
 import codeRetrieval from "./code-retrieval/index.js";
 import wikiRag from "./wiki-rag/index.js";
-import { memoryManifest, wikiRagManifest, codeRetrievalManifest } from "./agent-data-manifests.js";
+import { wikiRagManifest, codeRetrievalManifest } from "./agent-data-manifests.js";
 
 export {
+  fastMode,
   safety,
   approval,
   sandbox,
@@ -67,6 +69,7 @@ export {
   dap,
   diagramHint,
   fableBehavior,
+  gptWithTaste,
   goal,
   sessionMemory,
   webFetch,
@@ -87,7 +90,6 @@ export {
   tts,
   visualCompanion,
   afterToolFeedback,
-  memory,
   codeRetrieval,
   wikiRag,
 };
@@ -98,6 +100,7 @@ export const allExtensions = [
   approval,
   sandbox,
   headerPlaceholders,
+  fastMode,
   loopGuard,
   rulebook,
   promptCommands,
@@ -111,6 +114,7 @@ export const allExtensions = [
   dap,
   diagramHint,
   fableBehavior,
+  gptWithTaste,
   goal,
   sessionMemory,
   webFetch,
@@ -131,7 +135,6 @@ export const allExtensions = [
   tts,
   visualCompanion,
   afterToolFeedback,
-  memory,
   codeRetrieval,
   wikiRag,
 ];
@@ -143,6 +146,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "approval", factory: approval },
   { name: "sandbox", factory: sandbox },
   { name: "header-placeholders", factory: headerPlaceholders },
+  { name: "fast-mode", factory: fastMode },
   { name: "loop-guard", factory: loopGuard },
   { name: "rulebook", factory: rulebook },
   { name: "prompt-commands", factory: promptCommands },
@@ -158,6 +162,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "dap", factory: dap },
   { name: "diagram-hint", factory: diagramHint },
   { name: "fable-behavior", factory: fableBehavior },
+  { name: "gpt-with-taste", factory: gptWithTaste },
   { name: "goal", factory: goal },
   { name: "session-memory", factory: sessionMemory },
   { name: "web-fetch", factory: webFetch },
@@ -179,7 +184,6 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "tts", factory: tts },
   { name: "visual-companion", factory: visualCompanion },
   { name: "after-tool-feedback", factory: afterToolFeedback },
-  { name: "memory", factory: memory },
   { name: "code-retrieval", factory: codeRetrieval },
   { name: "wiki-rag", factory: wikiRag },
 ];
@@ -197,7 +201,6 @@ const builtinManifests = new Map<string, ExtensionManifest>([
   [goalManifest.id, goalManifest],
   [webSearchManifest.id, webSearchManifest],
   [mcpManifest.id, mcpManifest],
-  [memoryManifest.id, memoryManifest],
   [wikiRagManifest.id, wikiRagManifest],
   [codeRetrievalManifest.id, codeRetrievalManifest],
 ]);

@@ -4,6 +4,9 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { gateToolCall, getAgentMode } from "../agent-mode/modes.js";
+import { isUltraRouting, routingContextEnv } from "../_shared/ultra-context.js";
+import { catalogModel, resolveUltraRoute, routeLabel, routingError } from "./routing.js";
 import { parentModelSpec, resolveSubagentModel } from "./runner.js";
 import {
   preferredBackend,
@@ -19,12 +22,12 @@ import { registerWaitAgent } from "./wait-agent.js";
 import { registerListAgents } from "./list-agents.js";
 import { registerTopApprovalLifecycle } from "./approval-top.js";
 import { detachableSignal, ForegroundRun, SteerWatch, waitOrDetach } from "./detach.js";
-import { assertRouteAllowed, assertThinkingLevel, isThinkingLevel, readModelSelectionPolicy, resolveRouteAlias, routeOf, THINKING_LEVELS } from "./model-selection.js";
+import { assertRouteAllowed, isThinkingLevel, readModelSelectionPolicy, resolveRouteAlias, resolveThinkingLevel, THINKING_LEVELS } from "./model-selection.js";
 import { availableModels, registerListSubagentModels } from "./list-models-tool.js";
 import type { SubagentStopReason } from "./assistant-output.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { projectCwd } from "../_shared/session-cwd.js";
-import { closedStringField, normalizeTasks, spawnHasWork } from "./tasks.js";
+import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
 import { discoverAgents, inferNamedAgentProfile, resolveAgent, suggestAgent, withBuiltinDefaults, type AgentScope } from "./agents.js";
@@ -45,7 +48,6 @@ import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
 import { emitCatalogChanged } from "./catalog-events.js";
 import { completedPrefix } from "./fork-seed.js";
 import { assertDepthAllowed, childDepthOf } from "./depth.js";
-import { adoptSpawnBatch, appendSpawnDelta, rekeySpawnTool, rememberSpawnTool, type EarlyBatch, type EarlySlot } from "./parallel-early.js";
 
 function parentSessionPath(ctx: { sessionManager?: { getSessionFile?: () => string | undefined } }): string | undefined {
   try {
@@ -254,15 +256,6 @@ function releaseReserved(sessionKey: string, n = 1): void {
   else sessionSpawnCount.set(sessionKey, left);
 }
 
-function tryReserveOne(sessionKey: string): boolean {
-  const max = sessionCap();
-  if (max <= 0) return true;
-  const already = sessionSpawnCount.get(sessionKey) ?? 0;
-  if (already + 1 > max) return false;
-  sessionSpawnCount.set(sessionKey, already + 1);
-  return true;
-}
-
 function sessionSpawnKey(ctx: { cwd: string; sessionManager?: { getSessionId?: () => string } }): string {
   try {
     const sid = ctx.sessionManager?.getSessionId?.();
@@ -406,17 +399,16 @@ export default function (pi: ExtensionAPI) {
   const modelPolicy = readModelSelectionPolicy();
   registerListSubagentModels(pi, modelPolicy);
   const modelField = (desc: string) => ({ model: Type.Optional(Type.String({ description: desc })) });
-  const omittedModel = {} as ReturnType<typeof modelField>;
-  const maybeModel = (desc: string) => (modelPolicy.enabled ? modelField(desc) : omittedModel);
+  const maybeModel = (desc: string) => modelField(desc);
   const thinkingLevelField = {
     thinking_level: Type.Optional(
       Type.Union(
         THINKING_LEVELS.map((l) => Type.Literal(l)),
-        { description: "Thinking level for the child model; only levels listed by `list_subagent_models` for that route." },
+        { description: "Thinking level for the child model; only levels listed by `list_subagent_models` for that route. A level the route does not support is moved to the nearest supported one and reported in the result." },
       ),
     ),
   };
-  const maybeThinkingLevel = () => (modelPolicy.enabled ? thinkingLevelField : ({} as typeof thinkingLevelField));
+  const maybeThinkingLevel = () => thinkingLevelField;
 
   // 子代理需要人批准时，请求转到这个会话的界面（approval-route.ts）。
   registerTopApprovalLifecycle(pi);
@@ -487,140 +479,6 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  const launchEarly = (
-    ctx: Parameters<typeof sessionSpawnKey>[0] & { model?: { provider?: string; id?: string } },
-    batch: EarlyBatch,
-    index: number,
-    task: { task: string; model?: string; agent?: string },
-  ): Promise<void> => {
-    const sessionKey = sessionSpawnKey(ctx);
-    const slot: EarlySlot = { task: task.task, ok: false, output: "", settled: false, model: task.model };
-    batch.slots[index] = slot;
-    if (!tryReserveOne(sessionKey)) {
-      slot.settled = true;
-      slot.error = "已达单会话子代理上限";
-      return Promise.resolve();
-    }
-    const controller = new AbortController();
-    batch.abortors.push(controller);
-    const id = SubAgentRegistry.genId();
-    slot.agentId = id;
-    // 和其余前台路径一样登记进 inflight：转到后台以后，界面上的取消和卡死回收只能从这里够到它。
-    inflight.set(id, controller);
-    const profileName = closedStringField(batch.raw, "profile");
-    const profile = resolveProfile(typeof profileName === "string" ? (profileName as ProfileInput) : undefined);
-    const profileEnv = profileToEnv(profile);
-    const ownerPolicy = getApprovalPolicy();
-    profileEnv.APPROVAL_POLICY = ownerPolicy === "full" || ownerPolicy === "workspace" ? "auto" : ownerPolicy;
-    const depth = childDepthOf(ctx as never);
-    profileEnv.SUBAGENT_DEPTH = String(depth);
-    const chosenModel = pickSubagentModel(task.model, undefined, profileToModel(profile, getConfig), ctx.model);
-    slot.model = chosenModel;
-    let systemPrompt: string | undefined;
-    let tools: string[] | undefined;
-    let backend: "worker" | "in-process" | undefined;
-    if (task.agent) {
-      try {
-        const found = resolveAgent(withBuiltinDefaults(discoverAgents(ctx.cwd, "user").agents), task.agent);
-        systemPrompt = found?.systemPrompt;
-        tools = found?.tools;
-        backend = found?.backend;
-      } catch {
-        /* 命名档案解析失败留给 execute 路径记失败 */
-      }
-    }
-    const registry = getRegistry(projectCwd(ctx));
-    registry.create({
-      id,
-      task: task.task,
-      profile: JSON.stringify(profile),
-      model: chosenModel ?? null,
-      parentId: parentSessionId(ctx),
-      depth,
-    });
-    return runSubagent(ctx.cwd, task.task, id, {
-      projectCwd: projectCwd(ctx),
-      parentSessionPath: parentSessionPath(ctx),
-      model: chosenModel,
-      systemPrompt,
-      tools,
-      backend,
-      env: profileEnv,
-      timeoutMs: profileLimits(profile).timeoutMs,
-      depth,
-      signal: controller.signal,
-      onUpdate: (u) => {
-        registry.progress(id, u.transcript);
-        if (u.sessionPath) {
-          registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
-          slot.sessionPath = u.sessionPath;
-        }
-      },
-    }).then((r) => {
-      slot.ok = r.ok;
-      slot.output = r.output;
-      slot.error = r.error;
-      slot.partial = r.partial;
-      slot.sessionPath = r.sessionPath;
-      slot.stopReason = r.stopReason;
-      slot.settled = true;
-      // 父回合中止（abortEarly）记 cancelled，和其余路径一致；否则注册表里分不出是被停还是自己失败。
-      finishQuietly(registry, id, r.ok
-        ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
-        : {
-            status: controller.signal.aborted ? "cancelled" : "error",
-            output: r.output,
-            error: r.error,
-            exitCode: r.exitCode,
-            transcript: r.transcript,
-          });
-    }, (e: unknown) => {
-      const msg = String((e as Error)?.message ?? e);
-      slot.ok = false;
-      slot.error = msg;
-      slot.settled = true;
-      finishQuietly(registry, id, { status: "error", error: msg, exitCode: -1 });
-    }).finally(() => {
-      inflight.delete(id);
-      releaseReserved(sessionKey, 1);
-      // 转后台之后靠它发结算通知，前面记账出错也要走到。
-      try {
-        batch.onSettled?.(slot);
-      } catch {
-        /* 通知出错不能让这一项的 Promise 失败，连累整组 */
-      }
-    });
-  };
-
-  pi.on("message_update", (event, ctx) => {
-    if (process.env.PI_IS_SUBAGENT === "1") return;
-    const ame = event.assistantMessageEvent as {
-      type?: string;
-      toolName?: string;
-      contentIndex?: number;
-      id?: string;
-      delta?: string;
-      toolCall?: { id?: string; name?: string };
-    };
-    if (ame.type === "toolcall_start" && ame.toolName === "spawn_agent" && typeof ame.contentIndex === "number") {
-      rememberSpawnTool(ame.contentIndex, ame.id || `idx:${ame.contentIndex}`);
-      return;
-    }
-    if (ame.type === "toolcall_end" && ame.toolCall?.name === "spawn_agent" && typeof ame.contentIndex === "number" && ame.toolCall.id) {
-      rekeySpawnTool(ame.contentIndex, ame.toolCall.id);
-      return;
-    }
-    if (ame.type !== "toolcall_delta" || typeof ame.contentIndex !== "number" || typeof ame.delta !== "string") return;
-    const noted = appendSpawnDelta(ame.contentIndex, ame.delta);
-    if (!noted) return;
-    if (closedStringField(noted.batch.raw, "profile") === null) return;
-    for (let i = noted.batch.runs.length; i < noted.tasks.length; i++) {
-      const task = noted.tasks[i];
-      if (!task) continue;
-      noted.batch.runs.push(launchEarly(ctx, noted.batch, i, task));
-    }
-  });
-
   pi.registerTool({
     name: "spawn_agent",
     label: "Spawn Sub-agent",
@@ -630,6 +488,7 @@ export default function (pi: ExtensionAPI) {
       "`agent` picks a named agent (system prompt + tools + model) from ~/.pi/agent/agents/*.md: " +
       "scout/ask/reviewer are read-only, planner is restricted-write, worker is writable. " +
       "`profile` (explore|planner|reviewer|default) sets filesystem/MCP access; omitted profile still follows the named agent. " +
+      "In Ultra mode only Ultra role/default settings select implicit models; agent/profile model defaults are ignored. Ordinary mode keeps its existing model policy. " +
       "The sub-agent works in your current working directory; to isolate edits on their own branch, call create_worktree yourself first. " +
       "Pass `title` as the short card name (one clause, at most 24 characters); the sub-agent still receives the full task text. " +
       "`action: \"run\"` (default) blocks and returns the sub-agent output(s); `action: \"spawn\"` starts one task in the background, returns its agentId at once, and delivers the result later as a subagent-settled notice. " +
@@ -644,12 +503,8 @@ export default function (pi: ExtensionAPI) {
       "Prefer scout for broad fan-out; do simple single-file lookups yourself.",
       "Use spawn_agent action \"spawn\" when you have independent work to do meanwhile: its result arrives as a subagent-settled notice, so do not poll status or wait just to collect the conclusion.",
       "子任务要接着当前对话往下做时用 fork: true；要隔离探索时不要开。",
-      ...(modelPolicy.enabled
-        ? [
-            "开启自选路由时先调用 list_subagent_models，只用它列出的路由。它列出的 cheap / strong 别名可直接写进 model：省钱的调研用 cheap，难任务用 strong。",
-            "fork: true 时换模型会失去父前缀缓存，非必要不换。",
-          ]
-        : []),
+      "Ultra 或普通自选路由开启时先调用 list_subagent_models，只能从当前模式授权的模型或别名中选择；普通自选关闭时省略显式 model，要写 thinking_level 也先查它（会列出默认路由的可用档位）。",
+      "fork: true 时换模型会失去父前缀缓存，非必要不换。",
     ],
     parameters: Type.Object({
       title: Type.Optional(
@@ -672,6 +527,7 @@ export default function (pi: ExtensionAPI) {
               ),
               task: Type.String(),
               ...maybeModel("Model route or alias `cheap` / `strong` for this task; must come from `list_subagent_models`."),
+              ...maybeThinkingLevel(),
               agent: Type.Optional(Type.String()),
             }),
           ]),
@@ -701,6 +557,7 @@ export default function (pi: ExtensionAPI) {
             task: Type.String(),
             agent: Type.Optional(Type.String()),
             ...maybeModel("Model route or alias `cheap` / `strong` for this step; must come from `list_subagent_models`."),
+            ...maybeThinkingLevel(),
           }),
           { description: "Sequential steps; each step's task may contain {previous} (replaced by the prior step's output). Pass title on each step." },
         ),
@@ -759,10 +616,11 @@ export default function (pi: ExtensionAPI) {
       // 调 spawn_agent 的会话自己是子代理时它的身份：退回扩展 API 投递结算通知时，唤起的那一轮还算它的。
       const spawner = currentChild();
       const action = params.action ?? "run";
+      const ultra = isUltraRouting(ctx);
       const registry = getRegistry(projectCwd(ctx));
 
       // 模型策略「禁用子代理」：直接拒绝 run/spawn（status/list/cancel/remove 仍可用于善后历史任务）。
-      if ((action === "run" || action === "spawn") && getConfig("SUBAGENT_MODE")?.trim() === "disabled") {
+      if (!ultra && (action === "run" || action === "spawn") && getConfig("SUBAGENT_MODE")?.trim() === "disabled") {
         throw new Error(
           "子代理已被禁用（设置 → 子代理 → 模型策略 = 禁用子代理）。如需使用请改为「继承父模型」或「选定模型」。",
         );
@@ -830,13 +688,13 @@ export default function (pi: ExtensionAPI) {
       } catch (e) {
         return { content: [{ type: "text", text: String((e as Error).message ?? e) }], details: {}, isError: true };
       }
-      const explicitRoutes: string[] = [];
-      if (typeof params.model === "string" && params.model.trim()) explicitRoutes.push(params.model.trim());
-      for (const t of params.tasks ?? []) {
-        if (typeof t === "object" && typeof t.model === "string" && t.model.trim()) explicitRoutes.push(t.model.trim());
+      const explicitRoutes: Array<{ route: string; location: string; agent?: string }> = [];
+      if (typeof params.model === "string" && params.model.trim()) explicitRoutes.push({ route: params.model.trim(), location: "task", agent: params.agent });
+      for (const [index, t] of (params.tasks ?? []).entries()) {
+        if (typeof t === "object" && typeof t.model === "string" && t.model.trim()) explicitRoutes.push({ route: t.model.trim(), location: `tasks[${index}]`, agent: t.agent ?? params.agent });
       }
-      for (const s of params.chain ?? []) {
-        if (typeof s.model === "string" && s.model.trim()) explicitRoutes.push(s.model.trim());
+      for (const [index, s] of (params.chain ?? []).entries()) {
+        if (typeof s.model === "string" && s.model.trim()) explicitRoutes.push({ route: s.model.trim(), location: `chain[${index}]`, agent: s.agent ?? params.agent });
       }
       const profileModel =
         params.profile && typeof params.profile === "object"
@@ -845,46 +703,45 @@ export default function (pi: ExtensionAPI) {
       const inlineProfileModel = typeof profileModel === "string" ? profileModel.trim() : "";
       const thinkingLevelRaw = (params as { thinking_level?: unknown }).thinking_level;
       const thinkingLevel = typeof thinkingLevelRaw === "string" ? thinkingLevelRaw.trim() : "";
-      if (!modelPolicy.enabled) {
-        if (explicitRoutes.length > 0 || inlineProfileModel || thinkingLevel) {
+      const nodeThinking = [...(params.tasks ?? []), ...(params.chain ?? [])].some((item) => typeof item === "object" && Boolean(item.thinking_level));
+      if (!ultra && !modelPolicy.enabled) {
+        if (explicitRoutes.length > 0 || inlineProfileModel || thinkingLevel || nodeThinking) {
           return {
             content: [{ type: "text", text: "子代理路由选择未开启（设置 → 子代理 → 允许模型自选路由）" }],
             details: {},
             isError: true,
           };
         }
-      } else {
+      } else if (!ultra) {
         const avail = availableModels(ctx as never);
         try {
-          for (const route of explicitRoutes) assertRouteAllowed(route, modelPolicy, avail);
-          if (inlineProfileModel && inlineProfileModel !== "cheap" && inlineProfileModel !== "strong") {
-            assertRouteAllowed(inlineProfileModel, modelPolicy, avail);
+          for (const request of explicitRoutes) {
+            try { assertRouteAllowed(request.route, modelPolicy, avail); } catch (error) {
+              throw routingError(request.location, request.agent, "model", request.route, String((error as Error).message));
+            }
           }
-          if (thinkingLevel) {
-            const targetRaw = explicitRoutes[0] ?? inlineProfileModel;
-            const target = targetRaw ? resolveRouteAlias(targetRaw) : undefined;
-            const model = avail.find((m) => routeOf(m) === target) ?? avail.find((m) => routeOf(m) === (parentModelSpec(ctx.model) ?? ""));
-            if (!model) throw new Error("thinking_level 需要一个可解析的目标模型");
-            assertThinkingLevel(thinkingLevel, model);
+          if (inlineProfileModel && inlineProfileModel !== "cheap" && inlineProfileModel !== "strong") {
+            try { assertRouteAllowed(inlineProfileModel, modelPolicy, avail); } catch (error) {
+              throw routingError("profile", params.agent, "profile.model", inlineProfileModel, String((error as Error).message));
+            }
           }
         } catch (e) {
           return { content: [{ type: "text", text: String((e as Error).message ?? e) }], details: {}, isError: true };
         }
       }
+      const requestedThinking = new Map<string, string>();
       const thinkingOf = (id: string | undefined): { thinkingLevel?: string } => {
-        const level = runningThinkingLevel(registry, id, thinkingLevel);
+        const level = runningThinkingLevel(registry, id, (id ? requestedThinking.get(id) : undefined) ?? thinkingLevel);
         return level ? { thinkingLevel: level } : {};
       };
       const hasChain = (params.chain?.length ?? 0) > 0;
       if (!spawnHasWork(params)) throw new Error("provide `task`, `tasks`, or `chain`");
 
       // 单会话最大子代理数（0/空＝不限）。预占在实际 spawn 前，防止先并发再统计绕过上限。
-      // 流式阶段已经开工的并行任务各自占过名额，这里只补还没启动的。
+      // 所有任务只在完整参数通过授权后启动，统一预占本次名额。
       const sessionKey = sessionSpawnKey(ctx);
-      const earlyBatch = adoptSpawnBatch(toolCallId);
-      const earlyStarted = earlyBatch?.runs.length ?? 0;
       const maxPerSession = sessionCap();
-      const requested = Math.max(0, (hasChain ? params.chain?.length ?? 0 : list.length) - earlyStarted);
+      const requested = hasChain ? params.chain?.length ?? 0 : list.length;
       let slotsLeft = 0;
       // 前台 run 转后台后（detach.ts），还在跑的子代理各自结束时归还名额，这里不能提前一把还掉。
       let keepReservations = false;
@@ -896,7 +753,7 @@ export default function (pi: ExtensionAPI) {
       const transferOne = () => {
         slotsLeft = Math.max(0, slotsLeft - 1);
       };
-      if (maxPerSession > 0 && earlyStarted === 0 && requested > 0) {
+      if (maxPerSession > 0 && requested > 0) {
         const already = sessionSpawnCount.get(sessionKey) ?? 0;
         if (already + requested > maxPerSession) {
           throw new Error(
@@ -906,12 +763,6 @@ export default function (pi: ExtensionAPI) {
         }
         sessionSpawnCount.set(sessionKey, already + requested);
         slotsLeft = requested;
-      } else if (maxPerSession > 0 && requested > 0) {
-        const already = sessionSpawnCount.get(sessionKey) ?? 0;
-        const room = Math.max(0, maxPerSession - already);
-        const take = Math.min(room, requested);
-        if (take > 0) sessionSpawnCount.set(sessionKey, already + take);
-        slotsLeft = take;
       }
 
       try {
@@ -926,7 +777,7 @@ export default function (pi: ExtensionAPI) {
       const discovered = withBuiltinDefaults(discoverAgents(ctx.cwd, agentScope).agents);
       const agentLayer = (
         name: string | undefined,
-      ): { systemPrompt?: string; tools?: string[]; model?: string; backend?: "worker" | "in-process" } => {
+      ): { name?: string; filePath?: string; thinkingLevel?: string; systemPrompt?: string; tools?: string[]; model?: string; backend?: "worker" | "in-process" } => {
         const n = name?.trim();
         if (!n) return {};
         const a = resolveAgent(discovered, n);
@@ -950,7 +801,7 @@ export default function (pi: ExtensionAPI) {
           const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
           throw new Error(`unknown agent "${n}".${hint} Available agents: ${avail}`);
         }
-        return { systemPrompt: a.systemPrompt, tools: a.tools, model: a.model, ...(a.backend ? { backend: a.backend } : {}) };
+        return { name: a.name, filePath: a.filePath, thinkingLevel: a.thinkingLevel, systemPrompt: a.systemPrompt, tools: a.tools, model: a.model, ...(a.backend ? { backend: a.backend } : {}) };
       };
 
       const chainHead = Array.isArray(params.chain)
@@ -975,10 +826,10 @@ export default function (pi: ExtensionAPI) {
         if (hasChain || list.length !== 1) throw new Error("fork 仅支持单任务");
       }
       const seedMessages = params.fork ? completedPrefix(parentLeafMessages(ctx), toolCallId) : [];
-      const profileModel = profileToModel(profile, getConfig);
+      const profileModel = ultra ? undefined : profileToModel(profile, getConfig);
       // 显式 profile 与按命名角色推断的 profile 都要落到 env + registry，否则 UI 一律显示「工作」、
       // 只读档的 SAFETY_READONLY / deny 也不会生效。
-      const profileEnv: Record<string, string> = profileToEnv(profile);
+      const profileEnv: Record<string, string> = { ...profileToEnv(profile), ...routingContextEnv(ultra) };
       // 子代理继承 owner 审批策略，但把 `full` / `workspace` 下调为 `auto`：自主 spawn 的子代理
       // 对用户可见性低，不应连 safety 的危险命令确认 / 受保护路径拦截（④）都跳过。能力硬限
       // （① readonly/deny）与 owner 自身会话不受影响——这里只收紧"模型自动起的子代理"。
@@ -988,6 +839,85 @@ export default function (pi: ExtensionAPI) {
       profileEnv.SUBAGENT_DEPTH = String(childDepth);
       const limits = profileLimits(profile);
       const profileJson = JSON.stringify(profile);
+
+      type Unit = { task: string; model?: string; agent?: string; thinking_level?: string };
+      type Selection = {
+        model?: string;
+        thinkingLevel?: string;
+        layer: ReturnType<typeof agentLayer>;
+        location: string;
+        /** 请求的档位不被目标模型支持、已就近收敛时记下来，回给调用方看。 */
+        thinkingCoerced?: { requested: string; level: string };
+      };
+      const selections = new Map<Unit, Selection>();
+      const units: Unit[] = params.chain?.length ? params.chain : list;
+      const locationOf = (index: number) => params.chain?.length ? `chain[${index}]` : params.task && index === 0 ? "task" : `tasks[${index - (params.task ? 1 : 0)}]`;
+      const selectionOf = (unit: Unit): Selection => {
+        const saved = selections.get(unit);
+        if (saved) return saved;
+        const location = locationOf(units.indexOf(unit));
+        const layer = agentLayer(unit.agent ?? params.agent);
+        const chosen = ultra
+          ? resolveUltraRoute({ model: unit.model, agent: layer.name ?? unit.agent, location, parent: ctx.model, available: availableModels(ctx as never) })
+          : { model: pickSubagentModel(unit.model, layer.model, profileModel, ctx.model), source: layer.model ? `${layer.filePath}: model` : "普通子代理模型配置" };
+        const level = unit.thinking_level?.trim() || thinkingLevel || (!ultra ? layer.thinkingLevel : undefined);
+        let resolved: string | undefined;
+        let coerced: Selection["thinkingCoerced"];
+        if (level) {
+          const model = chosen.model ? catalogModel(chosen.model, availableModels(ctx as never), !ultra) : undefined;
+          const target = model ?? (routeLabel(ctx.model) === chosen.model ? ctx.model : undefined);
+          try {
+            if (!target) throw new Error("thinking_level 需要一个可解析的目标模型");
+            // 调用方（模型）按别家的默认档猜一个本模型没有的档时，就进收敛而不是整体失败：
+            // 会话本身也是收敛的（SDK clampThinkingLevel），子代理没理由比它更严。
+            const pick = resolveThinkingLevel(level, target as never);
+            resolved = pick.level;
+            if (pick.coerced) coerced = { requested: pick.requested, level: pick.level };
+          } catch (error) {
+            const source = unit.thinking_level || thinkingLevel ? "thinking_level" : `${layer.filePath}: thinking_level`;
+            throw routingError(location, layer.name ?? unit.agent, source, level, String((error as Error).message));
+          }
+        }
+        const selected = { model: chosen.model, thinkingLevel: resolved, layer, location, ...(coerced ? { thinkingCoerced: coerced } : {}) };
+        selections.set(unit, selected);
+        return selected;
+      };
+      // Model configuration errors must be found before any Ultra node can create a child.
+      try {
+        for (const unit of units) {
+          try { selectionOf(unit); } catch (error) {
+            if (ultra || unit.thinking_level || thinkingLevel) throw error;
+            // Preserve ordinary per-slot failure semantics for unrelated unknown agents.
+          }
+        }
+      } catch (error) {
+        return { content: [{ type: "text", text: String((error as Error).message) }], details: {}, isError: true };
+      }
+      /**
+       * 收敛过的思考档要如实回给调用方：否则它下一步还会照旧写那个不存在的档。
+       * 没收敛（或调用方没给档）时返回空串，不改动任何输出。
+       */
+      const coercionNote = (): string => {
+        const notes = [...selections.values()]
+          .filter((s) => s.thinkingCoerced)
+          .map(
+            (s) =>
+              `${s.location} 路由 ${s.model ?? "默认"} 没有思考档 ${s.thinkingCoerced!.requested}，已改为 ${s.thinkingCoerced!.level}`,
+          );
+        return notes.length ? `注意：${notes.join("；")}。可用档位见 list_subagent_models。\n\n` : "";
+      };
+
+      const assertCanStart = (unit: Unit, selected: Selection) => {
+        const mode = getAgentMode(projectCwd(ctx), parentSid ?? undefined);
+        const gate = gateToolCall(mode, "spawn_agent", {});
+        if (gate?.block) throw new Error(gate.reason);
+        if (!ultra && getConfig("SUBAGENT_MODE")?.trim() === "disabled") throw new Error("普通子代理已被禁用；停止未启动的任务");
+        if (unit.model && !ultra) {
+          if (!modelPolicy.enabled) throw new Error("普通子代理模型自选授权已撤销；停止未启动的任务");
+          assertRouteAllowed(unit.model, modelPolicy, availableModels(ctx as never));
+        }
+        if (unit.model && ultra) resolveUltraRoute({ model: selected.model, agent: selected.layer.name, location: selected.location, parent: ctx.model, available: availableModels(ctx as never) });
+      };
 
       // Chain mode: run steps sequentially; each step's {previous} is replaced by
       // the prior step's output. Stops at the first failing step.
@@ -1008,11 +938,10 @@ export default function (pi: ExtensionAPI) {
           status: "waiting" | "starting" | "running" | "done" | "error" | "cancelled";
         };
         const previewModel = (step: (typeof steps)[number]): string | undefined => {
-          const named = step.agent ?? params.agent;
           try {
-            return pickSubagentModel(step.model, agentLayer(named).model, profileModel, ctx.model);
+            return selectionOf(step).model;
           } catch {
-            return pickSubagentModel(step.model, undefined, profileModel, ctx.model);
+            return undefined;
           }
         };
         const slots: ChainSlot[] = steps.map((step, i) => ({
@@ -1069,9 +998,24 @@ export default function (pi: ExtensionAPI) {
           const step = steps[i];
           const taskText = step.task.replace(/\{previous\}/g, previous);
           const stepAgent = step.agent ?? params.agent;
-          const layer = agentLayer(stepAgent);
-          const chosenModel = pickSubagentModel(step.model, layer.model, profileModel, ctx.model);
+          const selection = selectionOf(step);
+          try {
+            assertCanStart(step, selection);
+          } catch (error) {
+            const message = String((error as Error).message);
+            slots[i] = { ...slots[i], status: "error", ok: false, error: message, output: "" };
+            publishChain();
+            releaseOne();
+            return {
+              content: [{ type: "text", text: `Chain stopped at step ${i + 1}: ${message}` }],
+              details: { mode: "chain", stoppedAt: i + 1, results: finishedChainResults() },
+              isError: true,
+            };
+          }
+          const layer = selection.layer;
+          const chosenModel = selection.model;
           const id = SubAgentRegistry.genId();
+          if (selection.thinkingLevel) requestedThinking.set(id, selection.thinkingLevel);
           registry.create({
             id,
             task: taskText,
@@ -1099,7 +1043,7 @@ export default function (pi: ExtensionAPI) {
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
-            thinkingLevel: thinkingLevel || undefined,
+            thinkingLevel: selection.thinkingLevel,
             depth: childDepth,
             signal: controller.signal,
             onUpdate: (u) => {
@@ -1151,20 +1095,24 @@ export default function (pi: ExtensionAPI) {
         }
         const last = slots[slots.length - 1];
         return {
-          content: [{ type: "text", text: last?.output || "(no output)" }],
+          content: [{ type: "text", text: `${coercionNote()}${last?.output || "(no output)"}` }],
           details: { mode: "chain", results: finishedChainResults() },
         };
       }
 
       if (action === "spawn") {
         if (list.length !== 1) throw new Error("background spawn 仅支持单任务");
-        const { task, model, agent } = list[0];
-        const layer = agentLayer(agent);
+        const { task } = list[0];
+        const selection = selectionOf(list[0]);
+        assertCanStart(list[0], selection);
+        const layer = selection.layer;
         const id = SubAgentRegistry.genId();
-        const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
+        const chosenModel = selection.model;
+        if (selection.thinkingLevel) requestedThinking.set(id, selection.thinkingLevel);
         const parentPath = parentSessionPath(ctx);
         const workspace = currentWorkspaceContext()?.workspace ?? ctx.cwd;
         const spawnedText =
+          coercionNote() +
           `Background sub-agent started. agentId: ${id}\n` +
           "You will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it.";
         // 不能续聊的后端（CLI、worker 进程里的父会话）：后台跑一次，结束时由管理器发结算通知。
@@ -1184,7 +1132,7 @@ export default function (pi: ExtensionAPI) {
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
             depth: childDepth,
-            thinkingLevel: thinkingLevel || undefined,
+            thinkingLevel: selection.thinkingLevel,
             signal: controller.signal,
             onUpdate: (u) => {
               if (u.sessionPath) registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
@@ -1238,7 +1186,7 @@ export default function (pi: ExtensionAPI) {
               env: profileEnv,
               mcp: profile.mcp,
               timeoutMs: limits.timeoutMs,
-              thinkingLevel: isThinkingLevel(thinkingLevel) ? thinkingLevel : undefined,
+              thinkingLevel: isThinkingLevel(selection.thinkingLevel) ? selection.thinkingLevel : undefined,
               seedMessages,
               depth: childDepth,
               parentActivationId: parentSid && getActivation(parentSid) ? parentSid : undefined,
@@ -1306,10 +1254,13 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (list.length === 1) {
-        const { task, model, agent } = list[0];
-        const layer = agentLayer(agent);
-        const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
+        const { task } = list[0];
+        const selection = selectionOf(list[0]);
+        assertCanStart(list[0], selection);
+        const layer = selection.layer;
+        const chosenModel = selection.model;
         const id = SubAgentRegistry.genId();
+        if (selection.thinkingLevel) requestedThinking.set(id, selection.thinkingLevel);
         registry.create({
           id,
           task,
@@ -1342,7 +1293,7 @@ export default function (pi: ExtensionAPI) {
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
-            thinkingLevel: thinkingLevel || undefined,
+            thinkingLevel: selection.thinkingLevel,
             seedMessages,
             depth: childDepth,
             signal: controller.signal,
@@ -1454,7 +1405,7 @@ export default function (pi: ExtensionAPI) {
           registry.finish(id, { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript });
           writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(task) });
           return {
-            content: [{ type: "text", text: r.output || "(no output)" }],
+            content: [{ type: "text", text: `${coercionNote()}${r.output || "(no output)"}` }],
             details: subagentDetails(id, r, {
               transcript: r.sessionPath ? undefined : tailLines(r.transcript, TRANSCRIPT_CAP),
               ...(chosenModel ? { model: chosenModel } : {}),
@@ -1483,7 +1434,7 @@ export default function (pi: ExtensionAPI) {
         stopReason?: SubagentStopReason;
         model?: string;
         settled?: boolean;
-      }> = list.map((t, i) => earlyBatch?.slots[i] ?? { task: t.task, ok: false, output: "", model: t.model });
+      }> = list.map((t) => ({ task: t.task, ok: false, output: "", model: t.model }));
       // 档案显式 limits.maxConcurrency 仍可收紧。默认一次把本次 tasks 全部拉起来：
       // 固定 4 路会让第 5 个一直排在队列里，会话列表却已经按参数画出 5 行。
       const concurrency = Math.max(1, limits.maxConcurrency ?? list.length);
@@ -1520,18 +1471,16 @@ export default function (pi: ExtensionAPI) {
       };
       const runOne = async (i: number): Promise<void> => {
         const t = list[i];
-        if (maxPerSession > 0 && earlyStarted > 0 && i >= earlyStarted + slotsLeft) {
-          slots[i] = { task: t.task, ok: false, output: "", error: "已达单会话子代理上限", settled: true };
-          publishLive();
-          return;
-        }
         let id: string | undefined;
         let settledAs: Pick<SubagentResult, "stopReason" | "output" | "sessionPath" | "diagnostic"> | undefined;
         try {
-          const layer = agentLayer(t.agent);
+          const selection = selectionOf(t);
+          assertCanStart(t, selection);
+          const layer = selection.layer;
           const subId = SubAgentRegistry.genId();
           id = subId;
-          const chosenModel = pickSubagentModel(t.model, layer.model, profileModel, ctx.model);
+          const chosenModel = selection.model;
+          if (selection.thinkingLevel) requestedThinking.set(subId, selection.thinkingLevel);
           registry.create({
             id: subId,
             task: t.task,
@@ -1553,7 +1502,7 @@ export default function (pi: ExtensionAPI) {
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
-            thinkingLevel: thinkingLevel || undefined,
+            thinkingLevel: selection.thinkingLevel,
             depth: childDepth,
             signal: controller.signal,
             onUpdate: (u) => {
@@ -1602,7 +1551,7 @@ export default function (pi: ExtensionAPI) {
           publishLive();
           settledAs = { stopReason: "error", output: "", diagnostic: msg };
         } finally {
-          if (i >= earlyStarted) releaseOne();
+          releaseOne();
           // 转后台之后靠它发结算通知，上面哪一步出错都要走到。
           if (id && fgAll.isRunning(id)) {
             fgAll.finished(id, settledAs ?? { stopReason: "error", output: "", diagnostic: "sub-agent ended without a result" });
@@ -1611,34 +1560,15 @@ export default function (pi: ExtensionAPI) {
       };
       // 滑动窗口并发：concurrency 个 worker 各自从队列取下一个任务，单个卡住只占一个槽位——不再像
       // 「分批 + Promise.all」那样被批内最慢/卡住的一个拖住，导致后续任务永远不开始。
-      if (earlyBatch) {
-        const abortEarly = () => {
-          for (const controller of earlyBatch.abortors) controller.abort();
-        };
-        if (linkedAll.signal.aborted) abortEarly();
-        else linkedAll.signal.addEventListener("abort", abortEarly, { once: true });
-        // 流式阶段已经开工的那几个：还在跑的记进这次前台 run，结束时经它（转后台后发通知）。
-        for (const slot of earlyBatch.slots) if (slot?.agentId && !slot.settled) fgAll.started(slot.agentId);
-        earlyBatch.onSettled = (slot) => {
-          if (slot.agentId && fgAll.isRunning(slot.agentId)) {
-            fgAll.finished(slot.agentId, {
-              stopReason: (slot.stopReason as SubagentStopReason | undefined) ?? (slot.ok ? "completed" : "error"),
-              output: slot.output,
-              sessionPath: slot.sessionPath,
-              diagnostic: slot.ok ? undefined : slot.error,
-            });
-          }
-        };
-      }
       publishLive();
-      let nextIndex = earlyStarted;
+      let nextIndex = 0;
       const worker = async (): Promise<void> => {
         for (let i = nextIndex++; i < list.length; i = nextIndex++) {
           await runOne(i);
         }
       };
-      const workers = Array.from({ length: Math.min(concurrency, Math.max(0, list.length - earlyStarted)) }, () => worker());
-      const all = Promise.all([...(earlyBatch?.runs ?? []), ...workers]);
+      const workers = Array.from({ length: Math.min(concurrency, list.length) }, () => worker());
+      const all = Promise.all(workers);
       const outcome = await waitOrDetach(all, { enabled: !nestedCall, hasPendingInput: () => steerWaiting(ctx) });
       // 那一刻其实都已经结束、只差收尾的，照常等完返回。
       const moving = outcome.detached && slots.some((s) => !s.settled || fgAll.isRunning(s.agentId));
@@ -1669,7 +1599,7 @@ export default function (pi: ExtensionAPI) {
         .join("\n\n---\n\n");
 
       return {
-        content: [{ type: "text", text: body }],
+        content: [{ type: "text", text: `${coercionNote()}${body}` }],
         details: {
           mode: "parallel",
           count: slots.length,

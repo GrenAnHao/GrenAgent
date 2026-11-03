@@ -24,7 +24,7 @@ it('indexes through AgentData jobs and serves the same SDK graph to an authentic
     stage: (id, stage, processed, total) => runtime.recordJobStage(id, stage, processed, total),
   });
   const runtime = new AgentDataRuntime({
-    dataPath: join(root, 'agent-data.db'), validateProject: async () => workspace,
+    dataPath: join(root, 'agent-data.db'),
     jobRunners: { 'codegraph.sync': jobs },
     codeRetrieval: {
       projects: () => code.projects(), status: async (path) => ({ ...await code.status(path) }),

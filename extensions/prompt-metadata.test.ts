@@ -34,6 +34,13 @@ function collectTools(): Registered[] {
 }
 
 describe("official tool prompt metadata", () => {
+  it("does not register removed long-term memory tools", () => {
+    const names = collectTools().map((tool) => tool.name);
+    expect(names).not.toContain("memory_search");
+    expect(names).not.toContain("conversation_search");
+    expect(names).toEqual(expect.arrayContaining(["code_explore", "wiki_search"]));
+  });
+
   it("gives every statically registered tool a promptSnippet", () => {
     const tools = collectTools();
     expect(tools.map((tool) => tool.name).length).toBeGreaterThan(20);
@@ -42,12 +49,12 @@ describe("official tool prompt metadata", () => {
 
   it("gives each AgentData family one primary tool with named promptGuidelines", () => {
     const tools = collectTools();
-    const primaries = tools.filter((tool) => tool.name === "code_explore" || tool.name === "wiki_search" || tool.name === "memory_search");
-    expect(primaries).toHaveLength(3);
+    const primaries = tools.filter((tool) => tool.name === "code_explore" || tool.name === "wiki_search");
+    expect(primaries).toHaveLength(2);
     for (const tool of primaries) {
       expect(tool.promptGuidelines?.length).toBeGreaterThan(0);
       for (const guideline of tool.promptGuidelines ?? []) {
-        expect(guideline).toMatch(/code_[a-z0-9_*]+|wiki_[a-z]+|memory_search|conversation_search/);
+        expect(guideline).toMatch(/code_[a-z0-9_*]+|wiki_[a-z]+/);
         expect(guideline).not.toMatch(/\bthis tool\b/i);
       }
     }

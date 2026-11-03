@@ -18,6 +18,58 @@ export function cutMessagesAfterEntry(
 type Assistant = Extract<ChatMessage, { kind: 'assistant' }>;
 type Tool = Extract<ChatMessage, { kind: 'tool' }>;
 
+function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'tool' && b.kind === 'tool') return a.toolCallId === b.toolCallId;
+  if (a.kind === 'assistant' && b.kind === 'assistant') {
+    return a.timestamp != null && b.timestamp != null ? a.timestamp === b.timestamp : a.text === b.text && a.thinking === b.thinking;
+  }
+  if (a.kind === 'user' && b.kind === 'user') {
+    return a.timestamp != null && b.timestamp != null ? a.timestamp === b.timestamp : a.text === b.text;
+  }
+  return false;
+}
+
+/** todo 的成功结果不能被较长 UI 历史遮住；按调用身份更新，缺失时按后端相邻消息插回原位置。 */
+export function reconcileTodoResults(base: ChatMessage[], backend: ChatMessage[]): ChatMessage[] {
+  let out = base;
+  for (let i = 0; i < backend.length; i++) {
+    const message = backend[i];
+    if (message.kind !== 'tool' || message.toolName.toLowerCase() !== 'todo' || message.status === 'running') continue;
+    const at = out.findIndex((item) => sameMessage(item, message));
+    if (at >= 0) {
+      const current = out[at] as Tool;
+      if (current.result === message.result && current.status === message.status) continue;
+      if (out === base) out = [...base];
+      out[at] = { ...current, ...message, id: current.id, argsComplete: true, interrupted: undefined, args: message.args && typeof message.args === 'object' && Object.keys(message.args).length ? message.args : current.args };
+      // 两条开始帧都缺失时，回执到达顺序可能不是源顺序；完整快照的后续锚点可纠正这个顺序。
+      for (let next = i + 1; next < backend.length; next++) {
+        const anchor = out.findIndex((item) => sameMessage(item, backend[next]));
+        if (anchor < 0) continue;
+        if (anchor < at) {
+          const [moved] = out.splice(at, 1);
+          out.splice(anchor, 0, moved);
+        }
+        break;
+      }
+      continue;
+    }
+    let insertAt = -1;
+    for (let next = i + 1; next < backend.length && insertAt < 0; next++) {
+      insertAt = out.findIndex((item) => sameMessage(item, backend[next]));
+    }
+    if (insertAt < 0) {
+      for (let previous = i - 1; previous >= 0; previous--) {
+        const anchor = out.findIndex((item) => sameMessage(item, backend[previous]));
+        if (anchor >= 0) { insertAt = anchor + 1; break; }
+      }
+    }
+    if (out === base) out = [...base];
+    out.splice(insertAt < 0 ? out.length : insertAt, 0, message);
+  }
+  return out;
+}
+
 /**
  * 把只靠实时事件攒出来的尾巴接到后端快照后面。
  * 快照里已有的条目原位更新（助手按 pi timestamp、工具按 toolCallId 对上），
@@ -29,9 +81,24 @@ export function mergeLiveTail(base: ChatMessage[], tail: ChatMessage[]): ChatMes
   const out = [...base];
   const assistantAt = new Map<number, number>();
   const toolAt = new Map<string, number>();
+  // Custom timestamps differ slightly between live emission and persisted projection.
+  // Match occurrences once rather than treating every repeated send as the first one.
+  const noticeAt = new Map<string, number[]>();
+  const pairedNoticeTypes = new Set(['agent-message', 'job-done', 'subagent-settled']);
+  const noticeKey = (m: Extract<ChatMessage, { kind: 'notice' }>) => JSON.stringify([m.customType, m.content]);
+  const noticeOwner = (m: Extract<ChatMessage, { kind: 'notice' }>) => {
+    const owner = m.details?.jobId ?? m.details?.childId ?? m.details?.from;
+    return typeof owner === 'string' ? owner : '';
+  };
   out.forEach((m, i) => {
     if (m.kind === 'assistant' && m.timestamp != null) assistantAt.set(m.timestamp, i);
     else if (m.kind === 'tool') toolAt.set(m.toolCallId, i);
+    else if (m.kind === 'notice' && pairedNoticeTypes.has(m.customType)) {
+      const key = noticeKey(m);
+      const indexes = noticeAt.get(key) ?? [];
+      indexes.push(i);
+      noticeAt.set(key, indexes);
+    }
   });
   for (const m of tail) {
     if (m.kind === 'assistant') {
@@ -63,6 +130,21 @@ export function mergeLiveTail(base: ChatMessage[], tail: ChatMessage[]): ChatMes
       continue;
     }
     if (m.kind === 'notice') {
+      if (pairedNoticeTypes.has(m.customType)) {
+        const candidates = noticeAt.get(noticeKey(m));
+        const owner = noticeOwner(m);
+        const match = candidates?.findIndex((index) => {
+          const previous = out[index] as Extract<ChatMessage, { kind: 'notice' }>;
+          return !owner || !noticeOwner(previous) || noticeOwner(previous) === owner;
+        }) ?? -1;
+        const at = match >= 0 ? candidates!.splice(match, 1)[0] : undefined;
+        if (at === undefined) out.push(m);
+        else {
+          const current = out[at] as Extract<ChatMessage, { kind: 'notice' }>;
+          out[at] = { ...current, ...m, id: current.id, details: m.details ?? current.details };
+        }
+        continue;
+      }
       const seen = out.some((x) => x.kind === 'notice' && x.customType === m.customType && x.content === m.content);
       if (!seen) out.push(m);
       continue;

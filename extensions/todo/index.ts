@@ -19,7 +19,9 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", async (_event, ctx) => reconstruct(ctx));
   pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));
-  pi.on("context", async (event) => {
+  pi.on("context", async (event, ctx) => {
+    // 派生给模型的收尾与下一次工具执行使用同一份分支状态；恢复时也走这个规则。
+    reconstruct(ctx);
     const messages = closeTodosInContext(event.messages);
     return messages ? { messages } : undefined;
   });
@@ -37,7 +39,8 @@ export default function (pi: ExtensionAPI) {
       "Do not use the todo tool for trivial single-step tasks that need no tracking.",
     ],
     parameters: TodoParams,
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      if (signal?.aborted) throw new Error("Todo update aborted");
       const result = applyTodo(state, params);
       if (!result.error) state = result.state;
       const details: TodoDetails = {

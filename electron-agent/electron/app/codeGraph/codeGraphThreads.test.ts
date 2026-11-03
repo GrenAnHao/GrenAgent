@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { autoSyncEnabled, CodeGraphThreads, defaultReaderCount, type CodeGraphThreadsOptions, type WorkerHandle } from './codeGraphThreads';
 import type { WorkerMessage, WorkerRequest, WorkerRole } from './workerProtocol';
@@ -245,7 +248,7 @@ describe('CodeGraphThreads', () => {
     await expect(threads.call(W('a'), 'codegraph_search', { query: 'x' })).rejects.toThrow(/CODEGRAPH_WORKER_CRASH_LOOP/);
     expect(of('read')).toHaveLength(3);
     clock = 31_000;
-    void threads.call(W('a'), 'codegraph_search', { query: 'x' });
+    void threads.call(W('a'), 'codegraph_search', { query: 'x' }).catch(() => undefined);
     await vi.waitFor(() => expect(of('read')).toHaveLength(4));
   });
 
@@ -394,5 +397,79 @@ describe('CodeGraphThreads auto sync', () => {
     of('write')[0].crash();
     await query(threads, 'a');
     await vi.waitFor(() => expect(of('write')[1]?.ops()).toEqual(['watch', 'plan', 'runSync']));
+  });
+
+  it('rejects a read immediately when the queue is full', async () => {
+    const { threads, of } = setup((request) => (request.op === 'call' ? new Promise(() => {}) : undefined), 1, () => 0, { maxQueuedReads: 0 });
+    const hanging = threads.call(W('a'), 'codegraph_search', { query: 'x' });
+    void hanging.catch(() => undefined);
+    await vi.waitFor(() => expect(of('read')[0]?.received).toHaveLength(1));
+    await expect(threads.call(W('b'), 'codegraph_search', { query: 'y' })).rejects.toThrow(/CODEGRAPH_BUSY/);
+    expect(of('read').flatMap((worker) => worker.received.filter((request) => request.op === 'call'))).toHaveLength(1);
+  });
+
+  it('shares one execution for the same read and times out a read that never returns', async () => {
+    const gate = deferred();
+    const timers: Array<{ fn: () => void; ms: number; cancelled: boolean }> = [];
+    const { threads, of } = setup((request) => {
+      if (request.op !== 'call') return undefined;
+      return request.args.query === 'slow' ? new Promise(() => {}) : gate.promise;
+    }, 2, () => 0, {
+      readTimeoutMs: 50,
+      setTimer: (fn, ms) => { const timer = { fn, ms, cancelled: false }; timers.push(timer); return timer; },
+      clearTimer: (handle) => { (handle as { cancelled: boolean }).cancelled = true; },
+    });
+    const first = threads.call(W('a'), 'codegraph_search', { query: 'x' });
+    const second = threads.call(W('a'), 'codegraph_search', { query: 'x' });
+    await vi.waitFor(() => expect(of('read').flatMap((worker) => worker.received.filter((request) => request.op === 'call'))).toHaveLength(1));
+    gate.resolve(result('same'));
+    await expect(first).resolves.toMatchObject({ content: [{ text: 'same' }] });
+    await expect(second).resolves.toMatchObject({ content: [{ text: 'same' }] });
+
+    const hung = threads.call(W('a'), 'codegraph_search', { query: 'slow' });
+    await vi.waitFor(() => expect(of('read').flatMap((worker) => worker.received.filter((request) => request.op === 'call'))).toHaveLength(2));
+    timers.filter((timer) => !timer.cancelled && timer.ms === 50).forEach((timer) => { timer.cancelled = true; timer.fn(); });
+    await expect(hung).rejects.toThrow(/CODEGRAPH_TIMEOUT/);
+    expect(of('read').some((worker) => worker.terminate.mock.calls.length > 0)).toBe(true);
+  });
+
+  it('catch-up syncs a registered workspace after startup, and a moved HEAD waits out the settle window', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cg-state-'));
+    const file = join(dir, 'codegraph-state.json');
+    writeFileSync(file, JSON.stringify({ version: 1, workspaces: [{ workspace: W('a'), touchedAt: 1 }] }));
+    const timers: Array<{ fn: () => void; ms: number; cancelled: boolean }> = [];
+    let head = 'refs/heads/main\naaa';
+    const fire = (ms: number) => {
+      for (const timer of [...timers]) {
+        if (!timer.cancelled && timer.ms === ms) { timer.cancelled = true; timer.fn(); }
+      }
+    };
+    try {
+      const { threads, of } = setup((request) => (request.op === 'runSync' ? { mode: 'incremental', filesChanged: 0 } : undefined), 1, () => 5_000, {
+        autoSync: true,
+        isIndexed: () => true,
+        statePath: file,
+        startupDelayMs: 10_000,
+        pollIntervalMs: 1_000,
+        branchSwitchSettleMs: 3_000,
+        readHead: () => head,
+        setTimer: (fn, ms) => { const timer = { fn, ms, cancelled: false }; timers.push(timer); return timer; },
+        clearTimer: (handle) => { (handle as { cancelled: boolean }).cancelled = true; },
+      });
+      fire(10_000);
+      await vi.waitFor(() => expect(of('write')[0]?.ops()).toEqual(['plan', 'runSync']));
+      fire(1_000);
+      await vi.waitFor(() => expect(of('write')[0].ops().filter((op) => op === 'runSync')).toHaveLength(2));
+      await threads.call(W('a'), 'codegraph_search', { query: 'x' });
+      await vi.waitFor(() => expect(of('write')[0].ops()).toContain('watch'));
+      const before = of('write')[0].ops().filter((op) => op === 'runSync').length;
+      head = 'refs/heads/topic\nbbb';
+      of('write')[0].send({ type: 'changed', workspace: W('a'), paths: ['src/a.ts'] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(of('write')[0].ops().filter((op) => op === 'runSync')).toHaveLength(before);
+      fire(3_000);
+      await vi.waitFor(() => expect(of('write')[0].ops().filter((op) => op === 'runSync')).toHaveLength(before + 1));
+      await expect(threads.status(W('a'))).resolves.toMatchObject({ phase: 'idle' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

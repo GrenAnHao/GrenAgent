@@ -8,7 +8,7 @@ import { parse } from 'yaml';
 const require = createRequire(import.meta.url);
 const script = require('../../scripts/collect-third-party-licenses.cjs') as {
   collect: (opts?: { out?: string; report?: string }) => { outDir: string; count: number; missing: number };
-  buildInventory: () => Array<{ name: string; version: string; license: string; files: string[] }>;
+  buildInventory: () => Array<{ name: string; version: string; license: string; files: string[]; directory: string }>;
   packedExclusions: () => string[];
   renderReport: (inventory: unknown, generatedBy: string) => string;
 };
@@ -32,12 +32,15 @@ describe('collect-third-party-licenses', () => {
     expect(fromConfig).toContain('node_modules/@splinetool/**');
   });
 
-  it('lists every production dependency from the lockfile, dev ones excluded', () => {
+  it('lists installed production dependencies and the vendored RepoWiki, dev ones excluded', () => {
     const inventory = script.buildInventory();
     const names = new Set(inventory.map((entry) => entry.name));
     expect(names.has('react')).toBe(true);
     expect(names.has('mermaid')).toBe(true);
     expect(names.has('elkjs')).toBe(true);
+    for (const name of ['diff', 'ignore', 'fflate', 'dompurify', 'react-markdown', 'remark-gfm', 'shiki', 'remark-parse', 'unified', 'repo-wiki']) {
+      expect(names.has(name)).toBe(true);
+    }
     // @splinetool 只由 @lobehub/ui 的依赖声明拉进来，本项目不分发它。
     expect(names.has('@splinetool/runtime')).toBe(false);
     // devDependencies 不进包。
@@ -64,8 +67,19 @@ describe('collect-third-party-licenses', () => {
     expect(readFileSync(join(out, '@fontsource/inter', 'LICENSE'), 'utf8')).toContain('SIL Open Font License');
 
     // 双许可包两个文件都在（dompurify 是 MPL-2.0 OR Apache-2.0，按 Apache 履行）。
-    expect(existsSync(join(out, 'dompurify', 'LICENSE'))).toBe(true);
-    expect(existsSync(join(out, 'dompurify', 'LICENSE-MPL'))).toBe(true);
+    for (const version of ['3.4.14', '3.4.17']) {
+      expect(existsSync(join(out, 'dompurify', version, 'LICENSE'))).toBe(true);
+      expect(existsSync(join(out, 'dompurify', version, 'LICENSE-MPL'))).toBe(true);
+    }
+
+    const vendoredJsonRepair = script.buildInventory().find((entry) => entry.name === 'jsonrepair-vendored');
+    expect(vendoredJsonRepair).toMatchObject({ version: '3.15.0', license: 'ISC', files: ['LICENSE.md'] });
+    const jsonRepairLicense = readFileSync(join(root, 'electron/wikiService/reference/qoder-0.5.1/jsonrepair-3.15.0/LICENSE.md'), 'utf8');
+    expect(readFileSync(join(out, vendoredJsonRepair!.directory, 'LICENSE.md'), 'utf8')).toBe(jsonRepairLicense);
+    expect(jsonRepairLicense).toContain('Copyright (c) 2020-2026 by Jos de Jong');
+
+    expect(readFileSync(join(out, 'repo-wiki', 'LICENSE'), 'utf8')).toContain('Copyright (c) 2026 Yufeng He');
+    expect(readFileSync(join(out, 'repo-wiki', 'THIRD_PARTY_NOTICES.md'), 'utf8')).toContain('he-yufeng/RepoWiki');
 
     // 本仓库的许可与第三方来源说明也一并给出。
     expect(readFileSync(join(out, 'LICENSE.txt'), 'utf8')).toContain('PolyForm Noncommercial License 1.0.0');
@@ -84,7 +98,7 @@ describe('collect-third-party-licenses', () => {
     expect(placeholder).toContain('上游 npm 包内未附带许可文本');
   });
 
-  it('keeps the committed dependency report in sync with the lockfile', () => {
+  it('keeps the committed dependency report in sync with the installed production graph', () => {
     const expected = script.renderReport(script.buildInventory(), 'electron-agent/scripts/collect-third-party-licenses.cjs');
     const committed = readFileSync(join(repoRoot, 'docs/third-party-dependencies.md'), 'utf8');
     // 依赖变更后跑 `node scripts/collect-third-party-licenses.cjs --report=../docs/third-party-dependencies.md`。

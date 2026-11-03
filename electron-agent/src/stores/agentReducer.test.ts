@@ -146,7 +146,7 @@ describe('applyEvent', () => {
       isError: false,
       result: { details: { todos: [{ id: 1, text: '注册', status: 'completed' }], nextId: 2 } },
     } as AgentEvent);
-    expect(s.todoListFinished).toBe(false);
+    expect(s.todoListFinished).toBe(true);
     s = applyEvent(s, {
       type: 'agent_end',
       messages: [

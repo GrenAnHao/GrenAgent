@@ -1,0 +1,23 @@
+{
+  "source": "Read-only SQLite inspection before app exit and first cleanup run; no record content was exported.",
+  "path": "C:/Users/rxstudio/AppData/Roaming/electron-agent/agent-data.db",
+  "bytes": 1206931456,
+  "counts": {
+    "memories": 1507,
+    "memory_captures": 185,
+    "memory_layer_schedules": 1,
+    "service_tasks": 1058,
+    "threads": 609,
+    "turns": 1590,
+    "items": 91165,
+    "tool_audit": 95104,
+    "permission_rules": 17,
+    "plugin_state": 6,
+    "agent_jobs": 5,
+    "agent_audit": 8739,
+    "wiki_libraries": 2,
+    "wiki_sources": 2
+  },
+  "memoryTasks": 1057,
+  "firstRunVerification": "All table-count preservation assertions passed after migration; integrity_check returned ok. Reporting stopped because deepStrictEqual distinguished SQLite's null-prototype row from an object literal. The assertion was corrected to compare its scalar value, then cleanup was rerun to verify idempotence."
+}

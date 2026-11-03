@@ -1,0 +1,194 @@
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/pipeline.ts b/electron-agent/electron/agentData/knowledgeKernel/pipeline.ts
+index f080fb2f..3a73737d 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/pipeline.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/pipeline.ts
+@@ -31,6 +31,14 @@ function validateDefinitions(items: Definition[], allowMissing = false): void {
+  const byId=new Map(items.map(d=>[d.id,d])); const visiting=new Set<string>(), visited=new Set<string>();
+  const visit=(id:string):void=>{if(visiting.has(id)) throw new Error('DEPENDENCY_CYCLE');if(visited.has(id)) return;const d=byId.get(id);if(!d){if(!allowMissing)throw new Error('MISSING_DEPENDENCY');return;}visiting.add(id);d.dependencies.forEach(visit);visiting.delete(id);visited.add(id);};items.forEach(d=>visit(d.id));
+ }
++/** A structural ancestor is not a page prerequisite; use its own prerequisites instead. */
++function leafDependencies(definition:Definition,byId:Map<string,Definition>,descendants:(id:string)=>string[]):string[] {
++ const resolve=(dep:string):string[]=>{
++  if(definition.id.startsWith(`${dep}/`)) {const ancestor=byId.get(dep);if(!ancestor)throw new Error('MISSING_DEPENDENCY');return ancestor.dependencies.flatMap(resolve);}
++  const leaves=descendants(dep);if(!leaves.length)throw new Error('MISSING_DEPENDENCY');return leaves;
++ };
++ return [...new Set(definition.dependencies.flatMap(resolve))];
++}
+ /** Advance only after the caller has validated and durably acknowledged the item. */
+ export function advanceStageGraph(original: StageGraph, id: string, payload: Record<string, unknown>): StageGraph {
+  const graph=structuredClone(original); const current=graph.nodes.find(n=>n.id===id);if(!current)throw new Error('UNKNOWN_STAGE_ITEM');
+@@ -55,7 +63,8 @@ export function advanceStageGraph(original: StageGraph, id: string, payload: Rec
+   graph.nodes.push(...newItems.map(d=>node(`catalogue:${d.id}`,'catalogue',[id],graph,{definition:d,depth})));
+   if(graph.nodes.filter(n=>n.phase==='catalogue').every(n=>graph.completed.includes(n.id))){
+    const descendants=(id:string):string[]=>{if(graph.leaves.includes(id))return [id];const children=graph.nodes.filter(n=>n.phase==='catalogue'&&n.deps.includes(`catalogue:${id}`));if(!children.length)throw new Error('MISSING_DEPENDENCY');return children.flatMap(child=>descendants(child.definition!.id));};
+-   const leafDefs=graph.definitions.filter(d=>graph.leaves.includes(d.id)).map(d=>({...d,dependencies:[...new Set(d.dependencies.flatMap(descendants))]}));validateDefinitions(leafDefs);graph.total=leafDefs.length;
++   validateDefinitions(graph.definitions);const byId=new Map(graph.definitions.map(d=>[d.id,d]));
++   const leafDefs=graph.definitions.filter(d=>graph.leaves.includes(d.id)).map(d=>({...d,dependencies:leafDependencies(d,byId,descendants)}));validateDefinitions(leafDefs);graph.total=leafDefs.length;
+    graph.nodes.push(...leafDefs.map(d=>node(`generate:${d.id}`,'generate',[`catalogue:${d.id}`,...d.dependencies.map(x=>`generate:${x}`)],graph,{definition:d,kind:'page'})));
+    graph.nodes.push(node('validate','validate',leafDefs.map(d=>`generate:${d.id}`),graph));
+   }
+@@ -72,8 +81,9 @@ export function buildCatalogueArtifact(graph: StageGraph): CatalogueArtifact {
+  if(graph.version!==2 || !graph.nodes.some(n=>n.id==='catalogue:complete') || graph.nodes.some(n=>n.phase==='catalogue' && n.id!=='catalogue:complete' && !graph.completed.includes(n.id))) throw new Error('CATALOGUE_INCOMPLETE');
+  const tree=[...graph.definitions].sort((a,b)=>a.id.localeCompare(b.id));
+  const descendants=(id:string):string[]=>graph.leaves.includes(id)?[id]:graph.leaves.filter(leaf=>leaf.startsWith(`${id}/`)).sort();
+- const pages=tree.filter(d=>graph.leaves.includes(d.id)).map(d=>({...d,dependencies:[...new Set(d.dependencies.flatMap(dep=>{const leaves=descendants(dep);if(!leaves.length)throw new Error('MISSING_DEPENDENCY');return leaves;}))].sort()}));
+- validateDefinitions(tree);validateDefinitions(pages);
++ validateDefinitions(tree);const byId=new Map(tree.map(d=>[d.id,d]));
++ const pages=tree.filter(d=>graph.leaves.includes(d.id)).map(d=>({...d,dependencies:leafDependencies(d,byId,descendants).sort()}));
++ validateDefinitions(pages);
+  const requiredPageIds=pages.map(page=>page.id);const catalogueHash=digest(canonical({tree,pages,requiredPageIds}));return {tree,pages,requiredPageIds,catalogueHash};
+ }
+ function advanceWikiV2(graph:StageGraph,current:StageNode,payload:Record<string,unknown>):StageGraph {
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/wikiPipeline.test.ts b/electron-agent/electron/agentData/knowledgeKernel/wikiPipeline.test.ts
+index 6aa8ce71..387c1c20 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/wikiPipeline.test.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/wikiPipeline.test.ts
+@@ -139,3 +139,38 @@ it('v2 separates legal root and complete logical IDs from catalogue control node
+  for(const id of ['complete','normal/nested','root']){g=advanceStageGraph(g,`catalogue:item:${id}`,{children:[]});if(id!=='root')expect(g.nodes.some(n=>n.id==='catalogue:complete')).toBe(false);}
+  expect(selectReadyItems(g,[]).map(n=>n.id)).toEqual(['catalogue:complete']);const artifact=buildCatalogueArtifact(g);g=advanceStageGraph(g,'catalogue:complete',artifact as any);expect(g.nodes.filter(n=>n.phase==='generate').map(n=>n.id)).toEqual(['generate:complete','generate:normal/nested','generate:root']);
+ });
++
++it.each([1,2])('v%i resolves a leaf structural-ancestor dependency to external prerequisites, not siblings',version=>{
++ const def=(id:string,dependencies:string[]=[],expand?:boolean)=>({id,title:id,goal:id,dependencies,...(expand===undefined?{}:{expand})});
++ let g=buildWikiStageGraph({inputHash:'s',...(version===2?{version:2 as const}:{})});
++ g=advanceStageGraph(g,'prepare',{});if(version===2)g=advanceStageGraph(g,'readme',{});g=advanceStageGraph(g,'overview',{});
++ const roots=[def('architecture'),def('modules/notes',['architecture']),def('outside',['modules/notes'])];g=advanceStageGraph(g,'plan',{items:roots});
++ if(version===2)g=advanceStageGraph(g,'catalogue:root',{children:roots});
++ const id=(value:string)=>version===2?`catalogue:item:${value}`:`catalogue:${value}`;
++ const leaves=(children:ReturnType<typeof def>[])=>version===2?children.map(child=>({...child,expand:false})):children;
++ g=advanceStageGraph(g,id('architecture'),{children:[]});
++ g=advanceStageGraph(g,id('modules/notes'),{children:leaves([def('method',['modules/notes']),def('references',['method']),def('templates',['method']),def('scripts',['method'])])});
++ g=advanceStageGraph(g,id('outside'),{children:[]});
++ if(version===1)for(const leaf of ['method','references','templates','scripts'])g=advanceStageGraph(g,id(`modules/notes/${leaf}`),{children:[]});
++ if(version===2){const artifact=buildCatalogueArtifact(g);g=advanceStageGraph(g,'catalogue:complete',artifact as any);}
++ const page=(name:string)=>g.nodes.find(n=>n.id===`generate:${name}`)!;
++ expect(page('modules/notes/method').definition!.dependencies).toEqual(['architecture']);
++ expect(page('modules/notes/references').definition!.dependencies).toEqual(['architecture','modules/notes/method']);
++ expect([...page('outside').definition!.dependencies].sort()).toEqual(['modules/notes/method','modules/notes/references','modules/notes/scripts','modules/notes/templates']);
++});
++
++it.each([1,2])('v%i still rejects a real cycle between sibling pages',version=>{
++ const def=(id:string,dependencies:string[]=[])=>({id,title:id,goal:id,dependencies});let g=buildWikiStageGraph({inputHash:'s',...(version===2?{version:2 as const}:{})});
++ g=advanceStageGraph(g,'prepare',{});if(version===2)g=advanceStageGraph(g,'readme',{});g=advanceStageGraph(g,'overview',{});g=advanceStageGraph(g,'plan',{items:[def('group')]});
++ if(version===2)g=advanceStageGraph(g,'catalogue:root',{children:[def('group')]});
++ expect(()=>advanceStageGraph(g,version===2?'catalogue:item:group':'catalogue:group',{children:[def('a',['b']),def('b',['a'])]})).toThrow('DEPENDENCY_CYCLE');
++});
++it.each([1,2])('v%i still rejects real cycles introduced by cross-group expansion',version=>{
++ const def=(id:string,dependencies:string[]=[],expand?:boolean)=>({id,title:id,goal:id,dependencies,...(expand===undefined?{}:{expand})});let g=buildWikiStageGraph({inputHash:'s',...(version===2?{version:2 as const}:{})});
++ g=advanceStageGraph(g,'prepare',{});if(version===2)g=advanceStageGraph(g,'readme',{});g=advanceStageGraph(g,'overview',{});const groups=[def('a'),def('b')];g=advanceStageGraph(g,'plan',{items:groups});if(version===2)g=advanceStageGraph(g,'catalogue:root',{children:groups});
++ const node=(id:string)=>version===2?`catalogue:item:${id}`:`catalogue:${id}`;
++ g=advanceStageGraph(g,node('a'),{children:[def('alpha',['b'],version===2?false:undefined)]});
++ g=advanceStageGraph(g,node('b'),{children:[def('beta',['a'],version===2?false:undefined)]});
++ if(version===2)expect(()=>buildCatalogueArtifact(g)).toThrow('DEPENDENCY_CYCLE');
++ else {g=advanceStageGraph(g,node('a/alpha'),{children:[]});expect(()=>advanceStageGraph(g,node('b/beta'),{children:[]})).toThrow('DEPENDENCY_CYCLE');}
++});
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/coordinator.ts b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+index d7bff33b..3dd1653d 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/coordinator.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+@@ -38,7 +38,7 @@ export class KnowledgeKernelCoordinator {
+  private async view(job:Job,read?:ReadProject):Promise<RepoWikiKnowledgeSnapshot>{const m=job.metadata?.repoWiki;if(!m)throw new Error('KNOWLEDGE_METADATA_REQUIRED');const p=read??await this.options.project.read(m.key.projectId,m.key.domain);const snapshot=projectKnowledgeSnapshot(job,this.content(p,m.counts.prepared,m.counts.planned),this.admissions.get(p.key.projectId+':'+p.key.domain)??{state:'preparing',planToken:p.planToken});const active=this.activeItems.get(job.id);if(snapshot.run&&active?.size){const items=[...active.values()].map(n=>({phase:n.phase,itemId:n.id,title:n.definition?.title??n.id}));snapshot.run.activeItems=items;snapshot.run.currentItem=items[0].title;}return snapshot;}
+  private async admission(p:ReadProject):Promise<RepoWikiKnowledgeSnapshot['admission']>{let admission:RepoWikiKnowledgeSnapshot['admission'];try{const binding=await this.options.bindModel(`admission:${p.key.projectId}:${p.key.domain}`);admission={state:'ready',modelIdentity:knowledgeModelIdentity(binding),modelDisplayName:binding.model.name,planToken:p.planToken};}catch{admission={state:'blocked',reasonCode:'MODEL_UNAVAILABLE',message:'Model is unavailable',planToken:p.planToken};}this.admissions.set(`${p.key.projectId}:${p.key.domain}`,admission);return admission;}
+  async prepare(projectId:string,domain:KnowledgeDomain):Promise<RepoWikiKnowledgeSnapshot>{const p=await this.options.project.read(projectId,domain);return {version:1,key:p.key,content:this.content(p),run:null,action:{state:'idle'},admission:await this.admission(p)};}
+- async start(request:StartKnowledgeTask):Promise<RepoWikiKnowledgeSnapshot>{if(this.closed)throw new Error('COORDINATOR_CLOSED');const p=await this.options.project.read(request.projectId,request.domain);if(p.language!==request.language||p.planToken!==request.expectedPlanToken)throw new Error('PLAN_CHANGED');const binding=await this.options.bindModel(`admission:${request.requestId}`);if(knowledgeModelIdentity(binding)!==request.expectedModelIdentity)throw new Error('MODEL_CHANGED');this.admissions.set(p.key.projectId+':'+p.key.domain,{state:'ready',modelIdentity:knowledgeModelIdentity(binding),modelDisplayName:binding.model.name,planToken:p.planToken});const job=this.options.store.createTask({workspace:p.root,key:p.key,request,pipelineConfigHash:this.pipeline,...(this.pipeline==='knowledge-kernel-qoder-v2'?{executionPolicy:DEFAULT_KNOWLEDGE_EXECUTION_POLICY}:{})});if(job.state==='pending')this.schedule(job.id);return this.view(job,p);}
++ async start(request:StartKnowledgeTask,repairRevision?:number):Promise<RepoWikiKnowledgeSnapshot>{if(this.closed)throw new Error('COORDINATOR_CLOSED');const p=await this.options.project.read(request.projectId,request.domain);if(p.language!==request.language||p.planToken!==request.expectedPlanToken)throw new Error('PLAN_CHANGED');const binding=await this.options.bindModel(`admission:${request.requestId}`);if(knowledgeModelIdentity(binding)!==request.expectedModelIdentity)throw new Error('MODEL_CHANGED');this.admissions.set(p.key.projectId+':'+p.key.domain,{state:'ready',modelIdentity:knowledgeModelIdentity(binding),modelDisplayName:binding.model.name,planToken:p.planToken});const job=this.options.store.createTask({workspace:p.root,key:p.key,request,pipelineConfigHash:this.pipeline,...(repairRevision!==undefined?{repairRevision}:{}),...(this.pipeline==='knowledge-kernel-qoder-v2'?{executionPolicy:DEFAULT_KNOWLEDGE_EXECUTION_POLICY}:{})});if(job.state==='pending')this.schedule(job.id);return this.view(job,p);}
+  async snapshot(projectId:string,domain:KnowledgeDomain,taskId?:string):Promise<RepoWikiKnowledgeSnapshot>{const p=await this.options.project.read(projectId,domain);const admission=await this.admission(p);const job=taskId?this.options.store.getTask(taskId):this.options.store.jobs.list().find(j=>{const k=j.metadata?.repoWiki?.key;return k?.projectId===projectId&&k.domain===domain&&k.branch===p.key.branch&&k.language===p.key.language;});if(job?.metadata?.repoWiki){if(hashKnowledgePayload(job.metadata.repoWiki.key)!==hashKnowledgePayload(p.key))throw new Error('SOURCE_IDENTITY_CHANGED');return this.view(job,p);}return {version:1,key:p.key,content:this.content(p),run:null,action:{state:'idle'},admission};}
+  async check(projectId:string,domain:KnowledgeDomain):Promise<RepoWikiKnowledgeSnapshot>{const p=await this.options.project.prepare(projectId,domain);this.remember(p);const job=this.options.store.jobs.list().find(j=>{const k=j.metadata?.repoWiki?.key;return k&&hashKnowledgePayload(k)===hashKnowledgePayload(p.key);});if(job)return this.view(job,p);return {version:1,key:p.key,content:this.content(p),run:null,action:{state:'idle'},admission:this.admissions.get(p.key.projectId+':'+p.key.domain)??{state:'preparing',planToken:p.planToken}};}
+  async snapshotForTask(job:Job):Promise<RepoWikiKnowledgeSnapshot>{try{return await this.view(job);}catch{return projectKnowledgeSnapshot(job,undefined,{state:'blocked',reasonCode:'PROJECT_UNAVAILABLE',message:'Project is unavailable'});}}
+@@ -121,7 +121,7 @@ export class KnowledgeKernelCoordinator {
+  private updateCounts(taskId:string,fence:ExecutionFence,graph:StageGraph):void{const store=this.options.store;const j=store.getTask(taskId)!;const counts=j.metadata!.repoWiki!.counts;const pages=store.listItems(taskId).filter(x=>x.phase==='generate');store.setState(taskId,fence,'running',{counts:{...counts,planned:graph.total??0,prepared:pages.filter(x=>x.state==='prepared').length,failed:pages.filter(x=>x.state==='failed').length,blocked:pages.filter(x=>x.state==='blocked').length}});}
+  async act(input:KnowledgeActionInput & {confirmExternal?:boolean;expectedModelIdentity?:string;expectedPlanToken?:string}):Promise<RepoWikiKnowledgeSnapshot>{const job=this.options.store.getTask(input.taskId);const m=job?.metadata?.repoWiki;if(!job||!m)throw new Error('TASK_NOT_FOUND');if(input.expectedRevision>m.revision)throw new Error('REVISION_CONFLICT');const stopping=input.action==='pause'||input.action==='cancel';if(stopping){const prior=this.options.store.readControlRequest(job.id,input.requestId);if(prior){if(prior.action!==input.action||prior.cause!=='user')throw new Error('IDEMPOTENCY_CONFLICT');return this.view(job);}}if(m.control?.requestId===input.requestId && m.control.action===input.action)return this.view(job);if(!stopping&&m.revision!==input.expectedRevision)throw new Error('REVISION_CONFLICT');if(stopping){const capabilities=projectKnowledgeSnapshot(job).run!.capabilities;if(!capabilities[input.action as 'pause'|'cancel'])throw new Error('TASK_ACTION_UNAVAILABLE');const updated=this.options.store.requestControl(job.id,{requestId:input.requestId,action:input.action as 'pause'|'cancel',cause:'user'});const running=this.running.get(job.id);if(running){running.controller.abort();if(m.fence)await this.options.abortStage(job.id,m.fence);await running.promise;}return this.view(this.options.store.getTask(updated.id)!);}
+   if(input.action==='resume'){if(job.state!=='paused')throw new Error('TASK_RESUME_UNAVAILABLE');this.schedule(job.id,true);return this.view(job);}
+-  if(input.action==='repair'){if(!['failed','cancelled'].includes(job.state)||!input.confirmExternal||!input.expectedModelIdentity)throw new Error('CONFIRMATION_REQUIRED');const p=await this.options.project.read(m.key.projectId,m.key.domain);return this.start({version:1,requestId:input.requestId,projectId:m.key.projectId,domain:m.key.domain,language:m.key.language,intent:'repair',confirmExternal:true,expectedModelIdentity:input.expectedModelIdentity,expectedPlanToken:p.planToken,retryOf:job.id});}
++  if(input.action==='repair'){if(!['failed','cancelled'].includes(job.state)||!input.confirmExternal||!input.expectedModelIdentity)throw new Error('CONFIRMATION_REQUIRED');const p=await this.options.project.read(m.key.projectId,m.key.domain);if(input.expectedPlanToken!==undefined&&(input.expectedPlanToken!==p.planToken||input.expectedPlanToken!==m.planHash))throw new Error('PLAN_CHANGED');return this.start({version:1,requestId:input.requestId,projectId:m.key.projectId,domain:m.key.domain,language:m.key.language,intent:'repair',confirmExternal:true,expectedModelIdentity:input.expectedModelIdentity,expectedPlanToken:input.expectedPlanToken??p.planToken,retryOf:job.id},input.expectedPlanToken!==undefined?input.expectedRevision:undefined);}
+   if(input.action==='reanalyse'){if(!['blocked','paused'].includes(job.state)||!input.confirmExternal||!input.expectedModelIdentity||!input.expectedPlanToken)throw new Error('CONFIRMATION_REQUIRED');const p=await this.options.project.read(m.key.projectId,m.key.domain);if(hashKnowledgePayload(p.key)!==hashKnowledgePayload(m.key))throw new Error('SOURCE_IDENTITY_CHANGED');if(p.planToken!==input.expectedPlanToken)throw new Error('PLAN_CHANGED');const binding=await this.options.bindModel(`admission:${input.requestId}`);if(knowledgeModelIdentity(binding)!==input.expectedModelIdentity)throw new Error('MODEL_CHANGED');const latest=this.options.store.getTask(job.id)!;if(latest.metadata!.repoWiki!.revision!==input.expectedRevision)throw new Error('REVISION_CONFLICT');const stopped=this.options.store.requestControl(job.id,{requestId:`supersede:${input.requestId}`,action:'cancel',cause:'user'});const running=this.running.get(job.id);if(running){running.controller.abort();if(m.fence)await this.options.abortStage(job.id,m.fence);await running.promise;}if(this.options.store.getTask(stopped.id)?.state!=='cancelled')throw new Error('TASK_STILL_RUNNING');return this.start({version:1,requestId:input.requestId,projectId:m.key.projectId,domain:m.key.domain,language:m.key.language,intent:p.content.publishedCount?'update':'generate',confirmExternal:true,expectedModelIdentity:input.expectedModelIdentity,expectedPlanToken:input.expectedPlanToken,retryOf:job.id});}
+   throw new Error('INVALID_KNOWLEDGE_ACTION');}
+  async drafts(taskId:string){const checkpoints=this.options.store.listCheckpoints(taskId);const titles=new Map<string,string>();for(const item of checkpoints){if(item.phase!=='plan'&&item.phase!=='catalogue')continue;const payload=item.payload as {items?:Array<{id:string;title:string}>;children?:Array<{id:string;title:string}>};for(const definition of payload.items??payload.children??[])if(typeof definition.id==='string'&&typeof definition.title==='string')titles.set(definition.id,definition.title);}const items=checkpoints.filter(x=>x.phase==='generate').map(x=>{const payload=x.payload as {markdown?:string;sources?:unknown[]};const definitionId=x.itemId.replace(/^(?:generate|card):/,'');return {id:x.itemId,title:titles.get(definitionId)??(definitionId==='repository'?'Repository':definitionId),markdown:payload.markdown??'',sources:payload.sources??[]};});return {taskId,items};}
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/coordinator.test.ts b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+index fbfc82c5..07349145 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/coordinator.test.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+@@ -204,3 +204,16 @@ it('v2 rebuilds its completion manifest when repair follows cancellation after v
+  try{const first=await c.start({version:1,requestId:'initial',projectId:p.id,domain:'wiki',language:'en',intent:'generate',confirmExternal:true,expectedModelIdentity:knowledgeModelIdentity(binding),expectedPlanToken:prepared.planToken});await viWait(()=>entered);const old=store.getTask(first.run!.taskId)!;expect(store.readCheckpoint({taskId:old.id,phase:'validate',itemId:'validate'}).state).toBe('prepared');const cancel=c.act({version:1,requestId:'cancel',taskId:old.id,expectedRevision:old.metadata!.repoWiki!.revision,action:'cancel'});await viWait(()=>store.getTask(old.id)?.metadata?.repoWiki?.control?.action==='cancel');release();await cancel;expect(store.getTask(old.id)?.state).toBe('cancelled');expect(real.read(p.id,'wiki').content.publishedCount).toBe(0);const before=[...calls];hold=false;const cancelled=store.getTask(old.id)!;const repair=await c.act({version:1,requestId:'repair',taskId:old.id,expectedRevision:cancelled.metadata!.repoWiki!.revision,action:'repair',confirmExternal:true,expectedModelIdentity:knowledgeModelIdentity(binding)});await viWait(()=>{const j=store.getTask(repair.run!.taskId);if(j?.state==='failed'||j?.state==='blocked')throw new Error(JSON.stringify(j));return j?.state==='completed';});expect(calls).toEqual(before);expect(real.read(p.id,'wiki').content.publishedCount).toBe(1);const manifest=store.readCheckpoint({taskId:repair.run!.taskId,phase:'validate',itemId:'validate'}).payload as {sourceSnapshotId:string};expect(manifest.sourceSnapshotId.startsWith(`${repair.run!.taskId}:`)).toBe(true);
+  }finally{release();await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
+ },30000);
++
++it.each(['plan','revision'] as const)('rejects confirmed repair when its %s changes before task creation',async changed=>{
++ const base=mkdtempSync(join(tmpdir(),'repair-guard-')),root=join(base,'src');mkdirSync(root);writeFileSync(join(root,'readme.md'),'# project\n');
++ const engine=new WorkspaceEngine(join(base,'data')),db=new DatabaseSync(':memory:'),store=new KnowledgeBuildStore(db,{controllerEpoch:'epoch'}),project=new KnowledgeProjectPort(engine),p=engine.create_project(root,'en'),read=project.read(p.id,'wiki');
++ const parent=store.createTask({workspace:root,key:read.key,request:{version:1,requestId:'parent-guard',projectId:p.id,domain:'wiki',language:'en',intent:'generate',confirmExternal:true,expectedModelIdentity:knowledgeModelIdentity(binding),expectedPlanToken:read.planToken},pipelineConfigHash:'pipeline'});
++ const fence=store.claim('guard',parent.id,'owner',0);store.setState(parent.id,fence,'failed');const original=store.getTask(parent.id)!;const revision=original.metadata!.repoWiki!.revision;
++ if(changed==='plan')vi.spyOn(project,'read').mockImplementation(()=>({...read,planToken:'changed-plan'}));
++ let executions=0;const c=new KnowledgeKernelCoordinator({store,project,bindModel:async()=>{if(changed==='revision')store.setState(parent.id,fence,'failed');return binding;},executeStage:async()=>{executions++;throw new Error('unexpected execution');},abortStage:async()=>{}});
++ try{
++  await expect(c.act({version:1,requestId:'confirmed-repair',taskId:parent.id,expectedRevision:revision,action:'repair',confirmExternal:true,expectedModelIdentity:knowledgeModelIdentity(binding),expectedPlanToken:read.planToken})).rejects.toThrow(changed==='plan'?'PLAN_CHANGED':'REVISION_CONFLICT');
++  expect(store.jobs.list()).toHaveLength(1);expect(executions).toBe(0);
++ }finally{await c.close();engine.close();db.close();rmSync(base,{recursive:true,force:true});}
++});
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/store.ts b/electron-agent/electron/agentData/knowledgeKernel/store.ts
+index 1415dbba..9c1e9f99 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/store.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/store.ts
+@@ -30,7 +30,7 @@ export function migrateKnowledgeKernel(db: DatabaseSync): void {
+   if (!columns.some(column => column.name === 'stage_kind')) db.exec('ALTER TABLE knowledge_build_items ADD COLUMN stage_kind TEXT');
+ }
+ export const hashKnowledgePayload = (payload: unknown): string => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+-export interface CreateKnowledgeTask { workspace: string; key: KnowledgeKey; request: StartKnowledgeTask; pipelineConfigHash: string; budgets?: KnowledgeBudgets; executionPolicy?: KnowledgeExecutionPolicyV2 }
++export interface CreateKnowledgeTask { workspace: string; key: KnowledgeKey; request: StartKnowledgeTask; pipelineConfigHash: string; budgets?: KnowledgeBudgets; executionPolicy?: KnowledgeExecutionPolicyV2; repairRevision?: number }
+ export interface CheckpointRef { taskId: string; phase: KnowledgePhase; itemId: string }
+ export interface ItemAck extends CheckpointRef { attempt: number; revision: number; outputHash: string }
+ export interface VerifiedArtifact extends ItemAck { state: string; inputHash: string; payload: unknown; evidence: StageExecutionResult['evidence']; dependencies: StageExecutionResult['dependencies']; sourceTaskId?: string }
+@@ -76,6 +76,10 @@ export class KnowledgeBuildStore {
+       if (all.some(j => ['pending','running','paused','blocked'].includes(j.state) && identity(j.metadata!.repoWiki!.key) === identity(input.key))) throw new Error('TARGET_ACTIVE');
+       const origin = request.retryOf ? this.task(request.retryOf) : undefined;
+       if (origin && identity(origin.metadata.repoWiki.key) !== identity(input.key)) throw new Error('REPAIR_IDENTITY_MISMATCH');
++      if (input.repairRevision !== undefined) {
++        if (!origin || request.intent !== 'repair' || !['failed','cancelled'].includes(origin.state) || origin.metadata.repoWiki.revision !== input.repairRevision) throw new Error('REVISION_CONFLICT');
++        if (origin.metadata.repoWiki.planHash !== request.expectedPlanToken) throw new Error('PLAN_CHANGED');
++      }
+       const repairOrigin = request.intent === 'repair' ? origin : undefined;
+       const metadata = parseKnowledgeTaskMetadata({ version: 1, requestId: request.requestId, key: input.key, intent: request.intent, revision: 0, phase: 'prepare', pipelineConfigHash: repairOrigin?.metadata.repoWiki.pipelineConfigHash ?? input.pipelineConfigHash, ...(repairOrigin ? (repairOrigin.metadata.repoWiki.executionPolicy ? { executionPolicy: structuredClone(repairOrigin.metadata.repoWiki.executionPolicy) } : {}) : (input.executionPolicy ? { executionPolicy: structuredClone(input.executionPolicy) } : {})), modelIdentity: request.expectedModelIdentity, planHash: request.expectedPlanToken, budgets: structuredClone(repairOrigin?.metadata.repoWiki.budgets ?? input.budgets ?? DEFAULT_KNOWLEDGE_BUDGETS), resumePolicy: 'auto', counts: { planned: 0, prepared: 0, failed: 0, blocked: 0, published: 0 } });
+       return this.jobs.create({ kind: 'repoWiki.generate', workspace: input.workspace, metadata: { repoWiki: metadata, retryOf: request.retryOf, target: { type: 'repoWiki', id: input.workspace, language: request.language }, payload: { projectId: request.projectId, language: request.language, target: request.domain, force: request.intent === 'regenerate', confirmExternal: true } } });
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/store.test.ts b/electron-agent/electron/agentData/knowledgeKernel/store.test.ts
+index a8632485..79af0e14 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/store.test.ts
++++ b/electron-agent/electron/agentData/knowledgeKernel/store.test.ts
+@@ -76,3 +76,15 @@ it('rejects a model purpose that conflicts with its domain and stage identity',a
+  expect(()=>store.beginAttempt(job.id,'plan','plan',fence,'x',{stageKind:'page'})).toThrow('STAGE_KIND_MISMATCH');
+  }finally{storage.close();}
+ });
++it('atomically checks the confirmed repair origin revision, state and plan',()=>{
++ const {storage,store}=fixture();try{
++  const parent=create(store),fence=store.claim('scope',parent.id,'owner',0);store.setState(parent.id,fence,'failed');store.releaseLease(parent.id,fence);
++  const original=store.getTask(parent.id)!;const meta=original.metadata!.repoWiki!;
++  const request={version:1 as const,requestId:'guarded-repair',projectId:meta.key.projectId,domain:meta.key.domain,language:meta.key.language,intent:'repair' as const,confirmExternal:true as const,expectedModelIdentity:'model',expectedPlanToken:meta.planHash!,retryOf:parent.id};
++  const args={workspace:'/repo',key:meta.key,request,pipelineConfigHash:'pipeline',repairRevision:meta.revision};const before=store.jobs.list().length;
++  expect(()=>store.createTask({...args,repairRevision:meta.revision+1})).toThrow('REVISION_CONFLICT');
++  expect(()=>store.createTask({...args,request:{...request,expectedPlanToken:'changed'}})).toThrow('PLAN_CHANGED');
++  expect(store.jobs.list()).toHaveLength(before);
++  const repair=store.createTask(args);expect(repair.metadata?.retryOf).toBe(parent.id);expect(repair.metadata?.repoWiki?.planHash).toBe(meta.planHash);
++ }finally{storage.close();}
++});
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/knowledgeProjection.ts b/electron-agent/src/features/repoWiki/knowledgeProjection.ts
+index 5bb6223e..a5c99340 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/knowledgeProjection.ts
++++ b/electron-agent/src/features/repoWiki/knowledgeProjection.ts
+@@ -39,6 +39,7 @@ const errorTexts: Record<string, string> = {
+   INVALID_MODEL_JSON: '模型没有按要求返回 JSON（已自动要求重发一次仍不合格），请重试。',
+   BUDGET_EXHAUSTED: '这一项用完了单项预算（模型轮数、工具次数或 token），已完成的部分已保留。点「重新分析」会用新的预算继续。',
+   CATALOGUE_LIMIT: '目录达到当前任务的节点、层级或规划项上限，已完成的部分已保留。请在 Wiki 计划里缩小范围后重新分析。',
++  DEPENDENCY_CYCLE: '目录页面的依赖形成循环，请调整 Wiki 计划中的依赖后重新分析。',
+   MODEL_CHANGED: '知识模型配置已变化，请重新确认后生成。',
+ };
+ /** Kernel errors carry stable codes; translate the known ones and keep readable server text otherwise. */
+diff --git a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/knowledgeProjection.test.ts b/electron-agent/src/features/repoWiki/knowledgeProjection.test.ts
+index fa101a51..fa1c098e 100644
+--- a/.agents/evidence/2026-11-02-repo-wiki-generation-validation-repair/cycle-preimage/knowledgeProjection.test.ts
++++ b/electron-agent/src/features/repoWiki/knowledgeProjection.test.ts
+@@ -72,3 +72,6 @@ describe('knowledge projection', () => {
+   });
+   it('keeps prepared-only content as an unpublished draft', () => { const snapshot = knowledgeFixture('failed'); snapshot.content = { state: 'partial', publishedCount: 0, preparedCount: 2, expectedCount: 3 }; expect(projectKnowledge(snapshot)).toMatchObject({ hasDraft: true, statusLabel: '部分完成' }); });
+ });
++it('explains deterministic catalogue cycles without an unconditional retry suggestion',()=>{
++ expect(knowledgeErrorText({code:'DEPENDENCY_CYCLE',message:'DEPENDENCY_CYCLE'})).toBe('目录页面的依赖形成循环，请调整 Wiki 计划中的依赖后重新分析。');
++});

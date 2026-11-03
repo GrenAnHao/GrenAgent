@@ -1,0 +1,15 @@
+{
+  "statusMs": 11.427100000000337,
+  "files": 1000,
+  "bytesPerFile": 98331,
+  "sourceIdentity": "694c72cb01ed81c40bd46f72882346582b9f9c5459a236939adcc855b28cf775",
+  "sourceSnapshotFile": "task-5-source-snapshot.json",
+  "health": "ok",
+  "runStageWhenRead": "scanning",
+  "finalStatus": "canceled",
+  "modelCalls": 0,
+  "pid": 42960,
+  "explicitScanTimeoutMs": 1,
+  "timedOutScanDidNotPublishIdentity": true,
+  "retryScanMs": 1096.1682
+}

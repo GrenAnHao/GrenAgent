@@ -1,0 +1,98 @@
+[
+  {
+    "project": "cli",
+    "version": "1.4.0",
+    "realRoot": "D:\\OneDrive\\Project Files\\Pi\\cli\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_d4b154627b8a3796aa750263124a9dcd\\node_modules\\@earendil-works\\pi-coding-agent",
+    "shellSha256": "592e7d3bda71c617f93218d977a5c229d0849347ab23246f0a459e67c81627af",
+    "diffSha256": "9bccf8c6394b8d6aa8782c10884c876890de9d2e4c90725cff61789f81b781f7",
+    "shellInode": 1407374885796632,
+    "displayDiff": {
+      "diff": "    ...\n  6 line-6\n  7 line-7\n  8 line-8\n  9 line-9\n 10 line-10\n-11 line-11\n+11 changed-11\n 12 line-12\n 13 line-13\n 14 line-14\n 15 line-15\n 16 line-16\n    ...",
+      "firstChangedLine": 11
+    },
+    "unifiedPatch": "--- sample.txt\n+++ sample.txt\n@@ -7,9 +7,9 @@\n line-7\n line-8\n line-9\n line-10\n-line-11\n+changed-11\n line-12\n line-13\n line-14\n line-15\n",
+    "minimalPathExecution": {
+      "bash": {
+        "shell": "D:\\Kits\\Git\\bin\\bash.exe",
+        "args": [
+          "-c"
+        ]
+      },
+      "powerShell": {
+        "shell": "C:\\Users\\rxstudio\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe",
+        "args": [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command"
+        ]
+      },
+      "sentinel": "pi-sdk-1.4-patch-ok"
+    }
+  },
+  {
+    "project": "extensions",
+    "version": "1.4.0",
+    "realRoot": "D:\\OneDrive\\Project Files\\Pi\\extensions\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_17c08a6b516064de546a78eac99040d6\\node_modules\\@earendil-works\\pi-coding-agent",
+    "shellSha256": "592e7d3bda71c617f93218d977a5c229d0849347ab23246f0a459e67c81627af",
+    "diffSha256": "9bccf8c6394b8d6aa8782c10884c876890de9d2e4c90725cff61789f81b781f7",
+    "shellInode": 1407374885796632,
+    "displayDiff": {
+      "diff": "    ...\n  6 line-6\n  7 line-7\n  8 line-8\n  9 line-9\n 10 line-10\n-11 line-11\n+11 changed-11\n 12 line-12\n 13 line-13\n 14 line-14\n 15 line-15\n 16 line-16\n    ...",
+      "firstChangedLine": 11
+    },
+    "unifiedPatch": "--- sample.txt\n+++ sample.txt\n@@ -7,9 +7,9 @@\n line-7\n line-8\n line-9\n line-10\n-line-11\n+changed-11\n line-12\n line-13\n line-14\n line-15\n",
+    "minimalPathExecution": {
+      "bash": {
+        "shell": "D:\\Kits\\Git\\bin\\bash.exe",
+        "args": [
+          "-c"
+        ]
+      },
+      "powerShell": {
+        "shell": "C:\\Users\\rxstudio\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe",
+        "args": [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command"
+        ]
+      },
+      "sentinel": "pi-sdk-1.4-patch-ok"
+    }
+  },
+  {
+    "project": "electron-agent",
+    "version": "1.4.0",
+    "realRoot": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_d419fad67b15cfecb14d39de4240c678\\node_modules\\@earendil-works\\pi-coding-agent",
+    "shellSha256": "592e7d3bda71c617f93218d977a5c229d0849347ab23246f0a459e67c81627af",
+    "diffSha256": "9bccf8c6394b8d6aa8782c10884c876890de9d2e4c90725cff61789f81b781f7",
+    "shellInode": 1407374885796632,
+    "displayDiff": {
+      "diff": "    ...\n  6 line-6\n  7 line-7\n  8 line-8\n  9 line-9\n 10 line-10\n-11 line-11\n+11 changed-11\n 12 line-12\n 13 line-13\n 14 line-14\n 15 line-15\n 16 line-16\n    ...",
+      "firstChangedLine": 11
+    },
+    "unifiedPatch": "--- sample.txt\n+++ sample.txt\n@@ -7,9 +7,9 @@\n line-7\n line-8\n line-9\n line-10\n-line-11\n+changed-11\n line-12\n line-13\n line-14\n line-15\n",
+    "minimalPathExecution": {
+      "bash": {
+        "shell": "D:\\Kits\\Git\\bin\\bash.exe",
+        "args": [
+          "-c"
+        ]
+      },
+      "powerShell": {
+        "shell": "C:\\Users\\rxstudio\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe",
+        "args": [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command"
+        ]
+      },
+      "sentinel": "pi-sdk-1.4-patch-ok"
+    }
+  }
+]

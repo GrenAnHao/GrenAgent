@@ -1,10 +1,10 @@
 import type { ResourceNavigation, ResourceRef, TaskRef, TaskStatus } from '../../../electron/agentData/operationsContracts';
 
 export const taskKey = (ref: TaskRef) => `${ref.source}:${ref.id}`;
-export const taskStatusLabels: Record<TaskStatus, string> = { pending: '等待中', queued: '排队中', running: '运行中', blocked: '受阻', completed: '已完成', failed: '失败', cancelled: '已取消' };
+export const taskStatusLabels: Record<TaskStatus, string> = { pending: '等待中', queued: '排队中', running: '运行中', paused: '已暂停', blocked: '受阻', completed: '已完成', failed: '失败', cancelled: '已取消' };
 /** antd Tag 的预设色名，供任务表格与详情共用，避免两处各写一份状态配色。 */
 export const taskStatusColors: Record<TaskStatus, string> = {
-  pending: 'default', queued: 'default', running: 'processing', blocked: 'warning',
+  pending: 'default', queued: 'default', running: 'processing', paused: 'default', blocked: 'warning',
   completed: 'success', failed: 'error', cancelled: 'default',
 };
 export const isTerminalTask = (status: TaskStatus) => status === 'completed' || status === 'failed' || status === 'cancelled';
@@ -30,8 +30,8 @@ function workspaceBasename(path: string): string {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 }
 export function resourceNavigation(resource: ResourceRef): ResourceNavigation {
+  if (resource.type === 'repoWiki') return { view: 'repoWiki', workspace: resource.id, ...(resource.language ? { language: resource.language } : {}) };
   if (resource.type === 'wiki') return { view: 'wiki', kbId: resource.id };
-  if (resource.type === 'memory') return { view: 'memory', id: resource.id };
   return { view: 'code', workspace: resource.id };
 }
 

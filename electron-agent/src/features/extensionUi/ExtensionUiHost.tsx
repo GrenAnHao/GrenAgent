@@ -11,6 +11,11 @@ import { useUiPromptStore } from '../../stores/uiPromptStore';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { parseAskUserPayload } from '../../components/QuestionSelector/answers';
 import { isApprovalPolicy, useApprovalStore } from '../../stores/approvalStore';
+import { useSessionPreferencesStore } from '../../stores/sessionPreferencesStore';
+import {
+  pickDefinedPreferences as parseSessionPreferences,
+  SESSION_PREFERENCE_FIELDS,
+} from '../../lib/sessionPreferences';
 import { useWechatStatusStore, type WechatStatus } from '../../stores/wechatStatusStore';
 import { useImMessagesStore, type ImConversation } from '../../stores/imMessagesStore';
 import { settleVisualOnTurnEnd, useVisualStore, type VisualOwner } from '../../stores/visualStore';
@@ -100,12 +105,40 @@ export function ExtensionUiHost() {
         const text = typeof r.statusText === 'string' ? r.statusText : undefined;
         if (r.statusKey === 'agent-mode') {
           // 模式按会话：带 sessionPath 的记到那份会话；没有会话身份的（启动早期）当项目默认。
-          if (isAgentMode(r.statusText)) {
-            if (e.sessionPath) useModeStore.getState().setSessionMode(e.sessionPath, r.statusText);
-            else useModeStore.getState().setMode(e.workspace, r.statusText);
+          const mode = parseSessionPreferences({ mode: r.statusText }).mode;
+          if (isAgentMode(mode)) {
+            if (e.sessionPath) {
+              useModeStore.getState().setSessionMode(e.sessionPath, mode);
+              // 同一份值投影到会话偏好缓存：新控件读快照，Plan 确认这类自动切模式也必须即时反映。
+              // status 没有 revision，所以只改 mode 这一个字段，不整份替换。
+              useSessionPreferencesStore.getState().applyStatus(e.sessionPath, 'mode', mode);
+            } else {
+              useModeStore.getState().setMode(e.workspace, mode);
+            }
           }
         } else if (r.statusKey === 'agent-mode-default') {
-          if (isAgentMode(r.statusText)) useModeStore.getState().setMode(e.workspace, r.statusText);
+          const mode = parseSessionPreferences({ mode: r.statusText }).mode;
+          if (isAgentMode(mode)) {
+            useModeStore.getState().setMode(e.workspace, mode);
+            // 默认推送只改项目默认，不动任何会话。
+            useSessionPreferencesStore.getState().applyDefaultStatus(e.workspace, 'mode', mode);
+          }
+        } else if (r.statusKey === 'session-preferences') {
+          // 后端每次提交偏好后广播整份快照（含 revision）：别的窗口/别的视图的修改要即时同步。
+          // 按 e.sessionPath 落；applyServer 会丢弃比自己更旧的版本，并跳过本字段有在途点击的项。
+          if (e.sessionPath && typeof r.statusText === 'string') {
+            try {
+              const parsedRaw = JSON.parse(r.statusText) as unknown;
+              const snapshot = parseSessionPreferences(parsedRaw);
+              // 只有真的带字段/版本才当快照应用；空对象不当成「权威空快照」去覆盖本地。
+              const hasAnyField = SESSION_PREFERENCE_FIELDS.some((field) => snapshot[field] !== undefined);
+              if (hasAnyField) {
+                useSessionPreferencesStore.getState().applyServer(e.sessionPath, snapshot);
+              }
+            } catch {
+              /* 畸形载荷忽略，不当成空快照去覆盖本地 */
+            }
+          }
         } else if (r.statusKey === 'plan-mode') {
           usePlanModeStore.getState().setStatus(text);
         } else if (r.statusKey === 'agent-plan') {
@@ -147,11 +180,18 @@ export function ExtensionUiHost() {
           }
         } else if (r.statusKey === 'approval-policy') {
           if (isApprovalPolicy(r.statusText)) {
-            if (e.sessionPath) useApprovalStore.getState().setSessionLevel(e.sessionPath, r.statusText);
-            else useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+            if (e.sessionPath) {
+              useApprovalStore.getState().setSessionLevel(e.sessionPath, r.statusText);
+              useSessionPreferencesStore.getState().applyStatus(e.sessionPath, 'approval', r.statusText);
+            } else {
+              useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+            }
           }
         } else if (r.statusKey === 'approval-policy-default') {
-          if (isApprovalPolicy(r.statusText)) useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+          if (isApprovalPolicy(r.statusText)) {
+            useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+            useSessionPreferencesStore.getState().applyDefaultStatus(e.workspace, 'approval', r.statusText);
+          }
         } else if (r.statusKey === 'ui-prompt') {
           if (backgroundSessionPathOf(e)) return;
           agentStoreRegistry.get(e.workspace)?.useStore.setState({

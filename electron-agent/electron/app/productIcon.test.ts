@@ -1,24 +1,31 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import { parse } from 'yaml';
 
 const root = resolve(__dirname, '../..');
-const PI_PATH = 'M40 56 H200 V84 H40 Z M74 84 H102 V190 H74 Z M150 84 H178 V190 H150 Z';
+const originalIcon = readFileSync(join(root, 'brand', 'source', 'grenagent-icon.svg'), 'utf8');
+const originalLogo = readFileSync(join(root, 'brand', 'source', 'grenagent-logo.svg'), 'utf8');
+const artwork = (svg: string) => svg.slice(svg.indexOf('>') + 1, svg.lastIndexOf('</svg>')).replace(/<title>[\s\S]*?<\/title>/g, '').trim();
 
 describe('product icon source', () => {
-  it('keeps the 1024 SVG mark, colors and squircle radius', () => {
+  it('keeps the approved G geometry on a neutral black and white application tile', () => {
     const svg = readFileSync(join(root, 'build', 'icon.svg'), 'utf8');
     expect(svg).toContain('viewBox="0 0 1024 1024"');
-    expect(svg).toContain('rx="320"');
-    expect(svg).toContain('#0b0d12');
-    expect(svg).toContain('#e6e8ec');
-    expect(svg).toContain(PI_PATH);
+    expect(svg).toContain('#171819');
+    expect(svg).toContain('#ffffff');
+    expect(svg).toContain('viewBox="0 0 352 352"');
+    expect(svg).toContain(artwork(originalIcon));
   });
 
-  it('uses the same pi path as PiBrandLogo', () => {
-    const logo = readFileSync(join(root, 'src', 'components', 'PiBrandLogo.tsx'), 'utf8');
-    expect(logo).toContain(PI_PATH);
+  it('embeds the complete approved outlined logo in the cold-start brand block', () => {
+    const html = readFileSync(join(root, 'index.html'), 'utf8');
+    const brandBlock = html.split('<!-- grenagent-brand:start -->')[1]?.split('<!-- grenagent-brand:end -->')[0];
+    expect(brandBlock).toBeTruthy();
+    expect(brandBlock).toContain('viewBox="0 0 1514 378"');
+    expect(brandBlock).toContain(artwork(originalLogo));
+    expect(brandBlock).toContain('aria-hidden="true"');
   });
 });
 
@@ -34,6 +41,7 @@ describe('product icon packaging', () => {
     };
     expect(config.directories?.buildResources).toBe('build');
     expect(config.files).toContain('build/icon.ico');
+    expect(config.files).toContain('build/icon.png');
     expect(config.win?.icon).toBe('build/icon.ico');
     expect(config.mac?.icon).toBe('build/icon.icns');
     expect(config.linux?.icon).toBe('build/icon.png');
@@ -73,6 +81,20 @@ describe('product icon artifacts', () => {
     for (const size of [16, 24, 32, 48, 64, 128, 256]) {
       expect(sizes, `missing ${size}`).toContain(size);
     }
+  });
+
+  it('ships the G raster generated from the committed application SVG', async () => {
+    const expected = await sharp(Buffer.from(readFileSync(join(root, 'build', 'icon.svg'), 'utf8'))).ensureAlpha().raw().toBuffer();
+    const png = sharp(readFileSync(join(root, 'build', 'icon.png')));
+    expect(await png.metadata()).toMatchObject({ format: 'png', width: 1024, height: 1024 });
+    expect((await png.ensureAlpha().raw().toBuffer()).equals(expected)).toBe(true);
+  });
+
+  it('keeps a 16/32 favicon and a valid ICNS container', () => {
+    expect(icoSizes(readFileSync(join(root, 'public', 'favicon.ico')))).toEqual([16, 32]);
+    const icns = readFileSync(join(root, 'build', 'icon.icns'));
+    expect(icns.toString('ascii', 0, 4)).toBe('icns');
+    expect(icns.readUInt32BE(4)).toBe(icns.length);
   });
 });
 

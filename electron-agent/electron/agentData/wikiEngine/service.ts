@@ -29,7 +29,7 @@ import {
   withWriteDb,
   type WikiIndexPage,
 } from './indexDb';
-import { createLlmClient, type CompleteFn } from './llm';
+import { createLlmClient, type CompleteFn, type CompleteOptions, type KnowledgeCompletionInput } from './llm';
 import { createLogger } from './logger';
 import { timeSync } from '../methodTiming';
 
@@ -387,15 +387,46 @@ export class WikiService {
   private readonly root: string;
   private readonly db: DatabaseSync;
   private readonly complete: CompleteFn;
+  private readonly describeModel?: () => Promise<string>;
   private readonly cancelled = new Set<string>();
   private readonly buildQueues = new Map<string, Promise<void>>();
   private readonly globalLlmLimit = createRefreshingLimit(getGlobalLlmConcurrency);
 
-  constructor(opts: { root: string; db: DatabaseSync; complete: CompleteFn }) {
+  constructor(opts: { root: string; db: DatabaseSync; complete: CompleteFn; describeModel?: () => Promise<string> }) {
     this.root = opts.root;
     this.db = opts.db;
     this.complete = opts.complete;
+    this.describeModel = opts.describeModel;
     this.ensureAssetsTable();
+  }
+
+  /** Shares the exact scheduler used by ingest extraction, merge and overview. */
+  withKnowledgeModelSlot<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.globalLlmLimit()(work, { signal });
+  }
+
+  completeKnowledge(input: KnowledgeCompletionInput, options: CompleteOptions = {}): Promise<string> {
+    const signal = options.signal;
+    const checkAbort = () => {
+      if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : Object.assign(new Error('aborted'), { name: 'AbortError' });
+    };
+    return this.withKnowledgeModelSlot(async () => {
+      checkAbort();
+      if (input.expectedModel !== undefined) {
+        if (!this.describeModel) throw new Error('MODEL_UNAVAILABLE');
+        const current = await this.describeModel();
+        checkAbort();
+        if (current !== input.expectedModel) throw new Error('MODEL_CHANGED');
+      }
+      const text = await this.complete(input.systemPrompt ?? '', input.user, 'repo-wiki', {
+        ...options,
+        maxTokens: input.maxTokens,
+        expectedModel: input.expectedModel,
+        expectedConfiguration: input.expectedConfiguration,
+      });
+      checkAbort();
+      return text;
+    }, signal);
   }
 
   private ensureAssetsTable(): void {

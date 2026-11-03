@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import iconSource from '../../../../brand/source/grenagent-icon.svg?raw';
 import {
   browserErrorPageUrl,
   describeBrowserGuestFailure,
@@ -69,7 +70,7 @@ describe('describeBrowserLoadError', () => {
 });
 
 describe('browserErrorPageUrl', () => {
-  it('builds a Codex-style guest document with the Pi mark and a details link', () => {
+  it('builds a guest error document with the approved G and a details link', () => {
     const pageUrl = browserErrorPageUrl({
       errorCode: -102,
       errorDescription: 'ERR_CONNECTION_REFUSED',
@@ -78,7 +79,13 @@ describe('browserErrorPageUrl', () => {
     expect(isBrowserErrorPageUrl(pageUrl)).toBe(true);
     const html = decodeURIComponent(pageUrl.slice('data:text/html;charset=utf-8,'.length));
     expect(html).toContain('class="icon"');
-    expect(html).toContain('M40 56 H200 V84 H40 Z M74 84 H102 V190 H74 Z M150 84 H178 V190 H150 Z');
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const original = new DOMParser().parseFromString(iconSource, 'image/svg+xml');
+    const icon = doc.querySelector('.icon svg')!;
+    expect(icon.getAttribute('viewBox')).toBe('0 0 352 352');
+    expect(icon.querySelector('path')?.getAttribute('d')).toBe(original.querySelector('path')?.getAttribute('d'));
+    expect(icon.querySelector('path')?.getAttribute('transform')).toBe('translate(16 19)');
+    expect(doc.querySelector('.icon')?.getAttribute('aria-hidden')).toBe('true');
     expect(html).toContain('id="details-link"');
     expect(html).toContain('id="reload-button"');
     expect(html).toContain('无法访问此站点');

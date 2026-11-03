@@ -63,13 +63,11 @@ describe('wiki ingest settings', () => {
     expect(getWikiIngestMode()).toBe('single-stage');
   });
 
-  it('并发变化后下一次取到新的限流器', async () => {
+  it('refreshes the configured budget for later calls', async () => {
     let concurrency = 5;
     const current = createRefreshingLimit(() => concurrency);
-    const first = current();
     concurrency = 1;
     const second = current();
-    expect(second).not.toBe(first);
 
     let active = 0;
     let maxActive = 0;
@@ -80,5 +78,25 @@ describe('wiki ingest settings', () => {
       active -= 1;
     })));
     expect(maxActive).toBe(1);
+  });
+
+  it('changing concurrency keeps the active budget and queued work in one scheduler', async () => {
+    let concurrency = 2;
+    const current = createRefreshingLimit(() => concurrency);
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const started: string[] = [];
+    const first = current()(async () => { started.push('first'); await gate; });
+    await Promise.resolve();
+    concurrency = 1;
+    const waiting = current()(async () => { started.push('waiting'); });
+    await Promise.resolve();
+    expect(started).toEqual(['first']);
+    concurrency = 2;
+    current();
+    await Promise.resolve();
+    expect(started).toEqual(['first', 'waiting']);
+    release();
+    await Promise.all([first, waiting]);
   });
 });

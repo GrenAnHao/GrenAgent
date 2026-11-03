@@ -1,10 +1,7 @@
 import { StrictMode, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ConfigProvider, ThemeProvider } from '@lobehub/ui';
-import { m } from 'motion/react';
 import { Bot, Boxes, FilePen, FileText, Moon, Sparkles, Sun, Terminal } from 'lucide-react';
-import { ANTD_CSS_VAR_KEY, ThemeBridge } from './components/ThemeBridge';
-import { schemePrimary, schemeTokens } from './theme/colorSchemes';
+import { WorkbenchThemeProvider } from './theme/WorkbenchThemeProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToolExecution } from './features/tools/ToolExecution';
 import { renderExtensionCard } from './features/tools/extensionCards';
@@ -302,46 +299,34 @@ function Gallery() {
 function Root() {
   const [dark, setDark] = useState(true);
   return (
-    <ThemeProvider
-      themeMode={dark ? 'dark' : 'light'}
-      appearance={dark ? 'dark' : 'light'}
-      customTheme={{ primaryColor: schemePrimary('github', dark) }}
-      theme={{
-        cssVar: { key: ANTD_CSS_VAR_KEY },
-        hashed: false,
-        token: schemeTokens('github', dark),
-      }}
-    >
-      <ConfigProvider motion={m}>
-        <ThemeBridge />
-        <button
-          type="button"
-          onClick={() => setDark((v) => !v)}
-          style={{
-            position: 'fixed',
-            top: 14,
-            right: 16,
-            zIndex: 10,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            border: '1px solid var(--gren-border)',
-            borderRadius: 8,
-            background: 'var(--gren-bg-1)',
-            color: 'var(--gren-fg)',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
-        >
-          {dark ? <Sun size={14} /> : <Moon size={14} />}
-          {dark ? '浅色' : '深色'}
-        </button>
-        <AgentStoreContext.Provider value={mockAgentCtx}>
-          <Gallery />
-        </AgentStoreContext.Provider>
-      </ConfigProvider>
-    </ThemeProvider>
+    <WorkbenchThemeProvider appearance={dark ? 'dark' : 'light'}>
+      <button
+        type="button"
+        onClick={() => setDark((v) => !v)}
+        style={{
+          position: 'fixed',
+          top: 14,
+          right: 16,
+          zIndex: 10,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 12px',
+          border: '1px solid var(--gren-border)',
+          borderRadius: 8,
+          background: 'var(--gren-bg-1)',
+          color: 'var(--gren-fg)',
+          fontSize: 12,
+          cursor: 'pointer',
+        }}
+      >
+        {dark ? <Sun size={14} /> : <Moon size={14} />}
+        {dark ? '浅色' : '深色'}
+      </button>
+      <AgentStoreContext.Provider value={mockAgentCtx}>
+        <Gallery />
+      </AgentStoreContext.Provider>
+    </WorkbenchThemeProvider>
   );
 }
 

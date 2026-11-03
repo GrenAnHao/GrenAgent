@@ -1,0 +1,14 @@
+import {readFileSync} from 'node:fs';
+import {markdownLinks} from '../../../electron-agent/electron/agentData/knowledgeKernel/markdownLinks';
+import {normalizeStageSources,validateStageResult} from '../../../electron-agent/electron/agentData/knowledgeKernel/validation';
+import {resolveWikiLink} from '../../../electron-agent/shared/wikiLinks';
+import {hashKnowledgePayload} from '../../../electron-agent/electron/agentData/knowledgeKernel/store';
+const read=(name:string)=>JSON.parse(readFileSync(new URL(name,import.meta.url),'utf8'));
+const snapshot=read('./third-manifest.json'),x=read('./live-third-failure.json');
+const row=x.items.find((i:any)=>i.item_id==='generate:overview');const payload=JSON.parse(row.payload);if(hashKnowledgePayload(payload)!==row.output_hash)throw Error('ARTIFACT_HASH_MISMATCH');
+const pages=x.items.filter((i:any)=>i.phase==='generate').map((i:any)=>i.item_id.slice(9));
+const evidence=JSON.parse(row.evidence);const ranges=evidence.filter((e:any)=>e.kind==='read'&&snapshot.files[e.path]?.hash===e.hash&&e.startLine!==undefined&&e.endLine!==undefined).map((e:any)=>({path:e.path,start:e.startLine,end:e.endLine}));
+if(ranges.length!==evidence.filter((e:any)=>e.kind==='read').length)throw Error('READ_HASH_MISMATCH');
+const before=markdownLinks(payload.markdown),result=normalizeStageSources('generate',payload,snapshot.files,ranges,{pageId:'overview',pageIds:pages}) as any;validateStageResult({phase:'generate',files:snapshot.files,observedRanges:ranges,pageId:'overview',pageIds:pages},result);
+const after=markdownLinks(result.markdown);const counts=(ls:typeof before)=>Object.fromEntries(['invalid','source','page','external','anchor'].map(kind=>[kind,ls.filter(l=>resolveWikiLink(l.url,'overview').kind===kind).length]));
+console.log(JSON.stringify({artifactHashVerified:true,pages,readRanges:ranges.length,before:counts(before),after:counts(after),beforeColon:before.filter(l=>/^source:[^:?#]+:\d+(?:-\d+)?$/.test(l.url)).length,canonicalSourceLinks:after.filter(l=>l.url.startsWith('source:')).map(l=>l.url),warnings:result.navigationWarnings??[],sources:result.sources.length,strictValidation:'passed'},null,2));

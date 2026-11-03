@@ -1,7 +1,7 @@
 /**
  * 命令页签：列表项是命令胶囊、带参数个数；选中后编辑区填好；改提示词时识别到的参数实时变；与保留名重名时就地报错、保存不可点；
  * 长提示词滚动时背景高亮层跟着 textarea 滚、两层内容宽度一致。
- * 规则页签：开关立即写盘；点规则打开编辑区；窄视口下范围标记不折行；没有工作区时项目范围置灰；浅色主题截图。
+ * 规则页签：开关立即写盘；点规则打开编辑区；模式范围回显、可多选、保存带回并刷新列表；窄视口下范围标记不折行；没有工作区时项目范围置灰；浅色主题截图。
  */
 
 const BODY = '[data-testid="prompt-body-input"]'
@@ -15,11 +15,9 @@ async function reveal(t, sel) {
   await t.sleep(150)
 }
 
-/** 范围标记（规则行 rowWrap 里最后一个元素）的高度和它自身的行高 */
+/** 来源标记的高度和它自身的行高，不依赖目录项内部的排列顺序。 */
 const badgeMetrics = (key) => `(() => {
-  const row = document.querySelector('[data-testid="rule-item-${key}"]')
-  let el = row
-  while (el.lastElementChild) el = el.lastElementChild
+  const el = document.querySelector('[data-testid="rule-origin-${key}"]')
   const s = getComputedStyle(el)
   const lineHeight = s.lineHeight === 'normal' ? parseFloat(s.fontSize) * 1.25 : parseFloat(s.lineHeight)
   return { text: el.textContent, height: el.getBoundingClientRect().height, lineHeight }
@@ -79,6 +77,28 @@ export default async function (t) {
   t.ok('点规则打开编辑区', await t.waitFor('[data-testid="rule-title-input"]'))
   t.check('编辑区名称是「中文回答」', await t.js(`document.querySelector('[data-testid="rule-title-input"]').value`), '中文回答')
 
+  // —— 规则的适用模式范围 ——
+  t.check('旧规则标全部模式', await t.js(`document.querySelector('[data-testid="rule-modes-global-zh"]').textContent`), '全部模式')
+  t.check('Ultra 规则标出模式', await t.js(`document.querySelector('[data-testid="rule-modes-global-ultra"]').textContent`), 'Ultra')
+
+  await reveal(t, '[data-testid="rule-open-global-ultra"]')
+  await t.click('[data-testid="rule-open-global-ultra"]', 20)
+  t.check('编辑区回显已保存模式 Ultra', await t.js(`document.querySelector('[data-testid="rule-mode-ultra"]').getAttribute('aria-pressed')`), 'true')
+  t.check('编辑区未选 Agent', await t.js(`document.querySelector('[data-testid="rule-mode-agent"]').getAttribute('aria-pressed')`), 'false')
+  await reveal(t, '[data-testid="rule-mode-plan"]')
+  await t.click('[data-testid="rule-mode-plan"]', 20)
+  t.check('选中 Plan 后高亮', await t.js(`document.querySelector('[data-testid="rule-mode-plan"]').getAttribute('aria-pressed')`), 'true')
+  await reveal(t, '[data-testid="rule-save"]')
+  await t.click('[data-testid="rule-save"]', 20)
+  const saved = await t.act('lastSavedRule')
+  t.info('保存的规则', saved)
+  t.ok('保存带回模式范围 Plan + Ultra', Array.isArray(saved?.modes) && saved.modes.includes('plan') && saved.modes.includes('ultra'))
+  t.ok('保存保留原规则标识', saved?.id === 'ultra')
+
+  await reveal(t, '[data-testid="rule-item-global-ultra"]')
+  t.check('列表刷新后标出两个模式', await t.js(`document.querySelector('[data-testid="rule-modes-global-ultra"]').textContent`), 'Plan、Ultra')
+  await t.shot('rule-modes')
+
   // —— 窄视口：范围标记不折行 ——
   const wide = await t.js(badgeMetrics('global-zh'))
   t.info('宽视口范围标记', wide)
@@ -86,7 +106,7 @@ export default async function (t) {
   await reveal(t, '[data-testid="rule-item-global-zh"]')
   const narrow = await t.js(badgeMetrics('global-zh'))
   t.info('760px 范围标记', narrow)
-  t.check('rowWrap 里最后一个元素是范围标记', narrow.text, '全局')
+  t.check('来源标记保留全局范围', narrow.text, '全局')
   t.ok('窄视口下范围标记不折行（高度 ≤ 1.5 倍行高）', narrow.height <= narrow.lineHeight * 1.5)
   await t.shot('narrow')
   await t.resize(before[0], before[1])

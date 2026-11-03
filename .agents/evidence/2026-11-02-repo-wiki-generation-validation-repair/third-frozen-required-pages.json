@@ -1,0 +1,13 @@
+[
+  "architecture",
+  "getting-started",
+  "modules/bin",
+  "modules/examples",
+  "modules/notes",
+  "modules/pocock",
+  "modules/scripts/installer",
+  "modules/scripts/libraries",
+  "modules/scripts/npf-cli",
+  "modules/templates",
+  "overview"
+]

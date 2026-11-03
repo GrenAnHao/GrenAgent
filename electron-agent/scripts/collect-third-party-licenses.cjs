@@ -20,11 +20,12 @@ const {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } = require('node:fs');
-const { join, resolve } = require('node:path');
+const { dirname, join, resolve } = require('node:path');
 const { parse } = require('yaml');
 
 const appDir = resolve(__dirname, '..');
@@ -46,22 +47,50 @@ const PERMISSIVE = new Set([
   'BlueOak-1.0.0',
 ]);
 
-function readLockPackages() {
-  const lock = JSON.parse(readFileSync(join(appDir, 'package-lock.json'), 'utf8'));
-  const out = [];
-  for (const [key, meta] of Object.entries(lock.packages ?? {})) {
-    if (!key.startsWith('node_modules/')) continue;
-    if (meta.dev || meta.link) continue;
-    const name = key.slice('node_modules/'.length);
-    // 嵌套副本（node_modules/a/node_modules/b）按顶层名收集，跳过以免重复。
-    if (name.includes('node_modules/')) continue;
-    out.push({
-      name,
-      version: meta.version ?? '',
-      license: typeof meta.license === 'string' ? meta.license : 'UNKNOWN',
-    });
+function installedPackageDir(fromDir, name) {
+  for (let dir = fromDir; ; dir = dirname(dir)) {
+    const candidate = join(dir, 'node_modules', name);
+    if (existsSync(join(candidate, 'package.json'))) return realpathSync(candidate);
+    if (dirname(dir) === dir) return undefined;
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Follow the installed production graph, including pnpm symlinks and versions.
+ * package-lock.json is historical: new host dependencies are locked by pnpm.
+ */
+function readInstalledProductionPackages(packageDir = appDir) {
+  const root = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+  const devOnly = new Set(Object.keys(root.devDependencies ?? {}).filter((name) => !root.dependencies?.[name]));
+  const seenDirectories = new Set();
+  const packages = new Map();
+  const visit = (fromDir, name, optional = false) => {
+    const dir = installedPackageDir(fromDir, name);
+    if (!dir) {
+      if (optional) return;
+      throw new Error(`Missing production dependency ${name} from ${fromDir}; install the locked dependencies first`);
+    }
+    if (seenDirectories.has(dir)) return;
+    seenDirectories.add(dir);
+    const meta = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    const key = `${meta.name}@${meta.version}`;
+    packages.set(key, {
+      name: meta.name,
+      version: meta.version,
+      license: typeof meta.license === 'string' ? meta.license : (meta.license?.type ?? 'UNKNOWN'),
+      packageDir: dir,
+    });
+    for (const dependency of Object.keys(meta.dependencies ?? {})) {
+      visit(dir, dependency, Object.hasOwn(meta.optionalDependencies ?? {}, dependency));
+    }
+    for (const dependency of Object.keys(meta.optionalDependencies ?? {})) visit(dir, dependency, true);
+    // Optional peer packages installed solely for development are not shipped.
+    for (const dependency of Object.keys(meta.peerDependencies ?? {})) {
+      if (!devOnly.has(dependency)) visit(dir, dependency, true);
+    }
+  };
+  for (const name of Object.keys(root.dependencies ?? {})) visit(packageDir, name);
+  for (const name of Object.keys(root.optionalDependencies ?? {})) visit(packageDir, name, true);
+  return [...packages.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
 /** 从 electron-builder.yml 读 files 里的排除项，与真实打包面保持一致。 */
@@ -94,9 +123,28 @@ function licenseFilesOf(packageDir) {
 
 function buildInventory() {
   const exclusions = packedExclusions();
-  return readLockPackages()
+  const installed = readInstalledProductionPackages()
     .filter((entry) => !isExcluded(entry.name, exclusions))
-    .map((entry) => ({ ...entry, files: licenseFilesOf(join(appDir, 'node_modules', entry.name)) }));
+    .map((entry) => ({ ...entry, files: licenseFilesOf(entry.packageDir) }));
+  const vendorDir = join(appDir, 'vendor', 'repo-wiki');
+  const vendor = JSON.parse(readFileSync(join(vendorDir, 'package.json'), 'utf8'));
+  installed.push({
+    name: 'repo-wiki', version: vendor.version, license: vendor.license,
+    packageDir: vendorDir, files: ['LICENSE', 'THIRD_PARTY_NOTICES.md'],
+  });
+  // Vendored source is bundled into the Wiki host, even though it is not an npm dependency.
+  installed.push({
+    name: 'jsonrepair-vendored', version: '3.15.0', license: 'ISC',
+    packageDir: join(appDir, 'electron', 'wikiService', 'reference', 'qoder-0.5.1', 'jsonrepair-3.15.0'),
+    files: ['LICENSE.md'],
+  });
+  // Preserve the established path for single versions. Multiple versions need
+  // their own directories so one license cannot silently overwrite another.
+  const counts = new Map();
+  for (const entry of installed) counts.set(entry.name, (counts.get(entry.name) ?? 0) + 1);
+  return installed.map((entry) => ({
+    ...entry, directory: counts.get(entry.name) > 1 ? join(entry.name, entry.version) : entry.name,
+  })).sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
 function renderReport(inventory, generatedBy) {
@@ -110,9 +158,9 @@ function renderReport(inventory, generatedBy) {
   const lines = [
     '# 第三方依赖清单',
     '',
-    `本文件由 \`${generatedBy}\` 从 \`electron-agent/package-lock.json\` 生成，不要手改。`,
+    `本文件由 \`${generatedBy}\` 从 pnpm 安装的生产依赖图（\`electron-agent/pnpm-lock.yaml\`）及仓库内 vendored 代码生成，不要手改。`,
     '只列随安装包分发的生产依赖；开发依赖（vitest、electron-builder、sharp、lightningcss 等）不进包，不在此列。',
-    '每个包的许可原文随安装包放在 `resources/licenses/<包名>/`，索引在 `resources/licenses/INDEX.md`。',
+    '每个包的许可原文随安装包放在 `resources/licenses/<包名>/`，多版本包放在 `<包名>/<版本>/`，索引在 `resources/licenses/INDEX.md`。',
     '',
     '## 许可证分布',
     '',
@@ -150,7 +198,7 @@ function collect(options = {}) {
 
   let missing = 0;
   for (const entry of inventory) {
-    const destDir = join(outDir, entry.name);
+    const destDir = join(outDir, entry.directory);
     if (entry.files.length === 0) {
       // 上游没随包发布许可文件：留一条占位，指明许可证标识与出处，便于人工核对。
       mkdirSync(destDir, { recursive: true });
@@ -169,7 +217,7 @@ function collect(options = {}) {
       continue;
     }
     mkdirSync(destDir, { recursive: true });
-    for (const file of entry.files) copyFileSync(join(appDir, 'node_modules', entry.name, file), join(destDir, file));
+    for (const file of entry.files) copyFileSync(join(entry.packageDir, file), join(destDir, file));
   }
 
   // 本仓库自身的许可与第三方来源说明：分发时一并给出。
@@ -187,7 +235,7 @@ function collect(options = {}) {
   return { outDir, count: inventory.length, missing };
 }
 
-module.exports = { collect, buildInventory, renderReport, packedExclusions };
+module.exports = { collect, buildInventory, renderReport, packedExclusions, readInstalledProductionPackages };
 
 /** electron-builder 的 beforePack 钩子：打包前把许可证摊到 app 目录下。 */
 module.exports.default = async function collectThirdPartyLicenses() {

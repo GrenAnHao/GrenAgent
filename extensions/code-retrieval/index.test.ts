@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import codeRetrieval from './index.js';
 import { CODE_GRAPH_AGENT_TOOLS } from './tools.js';
-import { MemoryClient } from '../memory/client.js';
+import { AgentDataClient } from '../_shared/agent-data-client.js';
 
 interface RegisteredTool {
   name: string;
@@ -87,7 +87,7 @@ describe('code retrieval extension', () => {
     ['code_explore', 'codegraph_explore', { query: 'parse', maxFiles: 4 }],
   ])('sends %s through the AgentData RPC and keeps the raw result', async (name, remote, params) => {
     const raw = { content: [{ type: 'text', text: 'result' }], structuredContent: { nodes: [1] }, isError: true };
-    const request = vi.spyOn(MemoryClient.prototype, 'request').mockResolvedValue(raw);
+    const request = vi.spyOn(AgentDataClient.prototype, 'request').mockResolvedValue(raw);
     const tools: RegisteredTool[] = [];
     codeRetrieval({ registerTool: (tool: RegisteredTool) => tools.push(tool) } as never);
     const tool = tools.find((item) => item.name === name)!;

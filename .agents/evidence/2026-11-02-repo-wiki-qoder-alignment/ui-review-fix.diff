@@ -1,0 +1,117 @@
+# UI focused review fix
+
+## electron-agent/src/features/repoWiki/knowledgeProjection.ts
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts"
+index 94bf9c85..3ba6021a 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.ts"	
+@@ -63,6 +63,7 @@ export function projectKnowledge(snapshot: RepoWikiKnowledgeSnapshot) {
+   const unit = domain === 'wiki' ? '篇' : '张';
+   const activeItems = run && activeStates.has(run.state) ? run.activeItems ?? [] : [];
+   const activeLabel = activeItems.length > 1 ? `处理中 ${activeItems.length} ${run?.phase === 'generate' ? unit : '项'}` : undefined;
++  const currentItem = run && activeStates.has(run.state) ? run.activeItems === undefined ? run.currentItem : activeItems[0]?.title : undefined;
+ 
+   // In-progress card: title / description / progress follow the current stage.
+   let title = '', description = '';
+@@ -100,7 +101,7 @@ export function projectKnowledge(snapshot: RepoWikiKnowledgeSnapshot) {
+ 
+   return {
+     published: content.publishedCount, prepared: content.preparedCount, expected: planned, unit,
+-    activeItems, activeLabel, currentItem: activeItems[0]?.title || run?.currentItem,
++    activeItems, activeLabel, currentItem,
+     runLabel: run ? runLabels[run.state] : '未生成',
+     /** Stage the run is in (or stopped in), for task detail views. */
+     phaseLabel: run ? stageCopy(domain, run.phase).title : undefined,
+
+## electron-agent/src/features/repoWiki/knowledgeProjection.test.ts
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts"
+index d1f5c50c..c4d795f1 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\knowledgeProjection.test.ts"	
+@@ -17,8 +17,13 @@ describe('knowledge projection', () => {
+     ];
+     Object.assign(snapshot.run!, { activeItems }); snapshot.run!.counts.failed = 1;
+     expect(projectKnowledge(snapshot)).toMatchObject({ activeItems, activeLabel: '处理中 3 篇', published: 4, prepared: 2 });
+-    snapshot.run!.state = 'paused'; expect(projectKnowledge(snapshot)).toMatchObject({ activeItems: [], activeLabel: undefined });
+-    snapshot.run!.state = 'failed'; expect(projectKnowledge(snapshot)).toMatchObject({ activeItems: [] });
++    snapshot.run!.currentItem = '陈旧项目';
++    snapshot.run!.state = 'paused'; expect(projectKnowledge(snapshot)).toMatchObject({ activeItems: [], activeLabel: undefined, currentItem: undefined });
++    snapshot.run!.state = 'failed'; expect(projectKnowledge(snapshot)).toMatchObject({ activeItems: [], currentItem: undefined });
++  });
++  it('treats an explicit empty active set as authoritative instead of falling back to a stale item', () => {
++    const snapshot = knowledgeFixture(); snapshot.run!.currentItem = '陈旧项目'; Object.assign(snapshot.run!, { activeItems: [] });
++    expect(projectKnowledge(snapshot).currentItem).toBeUndefined();
+   });
+   it('uses item units for catalogue work and preserves legacy current-item rendering', () => {
+     const snapshot = knowledgeFixture(); snapshot.run!.currentItem = '系统架构';
+
+## electron-agent/src/features/repoWiki/RepoWikiWorkspace.knowledge.test.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx"
+index fb6515bd..64c67bdd 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\repoWiki\\RepoWikiWorkspace.knowledge.test.tsx"	
+@@ -23,6 +23,7 @@ it('shows concurrent item names in the overview and removes them when the task p
+   const paused = structuredClone(initial); paused.run!.revision++; paused.run!.state = 'paused';
+   act(() => fixture.emitKnowledge(paused)); await within(region).findByText('生成已暂停');
+   expect(within(region).queryByText('处理中 3 篇')).toBeNull();
++  expect(within(region).queryByText('当前内容')).toBeNull();
+ });
+ it('does not paint an empty action strip during pinned publication', async () => {
+   const pinned = snapshot(); pinned.run!.phase = 'publish'; pinned.run!.capabilities = { pause: false, resume: false, cancel: false, repair: false, reanalyse: false }; fixture.setKnowledge(pinned); render(<RepoWikiWorkspace />);
+
+## electron-agent/src/features/agentData/TaskDetailDrawer.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx"
+index c445d34b..ff232e58 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.tsx"	
+@@ -49,6 +49,7 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
+   const retryHandled = useRef<string | undefined>(undefined);
+   const knowledge = (detail as (TaskDetail & { knowledge?: RepoWikiKnowledgeSnapshot }) | undefined)?.knowledge;
+   const knowledgeView = knowledge ? projectKnowledge(knowledge) : undefined;
++  const currentDocument = knowledgeView ? knowledgeView.currentItem : detail?.currentPage;
+   const valid = (request: number) => request === epoch.current && session === currentSession.current && visible && !!selected;
+ 
+   useEffect(() => { if (preview) previewCard.current?.scrollIntoView?.({ block: 'nearest' }); }, [preview]);
+@@ -175,7 +176,7 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
+             { key: 'status', label: '状态', children: detail.cancellationRequested ? '正在取消，等待确认' : taskStatusLabels[detail.status] },
+             { key: 'stage', label: '阶段', children: detail.stage || '未提供阶段' },
+             ...(detail.message ? [{ key: 'message', label: '当前操作', children: String(redact(detail.message)) }] : []),
+-            ...(!knowledgeView?.activeLabel && detail.currentPage ? [{ key: 'page', label: '当前文档', children: detail.currentPage }] : []),
++            ...(!knowledgeView?.activeLabel && currentDocument ? [{ key: 'page', label: '当前文档', children: currentDocument }] : []),
+             { key: 'progress', label: '进度', children: detail.progress === undefined || !Number.isFinite(detail.progress) ? '未提供百分比' : `${detail.progress}%` },
+             { key: 'count', label: '处理数量', children: detail.processed === undefined && detail.total === undefined ? '未提供计数' : `${detail.processed ?? '—'} / ${detail.total ?? '—'}` },
+             { key: 'attempts', label: '尝试次数', children: detail.attempts ?? '未提供' },
+
+## electron-agent/src/features/agentData/TaskDetailDrawer.test.tsx
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx"
+index ecd850cd..b7761735 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\src\\features\\agentData\\TaskDetailDrawer.test.tsx"	
+@@ -30,6 +30,13 @@ it('does not let an older task-list projection overwrite the newer knowledge rev
+   render(<TaskDetailDrawer taskRef={task.ref} taskView={{ ...task, knowledge: old } as TaskView} onClose={vi.fn()} />);
+   await screen.findByTestId('task-knowledge-summary'); expect(screen.getByTestId('task-knowledge-summary')).toHaveTextContent('任务版本5'); expect(screen.getByTestId('task-knowledge-summary')).toHaveTextContent('已准备2 / 3'); expect(screen.getByTestId('task-knowledge-summary')).toHaveTextContent('生成文档中');
+ });
++it.each(['paused', 'failed'] as const)('does not call a stopped knowledge item a current document in %s', async state => {
++  const knowledge: RepoWikiKnowledgeSnapshot = { version: 1, key: { workspaceInstanceId: 'i', projectId: 'p', portableProjectId: 'p', branch: 'main', language: 'zh', domain: 'wiki' }, content: { state: 'available', publishedCount: 4, preparedCount: 2, expectedCount: 6 }, run: { taskId: task.ref.id, revision: 5, phase: 'generate', state, currentItem: '陈旧项目', counts: { planned: 6, prepared: 2, failed: 1, blocked: 0, published: 0 }, capabilities: { pause: false, resume: state === 'paused', cancel: state === 'paused', repair: state === 'failed', reanalyse: false } }, action: { state: 'idle' }, admission: { state: 'ready' } };
++  vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, status: state, currentPage: '陈旧项目', knowledge } as TaskDetail);
++  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
++  await screen.findByTestId('task-knowledge-summary');
++  expect(screen.queryByText('当前文档')).toBeNull(); expect(screen.queryByText('陈旧项目')).toBeNull();
++});
+ it('echoes optional frozen kernel model identity and plan token from retry preflight', async () => {
+   vi.mocked(agentDataApi.tasks.previewRetry).mockResolvedValue({ ref: task.ref, label: task.label, callsModel: true, model: 'provider/model', modelIdentity: 'digest-v1', planToken: 'plan-v1', targetCount: 1 } as any);
+   render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />); await screen.findByText('任务信息'); fireEvent.click(screen.getByRole('button', { name: '重试任务' })); await screen.findByText('provider/model'); fireEvent.click(screen.getByRole('button', { name: '确认重试' }));
+
+## electron-agent/ui-harness/probes/repo-wiki.mjs
+diff --git "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs" "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"
+index 2ec93e32..c2df5ffb 100644
+--- "a/C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-qoder-ui-review-fix-baseline\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"
++++ "b/D:\\OneDrive\\Project Files\\Pi\\electron-agent\\ui-harness\\probes\\repo-wiki.mjs"	
+@@ -301,6 +301,7 @@ export default async function (t) {
+   await t.act('kernelConcurrentPaused');
+   t.ok('暂停反馈来自后端状态', await t.waitForText('[data-testid="knowledge-overview"]', '生成已暂停'));
+   t.check('暂停不继续展示陈旧在途数量', await t.count(active), 0);
++  t.check('暂停不将历史条目显示为当前内容', (await t.text('[data-testid="knowledge-overview"]')).includes('当前内容'), false);
+   await t.act('kernelLegacy');
+   t.ok('旧记录无activeItems仍显示当前内容', await t.waitForText('[data-testid="knowledge-overview"]', '当前内容兼容旧版单项'));
+   await t.resize(1420, 880); await t.setTheme('dark');

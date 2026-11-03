@@ -31,17 +31,21 @@ const state = vi.hoisted(() => ({
   composerLevel: null as string | null,
   peekCalls: [] as Array<{ provider: string; id: string } | null>,
   commitComposerModelToSession: vi.fn(),
+  adoptPreferences: vi.fn(),
   commandRun: vi.fn(),
+  sidebarSync: vi.fn(),
   sessionState: {
     worksDir: '/home/.pi/agent/works',
     activeSessionPath: '/home/.pi/agent/works/u1/s.jsonl' as string | null,
     draftConversationCwd: null as string | null,
+    draftConversationId: null as string | null,
   },
   setActiveSession: vi.fn(),
   setWorkspaceSessionPath: vi.fn(),
   upsertOptimisticSession: vi.fn(),
   clearDraftConversation: vi.fn(),
   pendingSend: 'hello',
+  sendOutcome: undefined as void | 'failed',
   pendingBehavior: undefined as 'steer' | 'followUp' | undefined,
   setComposerValue: vi.fn(),
   /** 测试显式给出画面绑定的会话；undefined 时跟 activeSessionPath 走。 */
@@ -64,7 +68,7 @@ vi.mock('../../lib/pi', () => ({
 }));
 vi.mock('../../lib/commandLanes', () => ({ commandLanes: { run: state.commandRun } }));
 vi.mock('../../lib/streamingGate', () => ({ awaitStreamingEnd: vi.fn() }));
-vi.mock('../../lib/sidebarSessionSync', () => ({ syncSidebarOnSend: vi.fn() }));
+vi.mock('../../lib/sidebarSessionSync', () => ({ syncSidebarOnSend: state.sidebarSync }));
 vi.mock('./input/composerBridge', () => ({
   setComposerValue: (text: string) => state.setComposerValue(text),
 }));
@@ -76,14 +80,16 @@ vi.mock('./ChatInput', async () => {
   const { useRef } = await import('react');
   const { ComposerPromptOverlay } = await import('./input/ComposerPromptOverlay');
   return { ChatInput: (props: {
-    onSend: (message: string, images?: unknown, behavior?: 'steer' | 'followUp') => void | Promise<void>;
+    onSend: (message: string, images?: unknown, behavior?: 'steer' | 'followUp') => void | 'failed' | Promise<void | 'failed'>;
     onAbort?: () => void | Promise<void>;
   }) => {
     const anchorRef = useRef<HTMLDivElement>(null);
     return (
     <div>
       {state.promptOverlay ? <><div ref={anchorRef} data-testid="overlay-anchor" /><ComposerPromptOverlay anchorRef={anchorRef} /></> : null}
-      <button type="button" data-testid="chat-input" onClick={() => void props.onSend(state.pendingSend, undefined, state.pendingBehavior)}>
+      <button type="button" data-testid="chat-input" onClick={() => {
+        void Promise.resolve(props.onSend(state.pendingSend, undefined, state.pendingBehavior)).then((outcome) => { state.sendOutcome = outcome; });
+      }}>
         send
       </button>
       <button type="button" data-testid="chat-abort" onClick={() => void props.onAbort?.()}>
@@ -100,6 +106,29 @@ vi.mock('./input/actions/ModelThinkingAction', () => ({
   },
   peekComposerLevel: () => state.composerLevel,
   commitComposerModelToSession: (...args: unknown[]) => state.commitComposerModelToSession(...args),
+}));
+vi.mock('./input/composerOwner', () => {
+  const read = (workspace: string) => state.sessionState.draftConversationCwd === workspace
+    ? state.sessionState.draftConversationId || workspace
+    : state.sessionState.activeSessionPath || workspace;
+  return { useComposerOwnerKey: read, readComposerOwnerKey: read };
+});
+vi.mock('../../stores/sessionPreferencesStore', () => ({
+  useSessionPreferencesStore: {
+    getState: () => ({
+      peek: () => {
+        const queued = state.peekCalls.shift();
+        const model = queued !== undefined ? queued : state.composerModel;
+        return {
+          revision: 0,
+          ...(model ? { model } : {}),
+          ...(state.composerLevel ? { thinkingLevel: state.composerLevel } : {}),
+          mode: 'ask', approval: 'workspace',
+        };
+      },
+      adopt: state.adoptPreferences,
+    }),
+  },
 }));
 vi.mock('./EmptyChatPrompt', () => ({
   EmptyChatPrompt: () => <div data-testid="empty-chat-prompt" />,
@@ -166,7 +195,6 @@ vi.mock('../../stores/AgentStoreContext', () => {
 
 state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => fn());
 
-import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { ChatView, laneKey } from './ChatView';
 import { useCommandInputStore } from '../../stores/commandInputStore';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
@@ -256,6 +284,7 @@ describe('prompt overlay clearance', () => {
 
 afterEach(() => {
   cleanup();
+  useCommandInputStore.setState({ bySession: {} });
   vi.useRealTimers();
   vi.clearAllMocks();
   state.workspace = '/home/.pi/agent/works/u1';
@@ -279,14 +308,16 @@ afterEach(() => {
     worksDir: '/home/.pi/agent/works',
     activeSessionPath: '/home/.pi/agent/works/u1/s.jsonl',
     draftConversationCwd: null,
+    draftConversationId: null,
   };
   state.pendingSend = 'hello';
+  state.sendOutcome = undefined;
   state.pendingBehavior = undefined;
   state.loadedPath = undefined;
   state.piTakeSteering.mockReset();
   state.piTakeSteering.mockResolvedValue({ steering: [] });
   state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
-  state.piNewSession.mockResolvedValue(undefined);
+  state.piNewSession.mockImplementation(async () => ({ sessionFile: `${state.workspace}/created.jsonl` }));
   state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
   state.composerModel = { provider: 'openai', id: 'g' };
   state.composerLevel = null;
@@ -346,29 +377,49 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     expect(seat).toHaveStyle({ paddingBottom: '0px' });
   });
 
-  it('草稿、会话与项目会话的输入座椅离底一致', () => {
-    state.workspaceReady = true;
-    state.messageCount = 1;
-    state.storeState.messages = [{}];
+  it.each([
+    { ready: false, count: 0 },
+    { ready: true, count: 0 },
+    { ready: true, count: 1 },
+  ])('空态输入区参与居中排版，加载与已有消息仍贴底（$ready / $count）', ({ ready, count }) => {
+    state.workspaceReady = ready;
+    state.messageCount = count;
+    state.storeState.messages = Array(count).fill({});
     render(<ChatView />);
-    expect(screen.getByTestId('composer-seat')).toHaveStyle({ paddingBottom: '0px' });
+    const seat = screen.getByTestId('composer-seat');
+    if (ready && count === 0) {
+      expect(seat).toHaveStyle({ position: 'relative', marginBottom: 'auto' });
+    } else {
+      expect(seat).toHaveStyle({ position: 'absolute', bottom: '0px' });
+    }
   });
 
-  it('keeps the compose column width when leaving the empty layout', () => {
+  it('keeps the same editor while expanding the empty composer to the transcript column and back', () => {
     state.workspaceReady = true;
     state.messageCount = 0;
     state.storeState.messages = [];
     const empty = render(<ChatView />);
     expect(empty.getByTestId('chat-input-region')).toHaveStyle({ width: '100%' });
-    expect(empty.getByTestId('chat-input-region').parentElement).toHaveStyle({ width: CHAT_CONTENT_WIDTH });
-    empty.unmount();
+    const input = empty.getByTestId('chat-input');
+    const emptyWidth = empty.getByTestId('chat-input-region').parentElement?.style.width;
+    expect(empty.getByTestId('chat-input-region').parentElement).toHaveStyle({ paddingInline: '8px' });
+    expect(empty.getByTestId('composer-seat')).toHaveStyle({ position: 'relative' });
 
     state.messageCount = 1;
     state.storeState.messages = Array(state.messageCount).fill({});
-    render(<ChatView />);
+    empty.rerender(<ChatView />);
     const occupied = screen.getByTestId('chat-input-region');
     expect(occupied).toHaveStyle({ width: '100%' });
-    expect(occupied.parentElement).toHaveStyle({ width: CHAT_CONTENT_WIDTH });
+    expect(occupied.parentElement).toHaveStyle({ width: 'min(100%, 1120px, max(760px, 86%))', paddingInline: '8px' });
+    expect(screen.getByTestId('chat-input')).toBe(input);
+    expect(screen.getByTestId('composer-seat')).toHaveStyle({ position: 'absolute', bottom: '0px' });
+
+    state.messageCount = 0;
+    state.storeState.messages = [];
+    empty.rerender(<ChatView />);
+    expect(screen.getByTestId('chat-input-region').parentElement?.style.width).toBe(emptyWidth);
+    expect(screen.getByTestId('chat-input')).toBe(input);
+    expect(screen.getByTestId('composer-seat')).toHaveStyle({ position: 'relative' });
   });
 });
 
@@ -552,167 +603,165 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.storeState.composerQueue.map((item) => item.text)).toEqual(['再补登录态']);
   });
 
-  it('草稿对话首发时先懒初始化 workspace 和 session', async () => {
-    state.composerModel = { provider: 'openai', id: 'g' };
-    state.piSetModel.mockClear();
-    state.piSetModel.mockResolvedValue(undefined);
-    state.sessionState.activeSessionPath = null;
+  it('草稿首发期间切到 B，新会话回执不能抢回画面，首发仍发给创建的会话', async () => {
+    const created = '/home/.pi/agent/works/u1/created.jsonl';
+    const other = '/home/.pi/agent/works/u1/other.jsonl';
+    let finish!: (value: unknown) => void;
+    state.sessionState.activeSessionPath = '';
     state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
+    state.sessionState.draftConversationId = 'draft:sending';
+    state.loadedPath = null;
     state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
-    state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
+    state.piNewSession.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    state.piGetState.mockResolvedValue({ sessionFile: other });
     state.piPrompt.mockResolvedValue(undefined);
-
     render(<ChatView />);
     fireEvent.click(screen.getByTestId('chat-input'));
     await act(async () => {});
+    state.sessionState.activeSessionPath = other;
+    state.sessionState.draftConversationCwd = null;
+    state.sessionState.draftConversationId = null;
+    state.loadedPath = other;
+    await act(async () => { finish({ sessionFile: created, sessionPath: created }); });
+    expect(state.setActiveSession).not.toHaveBeenCalledWith(created);
+    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'hello', undefined, undefined, created);
+    expect(state.loadedPath).toBe(other);
+  });
 
-    expect(state.piOpenWorkspace).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
-    expect(state.piNewSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
-    expect(state.setActiveSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1/created.jsonl');
-    expect(state.clearDraftConversation).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
-    expect(state.commitComposerModelToSession).toHaveBeenCalledWith(
-      '/home/.pi/agent/works/u1',
-      '/home/.pi/agent/works/u1/created.jsonl',
-      { provider: 'openai', id: 'g' },
-      null,
-    );
-    expect(state.piSetModel).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'openai', 'g');
+  it('首发失败时已经切到 B，仍返回 failed 让输入框恢复原草稿，不改 B 错误态', async () => {
+    let rejectCreate!: (error: Error) => void;
+    state.sessionState.activeSessionPath = '';
+    state.sessionState.draftConversationCwd = state.workspace;
+    state.sessionState.draftConversationId = 'draft:failed-create';
+    state.loadedPath = null;
+    state.piNewSession.mockImplementationOnce(() => new Promise((_, reject) => { rejectCreate = reject; }));
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    state.loadedPath = state.workspace + '/b.jsonl';
+    state.sessionState.activeSessionPath = state.loadedPath;
+    state.sessionState.draftConversationCwd = null;
+    state.sessionState.draftConversationId = null;
+    await act(async () => { rejectCreate(new Error('creation failed')); });
+    expect(state.sendOutcome).toBe('failed');
+    expect(state.storeState.lastError).toBeUndefined();
+    expect(state.piPrompt).not.toHaveBeenCalled();
+  });
+
+  it('取消弹层期间切到 B，原 A 的发送仍经过自己的 lane 与侧栏同步', async () => {
+    const source = state.sessionState.activeSessionPath!;
+    state.piPrompt.mockResolvedValue(undefined);
+    render(<ChatView />);
+    state.sessionState.activeSessionPath = state.workspace + '/other.jsonl';
+    state.loadedPath = state.sessionState.activeSessionPath;
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    expect(state.commandRun).toHaveBeenCalledWith(laneKey(state.workspace, source), expect.any(Function));
+    expect(state.sidebarSync).toHaveBeenCalledWith(state.workspace, 'hello', 0, source);
+    expect(state.piPrompt).toHaveBeenCalledWith(state.workspace, 'hello', undefined, undefined, source);
+  });
+
+  it('已切走的执行性命令也保留原会话回执', async () => {
+    const source = state.sessionState.activeSessionPath!;
+    state.pendingSend = '/compact';
+    state.piPrompt.mockResolvedValue(undefined);
+    render(<ChatView />);
+    state.sessionState.activeSessionPath = state.workspace + '/other.jsonl';
+    state.loadedPath = state.sessionState.activeSessionPath;
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    expect(useCommandInputStore.getState().list(source)).toEqual([expect.objectContaining({ command: '/compact' })]);
+    expect(state.commandRun).toHaveBeenCalledWith(laneKey(state.workspace, source), expect.any(Function));
+  });
+
+  it('首发模型不可用时保留原草稿身份，不把存档过户到未就绪会话', async () => {
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = state.workspace;
+    state.sessionState.draftConversationId = 'draft:unavailable';
+    state.piNewSession.mockResolvedValueOnce({ sessionFile: state.workspace + '/unavailable.jsonl', unavailable: ['model'] });
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    expect(state.sendOutcome).toBe('failed');
+    expect(state.setActiveSession).not.toHaveBeenCalled();
+    expect(state.adoptPreferences).not.toHaveBeenCalled();
+    expect(state.piPrompt).not.toHaveBeenCalled();
+  });
+
+  it('草稿首发把四项快照一次性交给新会话，收到身份后再发送', async () => {
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = state.workspace;
+    state.sessionState.draftConversationId = 'draft:initial';
+    state.composerLevel = 'high';
+    state.piOpenWorkspace.mockResolvedValue({ sessionFile: null });
+    state.piPrompt.mockResolvedValue(undefined);
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    expect(state.piNewSession).toHaveBeenCalledWith(state.workspace, {
+      revision: 0, model: { provider: 'openai', id: 'g' }, thinkingLevel: 'high', mode: 'ask', approval: 'workspace',
+    });
+    expect(state.setActiveSession).toHaveBeenCalledWith(state.workspace + '/created.jsonl');
+    expect(state.clearDraftConversation).toHaveBeenCalledWith(state.workspace, 'draft:initial');
+    expect(state.adoptPreferences).toHaveBeenCalledWith('draft:initial', state.workspace + '/created.jsonl', expect.objectContaining({ thinkingLevel: 'high', mode: 'ask' }));
+    expect(state.piPrompt).toHaveBeenCalledWith(state.workspace, 'hello', undefined, undefined, state.workspace + '/created.jsonl');
+    expect(state.piSetModel).not.toHaveBeenCalled();
     expect(state.piSetThinkingLevel).not.toHaveBeenCalled();
-    expect(state.commitComposerModelToSession.mock.invocationCallOrder[0]).toBeLessThan(
-      state.piSetModel.mock.invocationCallOrder[0],
-    );
-    expect(state.piSetModel.mock.invocationCallOrder[0]).toBeLessThan(state.piPrompt.mock.invocationCallOrder[0]);
-    expect(state.piNewSession.mock.invocationCallOrder[0]).toBeLessThan(state.piSetModel.mock.invocationCallOrder[0]);
   });
 
-  it('草稿首发把输入栏推理档位写进新会话，且晚于 setModel', async () => {
-    state.composerModel = { provider: 'openai', id: 'g' };
-    state.composerLevel = 'medium';
-    state.piSetModel.mockClear();
-    state.piSetThinkingLevel.mockClear();
-    state.sessionState.activeSessionPath = null;
-    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
-    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
-    state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
-    state.piPrompt.mockResolvedValue(undefined);
-
-    render(<ChatView />);
-    fireEvent.click(screen.getByTestId('chat-input'));
-    await act(async () => {});
-
-    expect(state.commitComposerModelToSession).toHaveBeenCalledWith(
-      '/home/.pi/agent/works/u1',
-      '/home/.pi/agent/works/u1/created.jsonl',
-      { provider: 'openai', id: 'g' },
-      'medium',
-    );
-    expect(state.piSetThinkingLevel).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'medium');
-    expect(state.piSetModel.mock.invocationCallOrder[0]).toBeLessThan(
-      state.piSetThinkingLevel.mock.invocationCallOrder[0],
-    );
-    expect(state.piSetThinkingLevel.mock.invocationCallOrder[0]).toBeLessThan(
-      state.piPrompt.mock.invocationCallOrder[0],
-    );
-  });
-
-  it('草稿首发没有输入栏模型时不调用 setModel', async () => {
+  it('首发没有可用模型时保留草稿，不借用旧会话模型发送', async () => {
     state.composerModel = null;
     state.sessionState.activeSessionPath = null;
-    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
-    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
-    state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
-    state.piPrompt.mockResolvedValue(undefined);
-    state.piSetModel.mockClear();
-
+    state.sessionState.draftConversationCwd = state.workspace;
     render(<ChatView />);
     fireEvent.click(screen.getByTestId('chat-input'));
     await act(async () => {});
-
-    expect(state.piNewSession).toHaveBeenCalled();
-    expect(state.piSetModel).not.toHaveBeenCalled();
-    expect(state.piPrompt).toHaveBeenCalled();
+    expect(state.piNewSession).not.toHaveBeenCalled();
+    expect(state.piPrompt).not.toHaveBeenCalled();
   });
 
-  it('项目草稿首发即使 openWorkspace 带回上一会话也要 newSession 再 setModel', async () => {
+  it('项目草稿首发即使 openWorkspace 带回上一会话也必须新建', async () => {
     state.workspace = 'D:/repo/app';
-    state.composerModel = { provider: 'openai', id: 'g' };
-    state.piSetModel.mockClear();
-    state.sessionState.worksDir = '/home/.pi/agent/works';
     state.sessionState.activeSessionPath = null;
-    state.sessionState.draftConversationCwd = 'D:/repo/app';
-    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: 'D:/repo/app/old.jsonl' });
-    state.piGetState.mockResolvedValue({ sessionFile: 'D:/repo/app/created.jsonl' });
+    state.sessionState.draftConversationCwd = state.workspace;
+    state.piOpenWorkspace.mockResolvedValue({ sessionFile: 'D:/repo/app/old.jsonl' });
     state.piPrompt.mockResolvedValue(undefined);
-
     render(<ChatView />);
     fireEvent.click(screen.getByTestId('chat-input'));
     await act(async () => {});
-
-    expect(state.piOpenWorkspace).toHaveBeenCalledWith('D:/repo/app');
-    expect(state.piNewSession).toHaveBeenCalledWith('D:/repo/app');
-    expect(state.setActiveSession).toHaveBeenCalledWith('D:/repo/app/created.jsonl');
-    expect(state.clearDraftConversation).toHaveBeenCalledWith('D:/repo/app');
-    expect(state.commitComposerModelToSession).toHaveBeenCalledWith(
-      'D:/repo/app',
-      'D:/repo/app/created.jsonl',
-      { provider: 'openai', id: 'g' },
-      null,
-    );
-    expect(state.piSetModel).toHaveBeenCalledWith('D:/repo/app', 'openai', 'g');
-    expect(state.piSetModel.mock.invocationCallOrder[0]).toBeLessThan(state.piPrompt.mock.invocationCallOrder[0]);
-    expect(state.piNewSession.mock.invocationCallOrder[0]).toBeLessThan(state.piSetModel.mock.invocationCallOrder[0]);
+    expect(state.piNewSession).toHaveBeenCalledWith('D:/repo/app', expect.objectContaining({ model: { provider: 'openai', id: 'g' } }));
+    expect(state.piPrompt).toHaveBeenCalledWith('D:/repo/app', 'hello', undefined, undefined, 'D:/repo/app/created.jsonl');
+    expect(state.piSetModel).not.toHaveBeenCalled();
   });
 
-  it('草稿首发用发送瞬间的输入栏模型，不被 await 之后的默认回填盖掉', async () => {
-    state.composerModel = { provider: 'deepseek', id: 'deepseek-flash' };
-    state.peekCalls = [{ provider: 'custom-mu78dr9u', id: 'grok-4.6-fast' }];
-    state.piSetModel.mockClear();
-    state.piSetModel.mockResolvedValue(undefined);
+  it('首发使用 await 前捕获的模型与思考，不读取之后别的会话选项', async () => {
     state.sessionState.activeSessionPath = null;
-    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
-    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
-    state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
+    state.sessionState.draftConversationCwd = state.workspace;
+    state.peekCalls = [{ provider: 'relay', id: 'selected' }];
+    state.composerLevel = 'high';
+    state.piOpenWorkspace.mockImplementationOnce(async () => {
+      state.composerModel = { provider: 'other', id: 'later' };
+      state.composerLevel = 'low';
+      return { sessionFile: null };
+    });
     state.piPrompt.mockResolvedValue(undefined);
-
     render(<ChatView />);
     fireEvent.click(screen.getByTestId('chat-input'));
     await act(async () => {});
-
-    expect(state.commitComposerModelToSession).toHaveBeenCalledWith(
-      '/home/.pi/agent/works/u1',
-      '/home/.pi/agent/works/u1/created.jsonl',
-      { provider: 'custom-mu78dr9u', id: 'grok-4.6-fast' },
-      null,
-    );
-    expect(state.piSetModel).toHaveBeenCalledWith(
-      '/home/.pi/agent/works/u1',
-      'custom-mu78dr9u',
-      'grok-4.6-fast',
-    );
-    expect(state.piSetModel).not.toHaveBeenCalledWith(
-      '/home/.pi/agent/works/u1',
-      'deepseek',
-      'deepseek-flash',
-    );
+    expect(state.piNewSession).toHaveBeenCalledWith(state.workspace, expect.objectContaining({ model: { provider: 'relay', id: 'selected' }, thinkingLevel: 'high' }));
   });
 
-  it('草稿首发 getState 遇到 SESSION_WORKSPACE_MISMATCH 时新建会话再读', async () => {
+  it('新建回执没有身份时明确失败，不能用当前前景 getState 猜目标', async () => {
     state.sessionState.activeSessionPath = null;
-    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
-    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
-    state.piGetState
-      .mockRejectedValueOnce(new Error('SESSION_WORKSPACE_MISMATCH'))
-      .mockResolvedValueOnce({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
-    state.piPrompt.mockResolvedValue(undefined);
-
+    state.sessionState.draftConversationCwd = state.workspace;
+    state.piNewSession.mockResolvedValueOnce({ cancelled: false });
+    state.piGetState.mockResolvedValue({ sessionFile: state.workspace + '/other.jsonl' });
     render(<ChatView />);
     fireEvent.click(screen.getByTestId('chat-input'));
     await act(async () => {});
-
-    expect(state.piNewSession).toHaveBeenCalledTimes(2);
-    expect(state.setActiveSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1/created.jsonl');
-    expect(state.storeState.lastError).toBeUndefined();
-    expect(state.piPrompt).toHaveBeenCalled();
+    expect(state.piPrompt).not.toHaveBeenCalled();
+    expect(state.piGetState).not.toHaveBeenCalled();
+    expect(state.storeState.lastError).toContain('没有返回会话标识');
   });
 
   it('停流后空跟进回车只冲刷队列，不再插一条用户气泡', async () => {
@@ -743,6 +792,24 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.pushUserMessage).not.toHaveBeenCalled();
     expect(state.piPrompt).not.toHaveBeenCalled();
     expect(state.storeState.composerQueue).toEqual([expect.objectContaining({ text: '先别再测了' })]);
+  });
+
+  it('执行性命令回执晚于会话切换时，命令胶囊仍归原会话并保留插入位置', async () => {
+    const source = state.sessionState.activeSessionPath!;
+    const other = '/home/.pi/agent/works/u1/other.jsonl';
+    state.pendingSend = '/compact';
+    state.storeState.messages = [{ kind: 'user', id: 'before-command', text: 'prior' }];
+    state.piPrompt.mockImplementationOnce(async () => {
+      state.loadedPath = other;
+      state.sessionState.activeSessionPath = other;
+    });
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    expect(useCommandInputStore.getState().list(source)).toEqual([
+      expect.objectContaining({ command: '/compact', rest: '', beforeCount: 1 }),
+    ]);
+    expect(useCommandInputStore.getState().list(other)).toEqual([]);
   });
 
   it('执行中设 /goal 立刻发给 Pi，不排进跟进、不进对话、不留命令行，回来就按会话路径补拉 Goal', async () => {

@@ -3,10 +3,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PiBrandLogo } from '../components/PiBrandLogo';
 import { RootErrorBoundary } from '../components/RootErrorBoundary';
 import { useThemeStore } from '../stores/themeStore';
 import { dismissBootSplash } from './bootSplash';
+import logoSource from '../../brand/source/grenagent-logo.svg?raw';
 
 // 不写 new URL('../../index.html', import.meta.url)：jsdom 环境下 Vite 会把这种写法改写成 http 资源地址。
 const indexHtml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../index.html'), 'utf8');
@@ -45,11 +45,15 @@ describe('index.html boot splash', () => {
     expect(doc.getElementById('root')?.childElementCount).toBe(0);
   });
 
-  it('draws the same π glyph as PiBrandLogo', () => {
-    const { container } = render(<PiBrandLogo />);
-    const splashPath = parseIndexHtml().querySelector('#boot-splash path')?.getAttribute('d');
-    expect(splashPath).toBeTruthy();
-    expect(splashPath).toBe(container.querySelector('path')?.getAttribute('d'));
+  it('renders all approved logo paths and transforms in the first frame', () => {
+    const original = new DOMParser().parseFromString(logoSource, 'image/svg+xml');
+    const geometry = (root: ParentNode) => Array.from(root.querySelectorAll('path')).map((path) => ({
+      d: path.getAttribute('d'), transform: path.getAttribute('transform'),
+    }));
+    const splash = parseIndexHtml().querySelector('#boot-splash')!;
+    expect(geometry(splash)).toEqual(geometry(original));
+    expect(splash.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 1514 378');
+    expect(splash.querySelector('text, img')).toBeNull();
   });
 });
 

@@ -1,0 +1,177 @@
+# Partial UI link repair diff against this task preimages
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx" "b/electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx"
+index 6aa6a86b..86a08008 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx"
++++ "b/electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.tsx"
+@@ -15,6 +15,7 @@ import ReactMarkdown, {
+ import remarkGfm from "remark-gfm";
+ import { sanitizeDiagramSvg, diagramIsSafeInput } from "./security";
+ import type { SourceRef } from "./api";
++import { resolveWikiLink } from "../../../../../../shared/wikiLinks";
+ import "./Mermaid.css";
+ 
+ export function Mermaid({ code }: { code: string }) {
+@@ -144,18 +145,20 @@ export function Mermaid({ code }: { code: string }) {
+     </section>
+   );
+ }
+-function safeDecode(path: string) {
+-  try {
+-    return decodeURIComponent(path);
+-  } catch {
+-    return path;
+-  }
++export function scrollToMarkdownHeading(root: Element | null | undefined, target: string) {
++  const slug = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s+/g, "-");
++  const heading = Array.from(root?.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6") || []).find(
++    (item) => item.id === target || slug(item.textContent || "") === target,
++  );
++  heading?.scrollIntoView({ block: "start" });
++  heading?.focus({ preventScroll: true });
+ }
+ const headingText = (node: any): string => node?.type === "text" ? node.value : (node?.children || []).map(headingText).join("");
+ export function Markdown({
+   value,
+   onSource,
+   onPage,
++  currentPageId,
+   headingPrefix = "wiki-heading",
+   leadingTitle,
+ }: {
+@@ -163,25 +166,11 @@ export function Markdown({
+   headingPrefix?: string;
+   leadingTitle?: string;
+   onSource: (ref: SourceRef) => void;
+-  onPage: (id: string) => void;
++  onPage: (id: string, hash?: string) => void;
++  currentPageId?: string;
+ }) {
+-  const sourceFromHref = (href: string): SourceRef | null => {
+-    let path = href.replace(/^source:/, "");
+-    const match = path.match(/#L(\d+)(?:-L?(\d+))?$/);
+-    path = path.replace(/#L.*$/, "");
+-    if (
+-      href.startsWith("source:") ||
+-      (match && !/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("//"))
+-    )
+-      return {
+-        path: safeDecode(path),
+-        start_line: Number(match?.[1] || 1),
+-        end_line: Number(match?.[2] || match?.[1] || 80),
+-      };
+-    return null;
+-  };
+-  const handlers = useRef({ onSource, onPage, headingPrefix, leadingTitle });
+-  handlers.current = { onSource, onPage, headingPrefix, leadingTitle };
++  const handlers = useRef({ onSource, onPage, currentPageId, headingPrefix, leadingTitle });
++  handlers.current = { onSource, onPage, currentPageId, headingPrefix, leadingTitle };
+   const components = useMemo<Components>(
+     () => ({
+       ...Object.fromEntries(
+@@ -224,54 +213,37 @@ export function Markdown({
+       },
+       a({ href, children }) {
+         if (!href) return <span>{children}</span>;
+-        const ref = sourceFromHref(href || "");
+-        if (ref)
++        const link = resolveWikiLink(href, handlers.current.currentPageId);
++        if (link.kind === 'invalid') return <span>{children}</span>;
++        if (link.kind === 'source')
+           return (
+             <button
+               type="button"
+               className="inline-source"
+-              onClick={() => handlers.current.onSource(ref)}
++              onClick={() => handlers.current.onSource({ path: link.path, start_line: link.start ?? 1, end_line: link.end ?? 80 })}
+             >
+               {children}
+               <span> ↗</span>
+             </button>
+           );
+-        if (href?.startsWith("#"))
++        if (link.kind === 'anchor')
+           return (
+             <button
+               type="button"
+               className="inline-page"
+               onClick={(event) => {
+-                const target = safeDecode(href.slice(1));
+-                const headings = event.currentTarget
+-                  .closest(".markdown")
+-                  ?.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6");
+-                const slug = (text: string) =>
+-                  text
+-                    .toLowerCase()
+-                    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+-                    .trim()
+-                    .replace(/\s+/g, "-");
+-                const heading = Array.from(headings || []).find(
+-                  (item) =>
+-                    item.id === target ||
+-                    slug(item.textContent || "") === target,
+-                );
+-                heading?.scrollIntoView({ block: "start" });
+-                heading?.focus({ preventScroll: true });
++                scrollToMarkdownHeading(event.currentTarget.closest('.markdown'), link.hash);
+               }}
+             >
+               {children}
+             </button>
+           );
+-        if (href && !/^(https?:|mailto:|#)/i.test(href))
++        if (link.kind === 'page')
+           return (
+             <button
+               type="button"
+               className="inline-page"
+-              onClick={() =>
+-                handlers.current.onPage(href.replace(/\.md(?:#.*)?$/, ""))
+-              }
++              onClick={() => link.hash === undefined ? handlers.current.onPage(link.pageId) : handlers.current.onPage(link.pageId, link.hash)}
+             >
+               {children}
+             </button>
+diff --git "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx" "b/electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx"
+index 958a6df8..1f9a7cf5 100644
+--- "a/.agents\\evidence\\2026-11-02-repo-wiki-generation-validation-repair\\ui-preimage\\electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx"
++++ "b/electron-agent\\vendor\\repo-wiki\\apps\\web\\src\\workspace\\Markdown.test.tsx"
+@@ -66,6 +66,39 @@ describe("safe Markdown renderer", () => {
+     fireEvent.click(screen.getByRole("button", { name: "模块" }));
+     expect(onPage).toHaveBeenCalledWith("modules/core");
+   });
++  it("resolves nested relative page links against the current page directory", () => {
++    const onPage = vi.fn();
++    render(<Markdown {...props} currentPageId="modules/core" onPage={onPage} value={'[Sibling](./api.md) [Parent](../guides/start.md)'} />);
++    fireEvent.click(screen.getByRole('button', { name: 'Sibling' }));
++    fireEvent.click(screen.getByRole('button', { name: 'Parent' }));
++    expect(onPage.mock.calls).toEqual([['modules/api'], ['guides/start']]);
++  });
++  it("decodes page paths and routes query/hash separately without corrupting page IDs", () => {
++    const onPage = vi.fn();
++    render(<Markdown {...props} currentPageId="modules/core" onPage={onPage} value={'[Guide](../guides/%E5%BC%80%E5%A7%8B.md?view=reader#%E5%AE%89%E8%A3%85)'} />);
++    fireEvent.click(screen.getByRole('button', { name: 'Guide' }));
++    expect(onPage).toHaveBeenCalledWith('guides/开始', '安装');
++  });
++  it("uses the latest current-page context after a navigation rerender", () => {
++    const onPage = vi.fn();
++    const { rerender } = render(<Markdown {...props} currentPageId="modules/core" onPage={onPage} value={'[Sibling](api.md)'} />);
++    rerender(<Markdown {...props} currentPageId="guides/start" onPage={onPage} value={'[Sibling](api.md)'} />);
++    fireEvent.click(screen.getByRole('button', { name: 'Sibling' }));
++    expect(onPage).toHaveBeenCalledWith('guides/api');
++  });
++  it("never routes unknown protocols, invalid escapes or traversal beyond the Wiki root", () => {
++    const { container } = render(<Markdown {...props} currentPageId="modules/core" value={'[Unknown](tel:+123) [Broken](bad%ZZ.md) [Escape](../../outside.md) [Encoded](%6aavascript:alert%281%29)'} />);
++    expect(container.querySelectorAll('button,a')).toHaveLength(0);
++    expect(screen.getByText('Unknown')).toBeInTheDocument();
++  });
++  it("keeps root-relative source citations and Markdown-looking code examples unchanged", () => {
++    const onSource = vi.fn();
++    const { container } = render(<Markdown {...props} currentPageId="modules/core" onSource={onSource} value={'[Code](source:src/a%20b.ts#L2-L4)\n\n`[sample](../missing.md)`\n\n```md\n[example](../missing.md)\n```'} />);
++    fireEvent.click(screen.getByRole('button', { name: /Code/ }));
++    expect(onSource).toHaveBeenCalledWith({ path: 'src/a b.ts', start_line: 2, end_line: 4 });
++    expect(container.querySelectorAll('button')).toHaveLength(1);
++    expect(container.querySelector('pre code')).toHaveTextContent('[example](../missing.md)');
++  });
+   it("makes external web links noopener noreferrer", () => {
+     render(<Markdown {...props} value={"[Docs](https://example.com/docs)"} />);
+     expect(screen.getByRole("link", { name: "Docs" })).toHaveAttribute(

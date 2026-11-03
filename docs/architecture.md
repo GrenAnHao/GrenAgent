@@ -18,7 +18,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 │          │                                   │          │
 │  ┌───────▼───────────────────────────────────▼───────┐  │
 │  │ agentdata-host 子进程：Agent Data（命名管道 JSONL）  │  │
-│  │ 记忆 L0-L3 / Wiki FTS5 / 任务与审计（node:sqlite）    │  │
+│  │ Wiki FTS5 / 线程 / 任务与审计（node:sqlite）    │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                          │
 │  主进程：ModelRuntime（短调用）                            │
@@ -34,10 +34,12 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 - **请求**：渲染层通过 `window.gren.invoke(command, args)` 调用主进程，走单业务通道 `gren:invoke`（`electron/ipc/contracts.ts` 定义、按命令名分发）。运行时命令（`agent_*`、子代理、后台 job、MCP 热重载与探测）由主进程原样转发给 agent-host 子进程。
 - **流式回传**：Agent 运行过程中的事件（`agent_start` / `message_start` / `message_delta` / `agent_end` 等）在 agent-host 子进程里产生，经 IPC 的 `broadcast` 事件交给主进程，主进程 `broadcastPiEvent` 广播到所有窗口（`pi://event`、`pi://ui-request`、`pi://exit`、`pi://jobs`，统一 `gren:event:` 前缀）。
-- **执行**：Pi SDK 跑在 agent-host 子进程里。交互与 Goal 走 `AgentSessionRuntime`；主进程的短调用（记忆、知识库、增强提示词、测活）走主进程自己的 `ModelRuntime.completeSimple`；子代理默认在 agent-host 进程内跑；worker 后端（CLI、worker 进程里再派的子代理）由子进程 `spawn(process.execPath, [PI_WORKER_ENTRY])` 并设 `ELECTRON_RUN_AS_NODE=1`。worktree 是显式工具 `create_worktree`，只切换调用方会话的工作目录（`working_directory`），不开新进程。
+- **执行**：Pi SDK 跑在 agent-host 子进程里。交互与 Goal 走 `AgentSessionRuntime`；主进程的短调用（知识库、增强提示词、测活）走主进程自己的 `ModelRuntime.completeSimple`；子代理默认在 agent-host 进程内跑；worker 后端（CLI、worker 进程里再派的子代理）由子进程 `spawn(process.execPath, [PI_WORKER_ENTRY])` 并设 `ELECTRON_RUN_AS_NODE=1`。worktree 是显式工具 `create_worktree`，只切换调用方会话的工作目录（`working_directory`），不开新进程。
 - **隔离**：业务代码只依赖 `src/platform/runtime.ts` 定义的 `GrenRuntimeBridge`，不直接引用 Electron；无 bridge 时自动降级为浏览器预览实现。
 
 ## 模块职责
+
+会话模式为 Agent / Ask / Debug / Plan / Ultra。旧 Brainstorm 会话和项目默认恢复为 Agent。Ultra 使用独立的默认/角色模型与白名单键，共用 SettingsService、供应商目录和子代理执行器；普通模型设置不参与 Ultra 解析。Ultra 规则按主会话模式注入，Ask / Plan 保持工具限制，未确认 Plan 不能手切 Ultra。子会话在元数据中固定 ordinary/ultra 路由域，恢复不随父会话改域；Ultra 历史模型不可用时明确失败，不自动换模。
 
 ### cli —— 内嵌 SDK 与 worker 入口
 
@@ -47,7 +49,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### extensions —— 内置扩展包
 
-包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进 agent-host 子进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。桌面端主进程保留 `PiPackageService` 与 `package_*` IPC 管理官方 `settings.packages`（渲染层已无扩展页签，没有入口调用）：可列出当前会话实际会加载的内置工厂（`filterManagedExtensions(filterExtensionsByProfile(manifestExtensions, profile), allowedPluginIds)`，与 `gren-runtime` 同源；内置清单向 agent-host 子进程要）以及用户 / 项目安装的 Pi Package；市场检索 npm `keywords:pi-package`，安装走 SDK `DefaultPackageManager`，写入后经子进程 `requestResourceReload()`。
+包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进 agent-host 子进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。桌面端主进程保留 `PiPackageService` 与 `package_*` IPC 管理官方 `settings.packages`（渲染层已无扩展页签，没有入口调用）：可列出当前会话实际会加载的内置工厂（`filterManagedExtensions(filterExtensionsByProfile(manifestExtensions, profile), allowedPluginIds)`，与 `gren-runtime` 同源；内置清单向 agent-host 子进程要）以及用户 / 项目安装的 Pi Package；市场检索 npm `keywords:pi-package`，安装走 SDK `DefaultPackageManager`，写入后经子进程 `requestResourceReload()`。
 
 扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS / Embedding）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
 
@@ -69,8 +71,8 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `dap` | Debug Adapter Protocol 调试 | `dap_launch`、`dap_set_breakpoints`、`dap_evaluate` 等 |
 | `diagram-hint` | Mermaid / KaTeX 渲染约定提示（隐式注入） | 策略 / 中间件，无显式工具 |
 | `fable-behavior` | Fable 5 + coding-agent 行为层（Tier 注入 + 子 agent 种子 + `fable_behavior_ref`） | `fable_behavior_ref` |
+| `gpt-with-taste` | GPT 系模型的行为层：整块文本作为 system 段落请求期投影，末条 assistant 之后插隐藏 steer；taste 生效时 fable 让位 | 无工具；`/taste status/on/off/steer on/steer off/reset` |
 | `goal` | 设定会话完成条件并自动驱动 / 判定 | `/goal` |
-| `memory` | AgentData 分层记忆、自动召回及活动分支会话捕获 | `memory_search`、`conversation_search` |
 | `wiki-rag` | TencentDB 风格 Wiki 只读检索（列出 / 检索 / 阅读） | `wiki_list`、`wiki_read`、`wiki_search` |
 | `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_explore` |
 | `session-memory` | 带分支锚点的会话工作状态；压缩时一次抽取兼作压缩摘要，交给 Pi 摘要时压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
@@ -80,7 +82,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `mcp-policy` | MCP 工具权限策略与审计 | 策略 / 中间件，无显式工具 |
 | `image-gen` | 文生图 | `generate_image` |
 | `diagnostics` | 环境 / 依赖诊断 | `diagnostics` |
-| `multi-agent` | 子代理委派 | `spawn_agent` |
+| `multi-agent` | 子代理委派，普通与 Ultra 模型配置分域 | `spawn_agent`、`list_subagent_models` |
 | `sandbox` | 自有 bash（对外契约同 pi 1.0.2 内置 bash，不再用 `createBashToolDefinition`）：沙箱 operations（Windows 照 pi 用 Git Bash：settings.json 的 `shellPath`，否则 Program Files 下的 Git、PATH 上的 bash.exe），输出流式进卡片。每次调用都是 `bash-N` job，前台等 `timeout`（默认 120 秒，`BASH_FOREGROUND_TIMEOUT_SEC`），仍在跑就交出已有输出并转后台；`run_in_background: true` 直接返回 id，完整日志写临时文件。无会话或超并发上限时退回不受管前台（timeout 到点杀）。沙箱拒绝和 runner 失败由 operations 作为事实返回（`{ exitCode, sandbox }`），bash 把标记接在输出后、退出码前并放进 `details.sandbox`，后台任务并进结算 detail；被拒后用 `sandbox_permissions` + `justification` 在同一次调用里升权，经用户批准 | `bash` |
 | `jobs` | 进程内后台 job 注册表（语义移植自 DSH jobs / jobs-local / tool-jobs）：每个 job 一个有界输出环（运行期 256KB、结算后 16KB），拉取源每 150ms 泵入；模型按消耗式游标读，`readAt` 非消耗；每个会话最多 10 个存活 job；结算发 `job-done` 通知，等待已收走、模型自己 `job_kill`、会话销毁的不发。`onEvent` 供宿主跟随，`observer.ts` 把事件合并成帧 | `job_output`、`job_list`、`job_kill` |
 | `lsp` | 语言服务器：定义 / 引用 / 悬停等 | `lsp_definition`、`lsp_references` 等 |
@@ -101,9 +103,9 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 **渲染层（`electron-agent/src`）：**
 
-- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`fileExplorer`（Dock「文件管理器」标签：项目文件树 + 多文件标签）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`agentData`（记忆与知识资产）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
+- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`fileExplorer`（Dock「文件管理器」标签：项目文件树 + 多文件标签）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`agentData`（知识资产与代码索引）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
 - `stores/`：zustand store 群，`agent.ts` / `agentReducer.ts` 为核心，把 pi 事件流折叠为会话状态。
-- `lib/`：主进程能力封装——`pi.ts`（`onPiEvent` / `onPiUiRequest` / `onPiExit`）、`agentData.ts`（记忆与 Wiki API）等。
+- `lib/`：主进程能力封装——`pi.ts`（`onPiEvent` / `onPiUiRequest` / `onPiExit`）、`agentData.ts`（Wiki 与代码索引 API）等。
 - `platform/`：**后端抽象层**。`runtime.ts` 定义 `GrenRuntimeBridge` 并对接 `window.gren`，无 bridge 时降级为 `browserPreviewBridge`，使渲染层可在纯浏览器预览态运行。
 - `components/` / `theme/`：通用组件与主题，运行时注入 `--gren-*` CSS 变量。
 - 首包只含对话界面。设置 / 连接 / 扩展 / 用量 / Agent 数据 / 开发者工作台面板、终端（xterm）、Mermaid（beautiful-mermaid、elkjs），以及 @lobehub/ui 的 Markdown / 高亮 / diff（经 `src/lib/lobeHeavy.ts` 中转）都按需加载；Markdown 与代码视图的预热在浏览器空闲后进行。
@@ -125,7 +127,6 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 自研的本地数据运行时，取代历史版本随包分发的 TencentDB 托管服务。跑在 agentdata-host 子进程里，经命名管道（Windows `\\.\pipe\grenagent-agentdata-*`，POSIX 为 0700 临时目录里的 socket）提供 JSONL RPC（token 鉴权，令牌由主进程签发）；inproc 模式下在主进程里监听 `127.0.0.1` 随机端口。数据落在 `<应用数据目录>/agent-data.db`（`node:sqlite`），只有 agentdata-host 打开它：
 
-- `memoryStore`：分级记忆和活动分支会话捕获，按来源合并提炼任务并保留未提交增量。`memory_search` 查询提炼后的记忆；`conversation_search` 查询已捕获会话的片段。L1 限来源项目，L2/L3 沿用全局作用域。
 - `wikiEngine`：每个知识库为 `<应用数据目录>/wiki/<wikiId>/`（原文 `raw/sources/`、生成页 `wiki/`、库内 `index.db`）；库状态在 `wiki_assets`（`draft` / `pending` / `processing` / `ready` / `failed`）。只有 `processing` 拒绝写入；工作台可 `resetDraft`。抽取在进程内队列完成，不建 `wiki.*` 系统任务。Agent 仅 `wiki_list` / `wiki_search` / `wiki_read`。
 - `jobStore`：任务、配置（version 乐观锁）与审计，支持导出 / 导入 / 诊断。
 - 代码检索通过内置的 CodeGraph SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。SDK 只在 codegraph-host 子进程里加载（由 agentdata-host 拉起，`CodeGraphHostClient` 门面），子进程内一个写线程、N 个读线程（`GREN_CODEGRAPH_READ_WORKERS`；`GREN_CODEGRAPH_THREADS=off` 退回单线程）。实例按工作区共享，空闲 15 分钟关闭。写由子进程主线程的 `SyncScheduler` 排：每个工作区至多一个在跑 + 一个待执行，重复请求合并；增量同步期间同工作区的查询照常应答（上一次提交的索引，写完读线程换连接），只有全量重建期间返回 busy。子进程每 10 秒报 `codegraph-host-sample`，同步失败 / 熔断 / 长时间占锁报 `codegraph-sync-event`。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
@@ -138,9 +139,9 @@ Goal 绑在当前 Pi 会话。权威源是会话 JSONL 里 `customType: "goal"` 
 
 Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话的 live Goal 页面。
 
-运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS / 子代理 env，扩展可反向调用记忆与 Wiki 能力。
+运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS / 子代理 env，扩展可反向调用 Wiki、代码索引与工具授权能力。
 
-记忆提炼共用 `TaskQueue` 的系统任务通道；Wiki 抽取走进程内串行队列与 Electron 模型短调用，不再创建 `wiki.ingest` / `wiki.sync` 任务。`SystemWorkerManager` 经 `ModelRuntime.completeSimple` 做串行短调用，不持有会话。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
+Wiki 抽取走进程内串行队列与 Electron 模型短调用，不创建 `wiki.ingest` / `wiki.sync` 任务。AgentData 不再捕获对话、提炼长期记忆或自动注入记忆上下文；启动迁移清理旧记忆数据，`session-memory` 继续负责会话压缩摘要与当前工作状态。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
 
 部分命令直接读取本地数据。用量报表来自用量账本 `<pi agentDir>/usage/ledger.db`：`extensions/usage-ledger` 在每条带 `usage` 的助手消息 `message_end` 时记一笔（主会话、子代理、命令行 pi 写同一份，WAL），插入触发器同步维护按 日 × 会话 × 模型 的汇总表；`usage_report` / `usage_reconcile` 经 agent-host 子进程的 `usageService` 查询，账本第一次被查时把会话目录里的历史导入一次，之后只在用户点「补录」时扫目录。侧栏会话列表（`WorkspaceService.listAllSessions` / `listSessions`）按字节标记只解码标题、首条用户消息、子代理与旧短调用标记所在的行，并按文件大小和修改时间缓存每份会话的解析结果，文件没变时只做一次 `stat`。
 
@@ -175,19 +176,39 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 - 前端 `ExtensionUiHost`（`electron-agent/src/features/extensionUi`）接收后写入 `wechatStatusStore` / `imMessagesStore`，由「连接」面板 `ConnectionsPanel` 展示登录二维码、状态与只读会话镜像。
 - 主人自己的交互式会话与微信流量隔离，因此桌面 UI 的「微信会话记录」是唯一能看到微信聊了什么的地方。
 
-## 记忆与知识运行时
+## 知识与数据运行时
 
-当前桌面端（Electron）使用自研 **Agent Data Runtime**（见上文 `electron-agent/electron/agentData`）：随应用启动、跑在 agentdata-host 子进程里，数据在 `<应用数据目录>/agent-data.db` 本地落盘（`node:sqlite`），提供 L0-L3 分级记忆与 Wiki FTS5 检索；运行时 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS 与子代理环境，扩展可反向调用。
+当前桌面端（Electron）使用自研 **Agent Data Runtime**（见上文 `electron-agent/electron/agentData`）：随应用启动、跑在 agentdata-host 子进程里，数据在 `<应用数据目录>/agent-data.db` 本地落盘（`node:sqlite`），提供 Wiki FTS5 检索、任务审计与线程持久化；运行时 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS 与子代理环境，扩展可反向调用。
 
 > **历史（Tauri 版，已过时）**：桌面端通过 Tauri 生命周期托管随安装包分发的 Node.js、MemoryCore 和 MemoryKnowledge。`local` 模式在应用启动时启动两个回环服务并等待 `/health`，自动初始化固定的单用户身份 `local / personal-local / pi-personal`，退出时由进程守卫回收；`remote` 模式不创建本机子进程，只连接配置的 HTTPS Gateway，并允许使用服务端已有 Team、Agent 和 User 身份。远程 Gateway API Key 与 User Key 分别保存在系统凭据库。Pi sidecar 启动后立即把两项 TencentDB 密钥移入模块私有内存并从工具子进程环境删除；知识工具通过仅获得专用 token 的 MemoryKnowledge MCP 注入。
+
+## Repo Wiki
+
+Repo Wiki 位于 Agent 数据工作台的标签中，渲染层直接使用宿主已加载项目和 `activeWorkspace`。`repoWiki_activate` 只绑定视图/工作区上下文，`repoWiki_hydrate` 按需准备当前项目；模块释放用带原 token 的 `repoWiki_release`。视图上下文不拥有后台任务，普通项目切换复用同一个 Repo Wiki OS 子进程。
+
+Repo Wiki 子进程负责项目文件、可重建 SQLite 投影、异步源码扫描和受限阶段执行。正文与计划/元数据位于 `<项目>/docs/repo-wiki/<语言>/`，`project-index.sqlite3` 是可重建投影；旧 `workspace.sqlite3` 保留为按需迁移输入。Wiki 和知识卡使用不同 namespace，卡片正式 ID 使用 `cards/` 前缀；Wiki 目录支持嵌套 ID。布局和编辑规则见 [Repo Wiki 文件说明](./repo-wiki.md)。
+
+**Legacy Wiki 与知识卡：** AgentData 的 `agent_jobs` 是 `repoWiki.generate` 的唯一任务状态；同库的阶段条目、源码快照、预算预留和写租约由 KnowledgeKernel 协调。Wiki 依次执行准备、概览、计划、目录、生成和校验，知识卡执行准备、计划、生成、关系和校验；已校验条目先持久化并确认，必需结果齐备后才整批发布。项目文件的 fence、journal 与收据协调跨文件写入，索引重建后结算任务。旧正式文档在生成或部分失败期间继续可读，人工编辑沿用三方合并和冲突候选。
+
+Legacy 知识工作进程使用 Pi SDK 的 `Agent` 和只读 `Read` / `Glob` / `Grep` / `ListDir` 工具，按冻结 manifest 限定访问；模型请求经 agentdata-host 的 `WikiService` 共享并发门到主进程，返回完整 `AssistantMessage`、工具调用和用量。启动先排空旧执行器和结算用量，再恢复符合条件的任务。应用退出暂停自动恢复，手动暂停保持暂停，取消不自动恢复；修复创建新任务并关联原任务。读取状态不扫描源码，显式检查比较正式 baseline 与实际工作区快照，Git 仅辅助候选分析；源码、搜索范围及依赖变化决定失效范围，结构变化重新规划。
+
+阅读页与任务中心使用同一版本化投影，分别表达内容新鲜度、运行状态、动作提交和准入状态；页面订阅不拥有后台执行。资料 Wiki 保留原有知识库和短调用路径，不随 Repo Wiki 内核切换。
+
+**Native Wiki：** 宿主 Repo Wiki 正常概览与生成/更新/修复/控制通过 `repoWiki_native` 使用 `qoder-wiki-local-v1`，不再要求打开第二个“原版 Wiki”入口。默认 auto 作者配置只在用户点击生成时按需保存，随后 prepare 和外发确认；页面挂载不启动生成。旧 Wiki 任务/预算/草稿保留明确的只读历史入口；旧 API 和知识卡调用合同保留，旧运行状态不覆盖当前 native 概览。`electron/wikiService/` 包含 native 操作存储、检查点、快照、分区租约和执行器；现有 repo-wiki-host 承载其私有 RPC，不新增常驻进程。AgentData `nativeWikiProjection` 消费任务/发布投影，并使用既有跨版本目标锁和共享模型并发槽；native service 是新运行的唯一协调者。start 在派发前完成任务投影并返回真实 task ID，活动按 projectId、workspace、language 隔离。`reference/qoder-0.5.1/` 保存固定参考模板与用途配置，工具/模型经批准的 Pi SDK 桥接。SQLite publication 是 native 权威，ProjectFiles 的 journal/CAS、收据和三方合并负责可重放文件投影。完成状态、成功页、保留旧文、失败项和投影状态分别表示。
+
+停用 native 仍保留 SQLite 记录、阶段正文和文件投影修复；userData 的 native 项目身份 registry 可在 ProjectFiles hydrate 失败时恢复只读入口。显式保存 native 作者配置将项目元数据升级为 schema 2，当前读取器支持 1/2，旧只认 1 的读取器拒绝接管；分支作者配置另有项目内归档。`npm run test:repo-wiki-flow` 前置定向类型检查，使用临时仓库、固定 provider 和真实知识 child 验证公开入口至发布/文件读回；类型与 CLI 已实际执行，桌面构建、UI 和真实供应商仍待验收。固定参考、宿主替代和未知项见 [原版参考说明](./repo-wiki-qoder-reference.md)，操作及验收见 [native Wiki 手册](./repo-wiki-native-manual.md)。
+
+Repo Wiki 宿主的项目根授权区分未传入与显式空列表：兼容调用方未提供 roots 时保留原有访问语义；显式传入空列表或更新为空列表时拒绝所有项目根。
 
 ## 数据存储
 
 | 数据 | 位置 |
 | --- | --- |
 | 会话记录 | `~/.pi/agent/sessions/*.jsonl` |
-| Agent Data（记忆 / Wiki / 任务与审计） | `<应用数据目录>/agent-data.db`（agentdata-host 子进程独占） |
+| Agent Data（Wiki / 线程 / 任务与审计） | `<应用数据目录>/agent-data.db`（agentdata-host 子进程独占） |
 | Wiki 正文与库内索引 | `<应用数据目录>/wiki/<wikiId>/`（`wiki/`、`raw/sources/`、`index.db`），参见 [Wiki 使用说明](./agent-data-wiki.md) |
+| Repo Wiki 正文、计划与元数据 | `<项目>/docs/repo-wiki/<语言>/`，包含历史 namespace、Markdown 与编辑/冲突基线 |
+| Repo Wiki 可重建索引与生成缓存 | `<应用数据目录>/repo-wiki/project-index.sqlite3`；旧 `workspace.sqlite3` 保留作按需迁移输入 |
 | 生成的图片 | `<工作区>/.pi/images/` |
 | 合成的音频 | `<工作区>/.pi/audio/` |
 | TencentDB 本地运行时数据（历史） | `<应用数据目录>/tencentdb-memory/`（MemoryCore、MemoryKnowledge，Tauri 版） |
@@ -202,12 +223,12 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 `embedding/` 是一个独立的本地向量服务，当前尚未集成进桌面应用。它在本地 CPU 上用 `@huggingface/transformers` 运行 `Xenova/all-MiniLM-L6-v2`，通过 `POST /embed` 返回 384 维向量，并可用 Node.js SEA 打成单文件可执行程序。
 
-它面向独立的本地向量实验，不属于桌面端记忆链路；桌面端的长期记忆和知识检索由自研 Agent Data Runtime 负责。实现细节见 `embedding/README.md`。
+它面向独立的本地向量实验；桌面端知识检索由自研 Agent Data Runtime 负责。实现细节见 `embedding/README.md`。
 
 ## 命令与规则
 
 - **命令**是全局的 Pi prompt template，文件在 `<agentDir>/prompts/<名>.md`。正文里写了 `{参数}` / `{参数=默认值}` 的模板由 `extensions/prompt-commands` 在 `input` 钩子里接管：`/名 "值" …` 展开成 `<command name="…" args="{JSON}">正文</command>`，块后接补充正文；其余模板（包括 `$1` 写法）仍由 Pi 原生展开。语法在 `extensions/prompt-commands/syntax.ts`，扩展、主进程、渲染层共用。`splitArgs` 在双引号内只把 `\"` 和 `\\` 当转义，其它反斜杠原样保留；`findCommandBlocks` 线性扫描。
 - 输入框里带参数的命令是 Lexical `CommandPillNode`（`src/features/chat/input/editor/CommandPill/`），只能放在输入开头，且输入框里最多一个：斜杠菜单与粘贴都要求光标 / 斜杠在整个输入开头且当前没有胶囊，不满足时带参数模板不出现在菜单里，粘贴按普通文本处理。胶囊内嵌原生 `<input>`：最后一个参数上 Tab、末尾 →、Esc 跳到胶囊后；第一个参数上 Shift+Tab、开头 ← 不动；离开胶囊时先 focus 编辑器根节点再移动选区；胶囊内 Ctrl/Cmd+Enter 透传 interrupt。
 - markdown 写出时胶囊写私用区字符 U+E000。发送和存草稿时由 `readComposerText` 把标记换成调用文本，调用文本总在最前，标记前后的正文各自 trim 后用一个空格接在后面。气泡由 `messageTags.tsx` 把 `<command>` 块还原成只读胶囊，不显示正文。
-- **规则**一条一个 Markdown 文件：全局 `<agentDir>/rules/*.md`，项目 `<工作区>/.pi/rules/*.md`，frontmatter 有 `title` 和 `enabled`。`extensions/context-rules` 在每次 `before_agent_start` 把启用的规则追加到 `systemPromptOptions.contextFiles`（全局在前、项目在后，同范围按文件名），按文件 mtime 缓存。读文件失败（如 Windows 上的 EBUSY）不缓存，下一轮重试；YAML 解析错误按 mtime 缓存，日志去重。子代理同样加载。
+- **规则**一条一个 Markdown 文件：全局 `<agentDir>/rules/*.md`，项目 `<工作区>/.pi/rules/*.md`，frontmatter 有 `title`、`enabled` 和可选的 `modes`（缺省/空值适用所有模式，显式未知模式报错）。`extensions/context-rules` 在每次 `before_agent_start` 把启用的规则追加到 `systemPromptOptions.contextFiles`（全局在前、项目在后，同范围按文件名），按文件 mtime 缓存。读文件失败（如 Windows 上的 EBUSY）不缓存，下一轮重试；YAML 解析错误按 mtime 缓存，日志去重。子代理同样加载。
 - 主进程 `PromptLibraryService` 负责读写两类文件，原子写的临时文件名用 `randomUUID`，规则 id 冲突按大小写不敏感判断。IPC 命令：`list_prompt_commands` / `save_prompt_command` / `delete_prompt_command` / `list_context_rules` / `save_context_rule` / `set_context_rule_enabled` / `delete_context_rule`；开关不存在的规则返回「规则不存在」。管理界面是扩展面板的「命令」「规则」页签；命令改动通过 `PI_RELOAD_REV` 让会话重载，规则改动下一轮生效。

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App } from 'antd';
 import { useEditor } from '@lobehub/editor/react';
 import { useAgentStore, useAgentStoreContext } from '../../stores/AgentStoreContext';
-import { useSessionStore } from '../../store';
+import { useComposerOwnerKey } from './input/composerOwner';
 import { useChatDraftStore } from '../../stores/chatDraftStore';
 import {
   ChatInputProvider,
@@ -58,9 +58,10 @@ export function ChatInput({
   const { useStore } = useAgentStore();
   const { workspace } = useAgentStoreContext();
   const { message } = App.useApp();
-  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
-  // 草稿按会话隔离：优先用会话文件路径（每会话独立），新建/草稿对话还没落盘 session 时回退到 workspace(cwd)。
-  const draftKey = activeSessionPath || workspace;
+  const draftKey = useComposerOwnerKey(workspace);
+  // 异步发送/取消返回时仍用最初的 key 写存档，只在原视图还可见时操作编辑器。
+  const displayedKey = useRef(draftKey);
+  displayedKey.current = draftKey;
 
   const isStreaming = useStore((s) => s.isStreaming);
   // 「正在生成」：存在流式中的 assistant 消息。回合文字完成后的收尾窗口里，
@@ -180,6 +181,17 @@ export function ChatInput({
       pastedTexts: pastedTexts.slice(),
       attachments: attachments.slice(),
     };
+    const restoreSnapshot = () => {
+      const drafts = useChatDraftStore.getState();
+      const target = drafts.resolveKey(draftKey);
+      if (!target) return;
+      useComposerFilesStore.getState().restore(draftKey, snapshot);
+      drafts.setDraft(draftKey, snapshot.draft);
+      if (drafts.resolveKey(displayedKey.current) !== target) return;
+      writeComposerText(editor, snapshot.draft);
+      setEmpty(!snapshot.draft);
+      requestAnimationFrame(() => editor.focus());
+    };
     try {
       if (!hasDraft && dispatchSingle) {
         const id = useStore.getState().composerQueue?.[0]?.id;
@@ -196,13 +208,17 @@ export function ChatInput({
         message.error('取消当前提问失败，请重试');
         return;
       }
-      editor.cleanDocument();
+      const visible = useChatDraftStore.getState().resolveKey(displayedKey.current) ===
+        useChatDraftStore.getState().resolveKey(draftKey);
+      if (visible) {
+        editor.cleanDocument();
+        setEmpty(true);
+        requestAnimationFrame(() => editor.focus());
+      }
       useComposerFilesStore.getState().clear(draftKey);
-      setEmpty(true);
-      // 已发送：清掉该会话草稿（debounce 也一并取消，避免随后把空内容当草稿又写回）。
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      // 已发送：清掉发起会话的存档，不清掉后来切到的会话。
+      if (visible && saveTimer.current) clearTimeout(saveTimer.current);
       if (draftKey) useChatDraftStore.getState().clearDraft(draftKey);
-      requestAnimationFrame(() => editor.focus());
 
       if (interrupt && hasDraft) {
         await onAbort();
@@ -225,18 +241,9 @@ export function ChatInput({
       // 草稿已经清掉，这里放开，让下一条能挂成跟进。
       sendingRef.current = false;
       const outcome = await onSend(text, images.length ? images : undefined, behavior);
-      if (outcome === 'failed') {
-        useComposerFilesStore.getState().restore(draftKey, snapshot);
-        writeComposerText(editor, snapshot.draft);
-        setEmpty(!snapshot.draft);
-        if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.draft);
-        requestAnimationFrame(() => editor.focus());
-      }
+      if (outcome === 'failed') restoreSnapshot();
     } catch {
-      useComposerFilesStore.getState().restore(draftKey, snapshot);
-      writeComposerText(editor, snapshot.draft);
-      setEmpty(!snapshot.draft);
-      if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.draft);
+      restoreSnapshot();
     } finally {
       sendingRef.current = false;
     }
@@ -295,7 +302,7 @@ export function ChatInput({
   // 供消息编辑 / 回退把文字写入底部输入框，以及编辑后走同一条普通发送。
   useEffect(() => {
     registerComposerSetValue(setValue);
-    registerComposerSend((text, images) => onSend(text, images));
+    registerComposerSend(async (text, images) => { await onSend(text, images); });
     registerComposerLoad(loadIntoDraft);
     registerComposerInsertFile(insertFile);
     return () => {
@@ -321,6 +328,11 @@ export function ChatInput({
     if (!draftKey) return;
     const prev = prevKeyRef.current;
     if (prev === draftKey) return;
+    // 旧版本未落盘草稿以 workspace 存档；只在首次挂载迁入当前独立身份。
+    if (prev === null && draftKey.startsWith('draft:')) {
+      useChatDraftStore.getState().adopt(workspace, draftKey);
+      useComposerFilesStore.getState().adopt(workspace, draftKey);
+    }
     // 关键：清掉上一个会话 pending 的 debounce save，否则它会在切换后用「新会话内容」覆盖「旧会话草稿」。
     if (saveTimer.current) clearTimeout(saveTimer.current);
     if (prev !== null) {
@@ -331,7 +343,7 @@ export function ChatInput({
     writeComposerDraft(editor, draft);
     setEmpty(!draft.text);
     requestAnimationFrame(() => editor.focus());
-  }, [draftKey, editor, readStoredDraft]);
+  }, [draftKey, editor, readStoredDraft, workspace]);
 
   // 卸载时把当前草稿同步落盘（debounce 可能还没触发）。
   useEffect(() => {

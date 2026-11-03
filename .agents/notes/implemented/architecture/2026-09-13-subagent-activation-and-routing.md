@@ -2,6 +2,8 @@
 
 Status: implemented
 
+工厂阶段冻结 `model` / `thinking_level` schema、开关仅新会话生效的部分，由 [Ultra 独立模式](../../implemented/feature/2026-10-28-ultra-mode.md) 的稳定可选字段与调用期授权替代；本篇保留历史理由。普通路由优先级、别名授权分类与名额生命周期继续沿用，Ultra 使用独立配置域。
+
 ## Problem
 
 94e5c5c5（2026-09-13）把 embedded spawn 改为可续聊的 Activation；需要 worktree 隔离的子代理由 agent-host 子进程 `spawn(process.execPath, [PI_WORKER_ENTRY])` 起 worker（`docs/architecture.md`）。DSH 子代理系列规格见 `docs/superpowers/specs/2026-09-13-dsh-subagent-*-design.md`。
@@ -24,7 +26,7 @@ Status: implemented
 
 ### 单会话子代理上限只计仍占用的名额
 
-名额在启动前预占，一次性任务结束或可继续会话收尾后释放。`tasks` 里已经闭合的任务在参数流还没写完时就启动，每个结束单独更新该行。横条用短任务名，模型写进工具结果，完成后仍显示。对得上最后一条已结束助手的 `message_end` 原地更新，不追加。
+名额在启动前预占，一次性任务结束或可继续会话收尾后释放。`tasks` 在完整参数通过授权后并行启动，每个结束单独更新该行；参数流提前启动被 [启动前完整授权](../../implemented/bug-fix/2026-10-28-subagent-authorization-before-launch.md) 取代。横条用短任务名，模型写进工具结果，完成后仍显示。对得上最后一条已结束助手的 `message_end` 原地更新，不追加。
 
 ### 涉及文件
 
@@ -32,7 +34,6 @@ Status: implemented
 - `extensions/multi-agent/list-models-tool.ts`
 - `extensions/multi-agent/index.ts`
 - `electron-agent/src/features/settings/settingsSchema.ts`
-- `extensions/multi-agent/parallel-early.ts`
 - `electron-agent/src/features/panels/subagentUtils.ts`
 - `electron-agent/src/stores/agentReducer.ts`
 
@@ -65,7 +66,7 @@ Status: implemented
 
 白名单增删对已打开会话立即生效；开关开启仍要新会话。别名显式出现在 `model` 里时不再校验目录可用性，目标不可用只会在子代理启动时才报错，这与 `profile: {model: "cheap"}` 一致。
 
-未处理的相邻问题：并行 `tasks[]` 在流式阶段提前启动（`launchEarly`，`index.ts`）时直接使用 `task.model`，没有走白名单校验，等 execute 校验失败时该任务可能已经在跑。需要单独设计「整批不启动」与「已提前启动的兄弟任务」怎么收场，不在这次改动里。
+并行参数流提前启动的白名单绕过已由 [启动前完整授权](../../implemented/bug-fix/2026-10-28-subagent-authorization-before-launch.md) 修复：execute 拒绝显式路由时整批尚未启动。
 
 ### 单会话子代理上限只计仍占用的名额
 

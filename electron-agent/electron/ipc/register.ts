@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
+import type { FilePickerOptions } from './filePicker';
 import type { SettingsService } from '../app/settingsService';
 import type { McpPolicyService } from '../app/mcpPolicyService';
 import type { McpConfigService } from '../app/mcpConfigService';
@@ -80,6 +81,8 @@ export interface IpcServices {
     abort(workspace: string): void;
   };
   workspace?: WorkspaceService;
+  /** Await child permission revocation after removing a trusted project record. */
+  workspaceProjectsChanged?: () => Promise<void>;
   /** 会话菜单「重新生成标题」：按会话文件的第一条用户消息起名，只返回标题，写回走 set_session_display_name。 */
   sessionTitle?: { generate(sessionPath: string): Promise<string> };
   uiHistory?: UiHistoryService;
@@ -105,8 +108,11 @@ export interface IpcServices {
 
 const commandHandlers = new Map<string, CommandHandler>();
 
-export function registerCommand(command: string, handler: CommandHandler): void {
+export function registerCommand(command: string, handler: CommandHandler): () => void {
   commandHandlers.set(command, handler);
+  return () => {
+    if (commandHandlers.get(command) === handler) commandHandlers.delete(command);
+  };
 }
 
 export function getRegisteredCommands(): string[] {
@@ -128,6 +134,10 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
 
   ipcMain.handle(IPC_CHANNELS.pickDirectory, async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  ipcMain.handle(IPC_CHANNELS.pickFile, async (_event, options?: FilePickerOptions) => {
+    const result = await dialog.showOpenDialog({ properties: ['openFile'], filters: options?.filters });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
   ipcMain.handle(IPC_CHANNELS.openUrl, (_event, url: string) => shell.openExternal(url));
@@ -192,7 +202,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       services.enhancePrompt!.abort(readString(args, 'workspace'));
     });
   }
-  if (services.workspace) registerWorkspaceCommands(services.workspace);
+  if (services.workspace) registerWorkspaceCommands(services.workspace, services.workspaceProjectsChanged);
   if (services.sessionTitle) {
     const sessionTitle = services.sessionTitle;
     registerCommand('generate_session_title', (_event, args) => sessionTitle.generate(readString(args, 'sessionPath')));
@@ -252,13 +262,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_admin_diagnostics', () => services.agentData!.request('admin.diagnostics'));
     registerCommand('agentData_admin_export', () => services.agentData!.request('admin.export'));
     registerCommand('agentData_admin_import', (_event, args) => services.agentData!.request('admin.import', { data: readRecord(args, 'data') }));
-    registerCommand('agentData_memory_overview', (_event, args) => services.agentData!.request('memory.admin.overview', {
-      userId: readString(args, 'userId'),
-      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
-      ...(args.projectId === undefined ? {} : { projectId: readString(args, 'projectId') }),
-      ...(args.sessionId === undefined ? {} : { sessionId: readString(args, 'sessionId') }),
-      ...(args.includeOtherProjects === true ? { includeOtherProjects: true } : {}),
-    }));
     registerWikiManagement(services.agentData);
     registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
       workspace: readString(args, 'workspace'),
@@ -267,25 +270,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_jobs_create', (_event, args) => services.agentData!.request('admin.jobs.create', {
       kind: readString(args, 'kind'),
       workspace: readString(args, 'workspace'),
-    }));
-    registerCommand('agentData_memory_search', (_event, args) => services.agentData!.request('memory.search', {
-      userId: readString(args, 'userId'),
-      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
-      ...(args.projectId === undefined ? {} : { projectId: readString(args, 'projectId') }),
-      ...(args.sessionId === undefined ? {} : { sessionId: readString(args, 'sessionId') }),
-      ...(args.includeOtherProjects === true ? { includeOtherProjects: true } : {}),
-      query: readString(args, 'query'),
-      limit: readPositiveInteger(args, 'limit', 50),
-    }));
-    registerCommand('agentData_memory_list', (_event, args) => services.agentData!.requestAdmin('memory.list', args));
-    registerCommand('agentData_memory_read', (_event, args) => services.agentData!.requestAdmin('memory.read', args));
-    registerCommand('agentData_memory_create', (_event, args) => services.agentData!.requestAdmin('memory.create', args));
-    registerCommand('agentData_memory_update', (_event, args) => services.agentData!.requestAdmin('memory.update', args));
-    registerCommand('agentData_memory_conversations_list', (_event, args) => services.agentData!.requestAdmin('memory.conversations.list', args));
-    registerCommand('agentData_memory_conversations_read', (_event, args) => services.agentData!.requestAdmin('memory.conversations.read', args));
-    registerCommand('agentData_memory_delete', (_event, args) => services.agentData!.requestAdmin('memory.delete', {
-      userId: readString(args, 'userId'),
-      id: readString(args, 'id'),
     }));
     registerCommand('agentData_code_search', (_event, args) => services.agentData!.request('codeRetrieval.search', {
       workspace: readString(args, 'workspace'),
@@ -510,6 +494,16 @@ function readRuleScope(args: Record<string, unknown>, key: string): 'global' | '
   return value;
 }
 
+/** 规则的模式范围：省略 / null 表示所有模式；给了就必须是字符串数组。 */
+function readOptionalRuleModes(args: Record<string, unknown>): string[] | undefined {
+  const value = args.modes;
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new Error('modes must be a string array');
+  }
+  return value as string[];
+}
+
 function registerPromptLibraryCommands(service: PromptLibraryService): void {
   registerCommand('list_prompt_commands', () => service.listCommands());
   registerCommand('save_prompt_command', (_event, args) => service.saveCommand({
@@ -530,6 +524,8 @@ function registerPromptLibraryCommands(service: PromptLibraryService): void {
       title: readText(args, 'title'),
       enabled: readBoolean(args, 'enabled'),
       body: readText(args, 'body'),
+      // 模式范围可选；服务端校验已知模式并去重，空数组等同所有模式。
+      modes: readOptionalRuleModes(args),
     });
   });
   registerCommand('set_context_rule_enabled', (_event, args) => service.setRuleEnabled(
@@ -557,6 +553,10 @@ function readOptionalReasoning(args: Record<string, unknown>): string | undefine
 
 function registerProviderCommands(service: ProviderService): void {
   registerCommand('get_provider_config', () => service.getConfig());
+  registerCommand('get_model_fast_preferences', () => service.getFastPreferences());
+  registerCommand('set_model_fast_preference', (_event, args) => service.setFastPreference(
+    readString(args, 'provider'), readString(args, 'modelId'), readBoolean(args, 'enabled'),
+  ));
   registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson'), readString(args, 'authJson')));
   registerCommand('refresh_model_registry', () => service.refresh());
   registerCommand('list_models_global', () => service.listModels());
@@ -595,7 +595,7 @@ function registerSettingsCommands(service: SettingsService): void {
   });
 }
 
-function registerWorkspaceCommands(service: WorkspaceService): void {
+function registerWorkspaceCommands(service: WorkspaceService, projectsChanged?: () => Promise<void>): void {
   registerCommand('get_works_dir', () => service.getWorksDir());
   registerCommand('create_conversation', () => service.createConversation());
   registerCommand('prune_orphan_conversations', (_event, args) => {
@@ -621,7 +621,10 @@ function registerWorkspaceCommands(service: WorkspaceService): void {
   });
   registerCommand('delete_pi_session', (_event, args) => service.deleteSession(readString(args, 'workspace'), readString(args, 'sessionPath')));
   registerCommand('delete_conversation', (_event, args) => service.deleteConversation(readString(args, 'workspace')));
-  registerCommand('remove_project', (_event, args) => service.removeProject(readString(args, 'workspace')));
+  registerCommand('remove_project', async (_event, args) => {
+    await service.removeProject(readString(args, 'workspace'));
+    await projectsChanged?.();
+  });
 }
 
 function registerUiHistoryCommands(service: UiHistoryService): void {
@@ -747,10 +750,11 @@ function registerPiCommands(service: PiCommandsPort): void {
   for (const command of [
     'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering', 'agent_cancel_steer', 'agent_set_model', 'agent_cycle_model',
     'agent_get_available_models', 'agent_set_thinking_level', 'agent_cycle_thinking_level', 'agent_set_mode',
-    'agent_set_approval', 'agent_exclude_entry', 'agent_restore_entry', 'agent_rewind_to', 'agent_truncate_to',
+    'agent_set_approval', 'agent_set_fast_mode', 'agent_exclude_entry', 'agent_restore_entry', 'agent_rewind_to', 'agent_truncate_to',
     'agent_compact', 'agent_set_auto_compaction', 'agent_abort_retry', 'agent_get_session_stats', 'agent_get_state',
     'agent_get_messages', 'agent_get_goal', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
     'agent_clone', 'agent_get_fork_messages', 'agent_set_session_name',
+    'agent_get_session_defaults', 'agent_set_session_defaults',
     'ask_user_draft_read', 'ask_user_draft_write', 'ask_user_draft_delete',
     'agent_complete_ask_user',
   ]) {

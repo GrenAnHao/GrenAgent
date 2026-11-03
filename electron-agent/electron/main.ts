@@ -1,5 +1,6 @@
 import { app, BrowserWindow, nativeImage, Notification } from "electron";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { APP_NAV_EVENT, BROWSER_OPEN_URL_EVENT, forwardAppCommands, guardMainWindowNavigation } from "./mainWindowNavigation";
 import { browserWindowOptions, resolveAppIcon, resolveRendererHtml } from "./mainConfig";
@@ -13,6 +14,9 @@ import { PromptLibraryService } from "./app/promptLibraryService";
 import { PiPackageService } from "./app/piPackageService";
 import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
+import { RepoWikiService, isTrustedRepoWikiSender } from "./app/repoWikiService";
+import { createRepoWikiKnowledgeModelResolver } from "./app/repoWikiKnowledgeModel";
+import { createNativeWikiModelBridge, type NativeWikiBridge } from "./app/nativeWikiModel";
 import { generateSessionTitle } from "./app/sessionTitle";
 import { UiHistoryService } from "./app/uiHistoryService";
 import { WorkspaceApprovalService } from "./app/workspaceApprovalService";
@@ -28,7 +32,7 @@ import { PermissionManager } from "./app/permissionManager";
 import { DevService } from "./app/devService";
 import { createEnhancePrompt } from "./app/enhancePrompt";
 import { AttentionService } from "./app/attentionService";
-import { registerIpcHandlers } from "./ipc/register";
+import { registerCommand, registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { attachEmbeddedWebview } from "./browser/attachEmbeddedWebview";
 import { attachDevToolsShortcut } from "./devtoolsShortcut";
@@ -37,13 +41,16 @@ import { PluginManager } from "./app/plugin/pluginManager";
 import { builtinPluginDefinitions } from "./app/plugin/builtinPlugins";
 import { assembleAgentData, type AgentDataMainMethods } from "./agentDataProcess/assemble";
 import { createCodeGraphClient } from "./agentDataProcess/codeGraphClient";
+import type { CodeGraphSyncEvent } from "./app/codeGraph/hostContract";
 import { AGENTDATA_DIAG_CHANNEL, AGENTDATA_MODEL_USAGE_CHANNEL, type AgentDataHostConfig, type AgentDataHostMethod } from "./agentDataProcess/contract";
 import type { MethodHandler } from "./agentProcess/rpcPeer";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
-import { resolveAgentDataHostEntry, resolveAgentHostEntry, resolveCodeGraphHostEntry, resolveCodeGraphWorkerEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
+import { resolveAgentDataHostEntry, resolveAgentHostEntry, resolveCodeGraphHostEntry, resolveCodeGraphWorkerEntry, resolveJobGuardExe, resolveRepoWikiHostEntry, resolveWorkerEntry } from "./agent/workerEntry";
 import { agentDataPipePath } from "./agentDataProcess/pipePath";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
-import { agentDataModelOverride, applyAgentDataModel } from "./agentData/agentDataSettings";
+import { createAgentDataModelPort } from "./agentData/createAgentDataModelPort";
+import { KnowledgeMessageBroker } from "./agent/knowledgeModelTurn";
+import type { KnowledgeMessageInput, RepoWikiKnowledgeSnapshot } from "../shared/knowledgeKernelContracts";
 import { getConfig, refreshConfig } from "../../extensions/_shared/runtime-config.js";
 import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
 import { collectModels } from "../../cli/src/probe-models.js";
@@ -125,7 +132,6 @@ if (!process.env.VITEST) {
     const isolatedWorkspace = new IsolatedWorkspaceService({
       limit: async () => Number((await settings.getAll()).isolatedWorkspaceLimit ?? DEFAULT_ISOLATED_LIMIT),
     });
-    const worksDir = await workspace.getWorksDir();
     const runtimeConfigPath = join(app.getPath('userData'), 'runtime-settings.json');
     bootstrapRuntimeConfig(runtimeConfigPath);
     process.env.PI_WORKER_ENTRY = resolveWorkerEntry({
@@ -145,12 +151,15 @@ if (!process.env.VITEST) {
       refreshConfig();
       return getConfig('agentDataModel');
     };
-    const completeAgentData = (input: { user: string; systemPrompt?: string; maxTokens?: number; signal?: AbortSignal; onUsage?: (report: { model: string; usage: unknown }) => void }) =>
-      modelRuntimeHost.completeSimple(applyAgentDataModel(input, agentDataModelRaw()));
-    const describeAgentDataModel = async () => {
-      const model = agentDataModelOverride(agentDataModelRaw());
-      return model ? `${model.provider}/${model.modelId}` : modelRuntimeHost.describeModel();
-    };
+    const knowledgeModel = createAgentDataModelPort(modelRuntimeHost, agentDataModelRaw, async () => {
+      try { return await readFile(join(agentDir, 'models.json'), 'utf8'); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+        throw error;
+      }
+    });
+    const completeAgentData = knowledgeModel.complete;
+    const describeAgentDataModel = knowledgeModel.describe;
     const entryInput = { packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname };
     const jobGuardExe = resolveJobGuardExe(entryInput);
     const codeGraphEntries = {
@@ -160,7 +169,54 @@ if (!process.env.VITEST) {
       execPath: process.execPath,
     };
     // 必须留在主进程的 socket 方法（审批 UI、渲染层广播、问 agent-host）。child 模式下由 agentdata-host 经反向 RPC 调回来。
+    let bindRepoWiki!: (service: RepoWikiService) => void;
+    const repoWikiReady = new Promise<RepoWikiService>((resolve) => { bindRepoWiki = resolve; });
+    let repoWikiInstance: RepoWikiService | undefined;
+    let nativeWikiInstance: NativeWikiBridge | undefined;
+    let nativeWikiDrain: Promise<void> = Promise.resolve();
+    let knowledgeEpoch: string | undefined, knowledgeEpochActive = false;
+    let releaseKnowledgeEpoch!: () => void;
+    let knowledgeEpochReady = new Promise<void>((resolve) => { releaseKnowledgeEpoch = resolve; });
+    const legacyKnowledgeProviders = new Map<string, { epoch?: string; abort: AbortController; settled: Promise<void> }>();
+    const knowledgeBroker = new KnowledgeMessageBroker({
+      bind: (taskId) => knowledgeModel.bindKnowledgeModel(taskId),
+      request: (binding, transcript, options) => knowledgeModel.requestKnowledgeMessage(binding, transcript, options),
+      drainWorkers: async (oldEpoch) => {
+        const old = [...legacyKnowledgeProviders.values()].filter(entry => entry.epoch !== knowledgeEpoch);
+        for (const entry of old) entry.abort.abort();
+        await Promise.allSettled(old.map(entry => entry.settled));
+        await (await repoWikiReady).drainKnowledgeWorker(oldEpoch);
+      },
+    });
+    const waitKnowledgeEpoch = async (epoch: string, signal: AbortSignal) => {
+      while (!knowledgeEpochActive) {
+        if (signal.aborted) throw new Error('aborted');
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => reject(new Error('aborted'));
+          signal.addEventListener('abort', abort, { once: true });
+          void knowledgeEpochReady.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+        });
+        if (knowledgeEpoch && knowledgeEpoch !== epoch) throw new Error('STALE_EPOCH');
+      }
+      if (knowledgeEpoch !== epoch) throw new Error('STALE_EPOCH');
+    };
     const mainMethods: AgentDataMainMethods = {
+      'knowledge.bindEpoch': async (params) => {
+        knowledgeEpochActive = false; knowledgeEpoch = readRpcString(params, 'epoch');
+        repoWikiInstance?.setKnowledgeEpoch(knowledgeEpoch);
+        releaseKnowledgeEpoch(); knowledgeEpochReady = new Promise<void>(resolve => { releaseKnowledgeEpoch = resolve; });
+        await nativeWikiDrain;
+        return knowledgeBroker.bindEpoch(knowledgeEpoch);
+      },
+      'knowledge.activateEpoch': (params) => { const epoch = readRpcString(params, 'epoch'); knowledgeBroker.activateEpoch(epoch); nativeWikiInstance?.activateModelDispatch(); knowledgeEpochActive = true; releaseKnowledgeEpoch(); return null; },
+      'knowledge.bindModel': (params) => knowledgeBroker.bind(readRpcString(params, 'taskId')),
+      'knowledge.message': (params) => knowledgeBroker.request(params.input as KnowledgeMessageInput),
+      'knowledge.abort': (params) => knowledgeBroker.abortRequest(readRpcString(params, 'requestId')),
+      'knowledge.ackUsage': (params) => knowledgeBroker.ackUsage(readRpcString(params, 'requestId')),
+      'knowledge.worker': async (params) => (await repoWikiReady).invokeKnowledgeWorker(readRpcString(params, 'method'), isRecord(params.input) ? params.input : {}),
+      'knowledge.changed': async (params) => (await repoWikiReady).publishKnowledgeSnapshot(params.snapshot as RepoWikiKnowledgeSnapshot),
+      'repoWiki.run': async (params) => (await repoWikiReady).runTask(params as unknown as Parameters<RepoWikiService['runTask']>[0]),
+      'repoWiki.cancel': async (params) => (await repoWikiReady).cancelTask({ id: readRpcString(params, 'id'), ...(params.pause === true ? { pause: true } : {}) }),
       'turn.start': (params) => agent.pi.enqueueTurn(
         readRpcString(params, 'workspace'),
         readRpcString(params, 'input'),
@@ -192,15 +248,23 @@ if (!process.env.VITEST) {
     let inprocAgentData: ReturnType<typeof assembleAgentData> | undefined;
     if (process.env.GREN_AGENTDATA_PROCESS === 'inproc') {
       const knownWorkspaces = new Set<string>();
+      let reportBreaker: (event: CodeGraphSyncEvent) => void = () => {};
       inprocAgentData = assembleAgentData({
+        knowledgeKernelVersion: 1,
         dataPath,
-        worksDir,
         model: { describe: describeAgentDataModel, complete: (input) => completeAgentData(input) },
-        codeGraph: createCodeGraphClient({ ...codeGraphEntries, listWorkspaces: () => [...knownWorkspaces], diag: recordDiagEvent }),
+        codeGraph: createCodeGraphClient({
+          ...codeGraphEntries,
+          listWorkspaces: () => [...knownWorkspaces],
+          diag: recordDiagEvent,
+          statePath: join(dirname(dataPath), 'codegraph-state.json'),
+          onBreaker: (event) => reportBreaker(event),
+        }),
         resolveSession: (project, sessionId) => agent.pi.ownsSession(project, sessionId),
         methods: mainMethods,
       });
       const assembled = inprocAgentData;
+      reportBreaker = (event) => assembled.runtime.recordCodegraphBreaker(event);
       agentData = new AgentDataService({ runtime: assembled.runtime, onKnownWorkspace: (path) => knownWorkspaces.add(path) });
     } else {
       // 模型短调用留在主进程（auth.json / OAuth 在这里）。子进程的 abort 按 requestId 找到对应的 AbortController。
@@ -212,7 +276,11 @@ if (!process.env.VITEST) {
           const requestId = readRpcString(p, 'requestId');
           const controller = new AbortController();
           modelCalls.set(requestId, controller);
+          let settled!: () => void;
           try {
+            if (typeof p.controllerEpoch === 'string') await waitKnowledgeEpoch(p.controllerEpoch, controller.signal);
+            legacyKnowledgeProviders.set(requestId, { epoch: typeof p.controllerEpoch === 'string' ? p.controllerEpoch : undefined,
+              abort: controller, settled: new Promise<void>(resolve => { settled = resolve; }) });
             const input = isRecord(p.input) ? p.input as { user: string; systemPrompt?: string; maxTokens?: number } : { user: '' };
             return await completeAgentData({
               ...input,
@@ -220,6 +288,7 @@ if (!process.env.VITEST) {
               ...(p.withUsage === true ? { onUsage: (report: { model: string; usage: unknown }) => agentDataProcess?.emit(AGENTDATA_MODEL_USAGE_CHANNEL, { requestId, report }) } : {}),
             });
           } finally {
+            settled?.(); legacyKnowledgeProviders.delete(requestId);
             modelCalls.delete(requestId);
           }
         },
@@ -243,7 +312,7 @@ if (!process.env.VITEST) {
           env: () => ({
             ...process.env,
             ELECTRON_RUN_AS_NODE: '1',
-            AGENTDATA_HOST_CONFIG: JSON.stringify({ ...launchState(), dataPath, worksDir, codeGraph: codeGraphEntries } satisfies AgentDataHostConfig),
+            AGENTDATA_HOST_CONFIG: JSON.stringify({ ...launchState(), dataPath, codeGraph: codeGraphEntries, knowledgeKernelVersion: 1 } satisfies AgentDataHostConfig),
           }),
           hostMethods,
           onEvent: (channel, payload) => {
@@ -251,6 +320,7 @@ if (!process.env.VITEST) {
           },
           onExit: (exit) => {
             recordDiagEvent({ kind: 'agentdata-host-exit', code: exit.code, signal: exit.signal, expected: exit.expected, ...(exit.fatal ? { fatal: exit.fatal } : {}), stderrTail: exit.stderrTail.slice(-4_000) });
+            nativeWikiDrain = nativeWikiInstance?.abortAndDrain() ?? Promise.resolve();
             for (const controller of modelCalls.values()) controller.abort();
             modelCalls.clear();
             hooks.onExit(exit);
@@ -328,7 +398,74 @@ if (!process.env.VITEST) {
         }
       },
     });
+    const nativeWiki = createNativeWikiModelBridge({
+      model: knowledgeModel,
+      gate: {
+        admit: async (operation, signal) => {
+          if (signal.aborted) throw signal.reason ?? new Error('aborted');
+          const project = await (await repoWikiReady).invokeKnowledgeWorker('project.read', { projectId: operation.projectId, domain: 'wiki' }) as { root: string; scope: string; key: { branch: string; language: string } };
+          const pathKey = (value: string) => process.platform === 'win32' ? value.replaceAll('\\', '/').toLowerCase() : value;
+          if (pathKey(project.root) !== pathKey(operation.repositoryRoot) || project.key.branch !== operation.branch || project.key.language !== operation.locale) throw new Error('NATIVE_SCOPE_MISMATCH');
+          if (signal.aborted) throw signal.reason ?? new Error('aborted');
+          const result = await agentData.requestAdmin<{ leaseId: string }>('admin.native.admit', { operation, scope: project.scope });
+          if (signal.aborted) { await agentData.requestAdmin('admin.native.release', { operation, leaseId: result.leaseId }); throw signal.reason ?? new Error('aborted'); }
+          return result.leaseId;
+        },
+        release: async (operation, leaseId) => { await agentData.requestAdmin('admin.native.release', { operation, leaseId }); },
+        project: async operation => { await agentData.requestAdmin('admin.native.project', { operation }); },
+        publication: async (operation, summary) => { await agentData.requestAdmin('admin.native.publication', { operation, summary }); },
+        dispatched: async (operation, requestId) => { await (await repoWikiReady).recordNativeDispatch(operation, requestId); },
+        stage: async (eventId, operationId, stage, detail) => { await agentData.requestAdmin('admin.native.stage', { eventId, operationId, stage, detail }); },
+        recover: async operation => { await agentData.requestAdmin('admin.native.recover', { operation }); },
+        withSlot: async (requestId, work, signal) => {
+          if (signal.aborted) throw signal.reason ?? new Error('aborted');
+          const cancel = () => { void agentData.requestAdmin('admin.native.slotCancel', { requestId }).catch(() => undefined); };
+          signal.addEventListener('abort', cancel, { once: true });
+          let acquired = false;
+          try {
+            await agentData.requestAdmin('admin.native.slotAcquire', { requestId }); acquired = true;
+            if (signal.aborted) throw signal.reason ?? new Error('aborted');
+            return await work();
+          } finally {
+            signal.removeEventListener('abort', cancel);
+            if (acquired) await agentData.requestAdmin('admin.native.slotRelease', { requestId });
+          }
+        },
+      },
+    });
+    nativeWikiInstance = nativeWiki;
     let mainWindow: BrowserWindow | undefined;
+    const repoWiki = new RepoWikiService({
+      entry: resolveRepoWikiHostEntry(entryInput),
+      dataDir: join(app.getPath('userData'), 'repo-wiki'),
+      registerCommand: (name, handler) => registerCommand(name, (event, args) => handler({
+        sender: event.sender, senderFrame: event.senderFrame ?? undefined,
+      }, args)),
+      isTrustedSender: (event) => isTrustedRepoWikiSender(event, {
+        window: mainWindow,
+        appUrl: process.env.ELECTRON_RENDERER_URL ?? pathToFileURL(resolveRendererHtml(app.getAppPath())).href,
+        windowForSender: (sender) => BrowserWindow.fromWebContents(sender),
+      }),
+      // Host-maintained project records grant access; renderer arguments do not.
+      allowedWorkspaces: () => workspace.readProjectSnapshot(),
+      projectSnapshot: () => workspace.getProjectSnapshot(),
+      isConversationWorkspaceSnapshot: (cwd) => workspace.isConversationWorkspaceSnapshot(cwd),
+      isConversationWorkspace: (cwd) => workspace.isConversationWorkspace(cwd),
+      resolveModel: createRepoWikiKnowledgeModelResolver(agentData, knowledgeModel.configurationIdentity),
+      native: nativeWiki,
+      tasks: agentData,
+      knowledge: agentData,
+      onError: (error) => console.error('RepoWiki configuration refresh failed', error),
+    });
+    repoWikiInstance = repoWiki;
+    if (knowledgeEpoch) repoWiki.setKnowledgeEpoch(knowledgeEpoch);
+    bindRepoWiki(repoWiki);
+    const stopRepoWikiProjectSubscription = workspace.subscribeProjectsChanged(() => {
+      void repoWiki.onHostProjectsChanged().catch((error) => console.error('RepoWiki project refresh failed', error));
+    });
+    // Metadata-only background prime. The renderer can display its existing host
+    // project snapshot before this completes; no project directories are visited.
+    void repoWiki.onHostProjectsChanged().catch((error) => console.error('RepoWiki project snapshot failed', error));
     const attention = new AttentionService({
       window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined),
       readSettings: () => settings.getAll(),
@@ -372,6 +509,7 @@ if (!process.env.VITEST) {
         // 主进程的短调用和子进程里的会话各持一份 ModelRuntime，两边都要重读。
         refresh: async () => {
           await modelRuntimeHost.refresh();
+          await repoWiki.refreshConfiguration();
           return agent.pi.refreshModelRegistry();
         },
         activeModel: async (target) => {
@@ -382,6 +520,7 @@ if (!process.env.VITEST) {
         oneshot: (request, onLine, signal) => runHostOneshot(modelRuntimeHost, request, onLine, signal),
       }),
       workspace,
+      workspaceProjectsChanged: () => repoWiki.refreshConfiguration(),
       // 短调用走主进程那份 ModelRuntime；标题模型每次现读设置。
       sessionTitle: {
         generate: (sessionPath) => generateSessionTitle(sessionPath, {
@@ -429,11 +568,14 @@ if (!process.env.VITEST) {
       if (shutdownStarted) return;
       shutdownStarted = true;
       void (async () => {
+        stopRepoWikiProjectSubscription();
         // agent-host 收尾时扩展还会经 AgentData 记账（记忆、回合状态），必须先于 agentData.stop。
         await agentProcess?.shutdown();
+        await repoWiki.drainNative();
         // child 模式：agentdata-host 自己先停 CodeGraph 同步与模型任务、再关库；inproc 模式在这里做同样的事。
-        await agentData.stop();
         await inprocAgentData?.close();
+        await agentData.stop();
+        await repoWiki.stop();
       })().catch((error) => console.error('Application shutdown failed', error)).finally(() => {
         shutdownDone = true;
         app.quit();

@@ -1,13 +1,13 @@
 import { getConfig } from './runtime-config.js';
 import { currentWorkspaceContext } from './workspace-context.js';
-import { MemoryClient } from '../memory/client.js';
+import { AgentDataClient } from './agent-data-client.js';
 
 export interface DesktopControlPort {
   request<T>(method: string, params: Record<string, unknown>): Promise<T>;
 }
 
 export function desktopControl(): DesktopControlPort {
-  return new MemoryClient();
+  return new AgentDataClient();
 }
 
 export async function authorizeDesktopOperation(

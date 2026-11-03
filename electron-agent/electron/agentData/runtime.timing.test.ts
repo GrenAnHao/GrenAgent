@@ -20,9 +20,8 @@ describe('AgentDataRuntime sync timing', () => {
   });
 
   it('records socket requests by method, folding unresolved names into fixed labels', async () => {
-    const params = { userId: 'u', workspace: '/a', sessionId: 's', source: 'session:s', transcript: 'user: one', fingerprint: 'fp1' };
     await client.request('system.status');
-    await client.request('memory.capture', params);
+    await client.request('thread.list');
     await expect(client.request('no.such.method')).rejects.toMatchObject({ code: 'METHOD_NOT_FOUND' });
     await expect(client.request('system.nope')).rejects.toMatchObject({ code: 'METHOD_NOT_FOUND' });
     await expect(new AgentDataClient({ ...(runtime.getEndpoint()!), token: 'bad' }).request('system.status')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
@@ -30,8 +29,8 @@ describe('AgentDataRuntime sync timing', () => {
     const sample = agentDataTiming.drain()!;
     const methods = new Map(sample.methods.map((row) => [row.method, row]));
     expect(methods.get('system.status')?.n).toBe(1);
-    expect(methods.get('memory.capture')).toMatchObject({ n: 1 });
-    expect(methods.get('memory.capture')!.totalMs).toBeGreaterThanOrEqual(methods.get('memory.capture')!.syncMs);
+    expect(methods.get('thread.list')).toMatchObject({ n: 1 });
+    expect(methods.get('thread.list')!.totalMs).toBeGreaterThanOrEqual(methods.get('thread.list')!.syncMs);
     expect(methods.get('rejected')?.n).toBe(2);
     expect(methods.get('invalid')?.n).toBe(1);
     expect(methods.has('no.such.method')).toBe(false);

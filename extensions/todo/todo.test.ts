@@ -65,6 +65,19 @@ describe("applyTodo", () => {
 });
 
 describe("reconstructFromEntries", () => {
+  it("normal stop 的收尾在恢复路径与 context 中一致", () => {
+    const entries = [
+      { type: "message", message: { role: "toolResult", toolName: "todo", details: { todos: [{ id: 1, text: "尾项", status: "in_progress" }], nextId: 2 } } },
+      { type: "message", message: { role: "assistant", stopReason: "stop" } },
+    ];
+    expect(reconstructFromEntries(entries).todos[0]?.status).toBe("completed");
+    expect(reconstructFromEntries([...entries, { type: "message", message: { role: "user" } }]).todos).toEqual([]);
+  });
+
+  it("恢复路径与前端一样识别大小写工具名", () => {
+    expect(reconstructFromEntries([{ type: "message", message: { role: "toolResult", toolName: "Todo", details: { todos: [{ id: 1, text: "保留", status: "pending" }] } } }]).todos).toHaveLength(1);
+  });
+
   it("uses the last successful details", () => {
     const s = reconstructFromEntries([
       { type: "message", message: { role: "toolResult", toolName: "todo", details: { todos: [{ id: 1, text: "a", done: false }], nextId: 2 } } },
@@ -116,6 +129,11 @@ describe("closeTodosInContext", () => {
       nextId: 3,
     },
   };
+
+  it("context 的字符串正文和非首 text 也同步计数", () => {
+    expect(closeTodosInContext([{ ...todo, content: "old" }, { role: "assistant", stopReason: "stop" }])?.[0]?.content).toBe("0 pending, 0 in progress, 2 completed");
+    expect(closeTodosInContext([{ ...todo, content: [{ type: "image" }, { type: "text", text: "old" }] }, { role: "assistant", stopReason: "stop" }])?.[0]?.content).toEqual([{ type: "image" }, { type: "text", text: "0 pending, 0 in progress, 2 completed" }]);
+  });
 
   it("closes the last successful todo result after a normal stop", () => {
     const next = closeTodosInContext([

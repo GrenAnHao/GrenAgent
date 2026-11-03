@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { getSettings, setSettings, closeWorkspace, openWorkspace, packageList, reloadMcpServer, probeMcpServer, readMcpToolsCache } = vi.hoisted(() => ({
+const { getSettings, setSettings, closeWorkspace, openWorkspace, packageList, reloadMcpServer, probeMcpServer, readMcpToolsCache, readMcpPolicy } = vi.hoisted(() => ({
   getSettings: vi.fn((): Promise<Record<string, string>> => Promise.resolve({})),
   setSettings: vi.fn(() => Promise.resolve()),
   closeWorkspace: vi.fn(() => Promise.resolve()),
@@ -9,6 +9,7 @@ const { getSettings, setSettings, closeWorkspace, openWorkspace, packageList, re
   packageList: vi.fn(() => Promise.resolve([])),
   reloadMcpServer: vi.fn(() => Promise.resolve()),
   probeMcpServer: vi.fn(() => Promise.resolve(JSON.stringify({ ok: true, toolNames: [] }))),
+  readMcpPolicy: vi.fn(() => Promise.resolve('')),
   readMcpToolsCache: vi.fn(() => Promise.resolve(JSON.stringify({
     fs: { ok: true, toolNames: ['mcp__fs__t'], probedAt: 't' },
   }))),
@@ -22,7 +23,7 @@ vi.mock('../../lib/pi', () => ({
 }));
 vi.mock('../../lib/mcpPolicyIo', () => ({
   probeMcpServer,
-  readMcpPolicy: () => Promise.resolve(''),
+  readMcpPolicy,
   readMcpToolsCache,
   writeMcpPolicy: () => Promise.resolve(),
 }));
@@ -42,6 +43,24 @@ afterEach(() => {
 });
 
 describe('ExtensionsPanel', () => {
+  it('loads existing tool policy while the server list is loading', async () => {
+    render(<ExtensionsPanel />);
+    await waitFor(() => expect(readMcpPolicy).toHaveBeenCalledOnce());
+  });
+  it('selects a server from the directory and returns without losing its detail', async () => {
+    getSettings.mockResolvedValueOnce({
+      MCP_SERVERS: '{"mcpServers":{"fs":{"command":"npx"},"api":{"url":"https://m"}}}',
+    });
+    render(<ExtensionsPanel />);
+    await screen.findByTestId('mcp-select-fs');
+    fireEvent.click(screen.getByTestId('mcp-select-api'));
+    const detail = screen.getByTestId('mcp-server-api');
+    expect(screen.getByTestId('mcp-workbench')).toHaveAttribute('data-mobile-detail', 'true');
+    fireEvent.click(screen.getByTestId('mcp-back'));
+    expect(screen.getByTestId('mcp-workbench')).toHaveAttribute('data-mobile-detail', 'false');
+    expect(screen.getByTestId('mcp-server-api')).toBe(detail);
+  });
+
   it('exposes MCP and skills tabs, without retired packages or code intelligence tabs', async () => {
     getSettings.mockResolvedValueOnce({});
     render(<ExtensionsPanel />);
@@ -68,8 +87,9 @@ describe('ExtensionsPanel', () => {
     });
     render(<ExtensionsPanel />);
     await waitFor(() => expect(screen.getByTestId('mcp-server-fs')).toBeTruthy());
-    expect(screen.getByTestId('mcp-server-fs').textContent).toContain('stdio');
-    expect(screen.getByTestId('mcp-server-api').textContent).toContain('sse');
+    expect(screen.getByTestId('mcp-server-fs').textContent).toContain('STDIO');
+    fireEvent.click(screen.getByTestId('mcp-select-api'));
+    expect(screen.getByTestId('mcp-server-api').textContent).toContain('HTTP');
   });
 
   it('opens the add modal from the add button', async () => {
@@ -89,7 +109,7 @@ describe('ExtensionsPanel', () => {
     });
     render(<ExtensionsPanel />);
     await waitFor(() => expect(screen.getByTestId('mcp-reload-fs')).toBeTruthy());
-    expect(screen.getByTestId('extensions-panel').textContent).toContain('点「重载」');
+    expect(screen.getByTestId('mcp-reload-fs').textContent).toContain('重载');
     probeMcpServer.mockClear();
     fireEvent.click(screen.getByTestId('mcp-reload-fs'));
     await waitFor(() => expect(reloadMcpServer).toHaveBeenCalledWith('/ws', 'fs'));

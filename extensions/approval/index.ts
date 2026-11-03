@@ -1,7 +1,8 @@
 // approval：审批策略（readonly/ask/auto/workspace/full）按会话生效 + 状态回推。
 // 策略本体在 _shared/approval（进程内共享），供 safety / 沙箱消费者读取。
-// 桌面切换走宿主 agent_set_approval：写该会话的进程内内存 + 会话条目 session-controls，
-// 并更新项目默认档（只给新会话继承）。session_start 把本会话的档钉进内存，之后项目默认档变化不再影响它。
+// 桌面切换走宿主 agent_set_approval：写该会话的进程内内存 + 会话条目 session-preferences，
+// 不再改项目默认。session_start 把本会话的档钉进内存，之后项目默认档变化不再影响它。
+// 缺档位的历史会话首次继承项目默认时把初值固化进 canonical 条目（只一次），冷恢复不再重新继承。
 import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -14,19 +15,14 @@ import {
   setApprovalPolicy,
 } from "../_shared/approval.js";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
+import { readSessionPreferences, SESSION_PREFERENCES_ENTRY } from "../_shared/session-preferences.js";
 import { currentCwd, currentSessionId } from "../_shared/workspace-context.js";
 
 type SessionEntry = { type: string; customType?: string; data?: unknown };
 
-/** 会话里最近一条宿主写的 session-controls 审批档。旧版全局 approval 条目不算会话自己的选择。 */
+/** 会话里最近一条审批档：canonical 条目与宿主写的 session-controls 一起按文件顺序取最近。 */
 export function persistedApproval(entries: SessionEntry[]): ApprovalPolicy | undefined {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i];
-    if (e.type !== "custom" || e.customType !== "session-controls") continue;
-    const parsed = parseApproval((e.data as { approval?: string } | undefined)?.approval);
-    if (parsed) return parsed;
-  }
-  return undefined;
+  return readSessionPreferences(entries).approval;
 }
 
 function legacyApproval(entries: SessionEntry[]): ApprovalPolicy | undefined {
@@ -43,6 +39,17 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus("approval-policy", getApprovalPolicy(workspaceCwd, sessionId));
     // 项目默认档：草稿输入栏显示用（新会话将继承它）。
     ctx.ui.setStatus("approval-policy-default", getDefaultApprovalPolicy(workspaceCwd));
+  };
+
+  /**
+   * 缺档位的会话首次继承时固化初值。写失败只记日志：内存已钉住，不能让整个 session_start 抛错。
+   */
+  const solidifyInitialApproval = (policy: ApprovalPolicy) => {
+    try {
+      pi.appendEntry(SESSION_PREFERENCES_ENTRY, { approval: policy, revision: 1 });
+    } catch (err) {
+      console.error("[approval] 固化初始档位失败（仅内存生效）：", err);
+    }
   };
 
   // 盘上的项目默认档变了：只灌项目默认，不碰已钉住档位的会话。
@@ -75,7 +82,9 @@ export default function (pi: ExtensionAPI) {
         ? getApprovalPolicy(projectCwd(ctx), parent)
         : undefined;
       const own = persistedApproval(entries);
-      setApprovalPolicy(own ?? inherited ?? getDefaultApprovalPolicy(projectCwd(ctx)), projectCwd(ctx), sessionId);
+      const initial = own ?? inherited ?? getDefaultApprovalPolicy(projectCwd(ctx));
+      setApprovalPolicy(initial, projectCwd(ctx), sessionId);
+      if (!own) solidifyInitialApproval(initial);
     }
     push(ctx);
   });

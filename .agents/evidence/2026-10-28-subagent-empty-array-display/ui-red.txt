@@ -1,0 +1,46 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs subagent-history
+
+构建：1 个源文件有改动（ui-harness/scenarios/subagent-history.tsx）
+场景已构建（生产模式，14.4s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[77892:1028/135328.439:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ subagent-history
+  PASS 历史：两张单卡和组合卡共享一次 registry 查询
+  PASS 历史：缺标题的完成卡按保存的 agentId 恢复任务
+  PASS 历史：单卡恢复实际模型和思考档位，模型前带供应商显示名
+  PASS 历史：重复任务按 agentId 恢复对应模型，没有显示名的供应商用 id
+  PASS 历史：没有借用同名其他子代理模型
+  PASS 历史：完成卡没有运行转圈
+  INFO 截图 history-restored  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-history-history-restored.png
+  PASS 重开：再次共享一次查询
+  PASS 重开：标题不依赖上次挂载的内存
+  PASS 重开：模型和档位不依赖上次挂载的内存
+  PASS 终态：首包补齐后释放轮询
+  INFO 截图 history-reopened  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-history-history-reopened.png
+  FAIL 空数组：成功单任务保留单卡  got 0  want 1
+  FAIL 空数组：拒绝单任务保留单卡  got 0  want 1
+  FAIL 空数组：chain 两个真实步骤没有消失  got 0  want 2
+  FAIL 单步 chain：保留逐项结果和详情索引  got 0  want 1
+  FAIL 混合 task/tasks：两项都显示  got 1  want 2
+  FAIL 混合 task/tasks：标题按后端顺序显示  got ["#1"]  want ["顶层标题","数组标题"]
+  FAIL 混合 task/tasks：模型按后端顺序显示  got ["中转站 / array"]  want ["中转站 / top","中转站 / array"]
+  FAIL 调用级拒绝：组卡直接给出原因  got 0  want 1
+  FAIL 调用级拒绝：原因原文没有丢  got false
+  FAIL 没有工作：显示错误单卡而非零项组  got 0  want 1
+  FAIL 后续结果：仍然只有原启动单卡  got 0  want 1
+  FAIL 参数流：空数组阶段不显示零项并行卡  got 1  want 0
+  PASS 参数流：第一项闭合后可见完整任务
+  PASS 参数流：第二项闭合后显示两个任务
+  FAIL 全部：没有持久的零个/零步组头  got false
+  INFO 截图 empty-arrays-light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-history-empty-arrays-light.png
+  FAIL 重挂载：空数组成功任务仍是单卡  got 0  want 1
+  FAIL 重挂载：链式步骤完整保留  got 0  want 2
+  ── 12 passed, 15 failed
+
+失败场景：subagent-history（12.0s）
+单独复跑确认：node ui-harness/check.mjs subagent-history

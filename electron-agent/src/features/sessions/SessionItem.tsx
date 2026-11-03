@@ -13,23 +13,25 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 28px;
+    height: 32px;
     margin: 0 6px;
     padding: 0 8px 0 16px;
     border-radius: 7px;
     color: ${cssVar.colorTextSecondary};
+    font-size: var(--pi-font-size-secondary, 13px);
+    font-weight: 400;
     cursor: pointer;
 
     &:hover {
-      background: ${cssVar.colorFillTertiary};
+      background: var(--gren-sidebar-hover-bg, ${cssVar.colorFillTertiary});
     }
   `,
   active: css`
     color: ${cssVar.colorText};
-    background: ${cssVar.colorFill};
+    background: var(--gren-sidebar-active-bg, ${cssVar.colorFill});
 
     &:hover {
-      background: ${cssVar.colorFill};
+      background: var(--gren-sidebar-active-bg, ${cssVar.colorFill});
     }
   `,
   title: css`
@@ -100,7 +102,7 @@ const styles = createStaticStyles(({ css }) => ({
   editWrap: css`
     display: flex;
     align-items: center;
-    height: 28px;
+    height: 32px;
     margin: 0 6px;
     padding: 0 8px 0 16px;
   `,

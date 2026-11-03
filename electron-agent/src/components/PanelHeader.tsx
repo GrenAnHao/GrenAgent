@@ -10,7 +10,7 @@ const styles = createStaticStyles(({ css }) => ({
     flex: 0 0 auto;
     height: ${HEADER_HEIGHT}px;
     padding-inline: 12px;
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+    border-block-end: 1px solid var(--gren-chrome-border, ${cssVar.colorBorderSecondary});
     /* 透明继承所在列底色（侧栏/内容），避免顶栏悬浮成更亮的色块、与列身割裂。 */
     background: transparent;
   `,
@@ -34,12 +34,12 @@ interface PanelHeaderProps {
 export function PanelHeader({ left, title, actions }: PanelHeaderProps) {
   return (
     <Flexbox horizontal align="center" distribution="space-between" className={styles.bar}>
-      <Flexbox horizontal align="center" gap={8}>
+      <Flexbox horizontal align="center" gap={8} style={{ flex: 1, minWidth: 0 }}>
         {left}
         {typeof title === 'string' ? <span className={styles.title}>{title}</span> : title}
       </Flexbox>
       {actions != null && (
-        <Flexbox horizontal align="center" gap={4}>
+        <Flexbox horizontal align="center" gap={4} style={{ flexShrink: 0 }}>
           {actions}
         </Flexbox>
       )}

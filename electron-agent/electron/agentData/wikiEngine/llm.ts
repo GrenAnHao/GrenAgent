@@ -5,10 +5,29 @@
  * and does not import the `ai` package.
  */
 
+export interface CompleteOptions {
+  signal?: AbortSignal;
+  maxTokens?: number;
+  expectedModel?: string;
+  expectedConfiguration?: string;
+  onUsage?: (report: { model: string; usage: unknown }) => void;
+}
+
+export interface KnowledgeCompletionInput {
+  user: string;
+  systemPrompt?: string;
+  maxTokens?: number;
+  expectedModel?: string;
+  /** Opaque SHA-256 identity for the resolved model configuration. */
+  expectedConfiguration?: string;
+  sourceProjectId?: string;
+}
+
 export type CompleteFn = (
   system: string,
   prompt: string,
   label?: string,
+  options?: CompleteOptions,
 ) => Promise<string>;
 
 /** Upstream raw config (shape retained for parity; unused by the adapter). */
@@ -77,7 +96,10 @@ export function createLlmClient(
   return {
     config,
     async chat(params: ChatParams): Promise<string> {
-      const text = await complete(params.system, params.prompt, params.label);
+      const text = await complete(params.system, params.prompt, params.label, {
+        signal: params.abortSignal,
+        maxTokens: params.maxOutputTokens,
+      });
       return (text ?? '').trim();
     },
   };

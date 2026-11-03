@@ -1,0 +1,61 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs task-notices
+
+构建：6 个源文件有改动（src/stores/sessionViewStateStore.ts、src/features/chat/taskNoticeModel.ts 等）
+[33m[PLUGIN_TIMINGS] [0mYour build spent 5% of 103.2s inside plugin hooks (5.6s).
+Measured inside the callback, so queue time is excluded and time the callback itself awaited is not:
+  - vite:prepare-out-dir renderStart (1%, 1.4s, 1 call)
+  - ui-harness-deps-graph generateBundle (1%, 1.2s, 1 call)
+See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+
+场景已构建（生产模式，104.6s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[94008:1028/161240.829:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ task-notices
+  PASS 结算时间线加载
+  PASS 默认全部收起，不外铺正文
+  PASS 没有多余类型标签
+  PASS bash-ok 终态明确且不混淆
+  PASS bash-exit 终态明确且不混淆
+  PASS bash-failed 终态明确且不混淆
+  PASS bash-cancel 终态明确且不混淆
+  PASS bash-timeout 终态明确且不混淆
+  PASS bash-unknown 终态明确且不混淆
+  PASS sa-done 终态明确且不混淆
+  PASS sa-error 终态明确且不混淆
+  PASS sa-abort 终态明确且不混淆
+  PASS sa-timeout 终态明确且不混淆
+  PASS 非零退出头部直接写失败和退出码
+  PASS 默认紧凑行高
+  PASS 快照补得真实耗时
+  PASS 通知原本没有的耗时从快照补回（沿用整秒格式）
+  INFO 截图 tasks-collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\task-notices-tasks-collapsed.png
+  PASS 展开直接读取留存输出
+  PASS 未显示写给模型的工具API指令
+  PASS 再点收起，正文不留空块
+  PASS 失败仍有具体输出
+  INFO 截图 tasks-failure-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\task-notices-tasks-failure-expanded.png
+  PASS 已清理的记录如实说明输出缺口
+  PASS 缺少开始时间不伪造耗时
+  PASS 迟到运行中帧不让结算倒退
+  PASS 完整报告与会话结算分开标明
+  PASS 中止会话的完整回复仍然保留
+  PASS 子代理失败保留中间产出
+  PASS 失败原因与产出分开呈现
+  PASS 超时原因含真实时间
+  PASS 成功正文中的Diagnostic是正文而非失败诊断
+  PASS 成功正文不凭引用文案生成错误块
+  PASS 空结果仍有身份和状态，展开不留白
+  PASS 长结果全文仍保留
+  PASS 长结果限高滚动，不截成摘要
+  PASS 实时重复start/end只出现一个结算卡
+  PASS 窄屏标题与元信息不撑破页面
+  INFO 截图 tasks-light-narrow  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\task-notices-tasks-light-narrow.png
+  PASS 没有组件渲染错误
+  ── 37 passed, 0 failed
+
+通过：task-notices（41.5s）。只跑了 1/39 个场景，其余 38 个没指定，未运行

@@ -43,13 +43,18 @@ const handlers = new Set<Handler>()
 let seq = 0
 let plan: Plan | null = null
 let mode = 'plan'
+let preferenceRevision = 1
+const preferences = () => ({ revision: preferenceRevision, mode, approval: 'auto', model: { provider: 'fixture', id: 'plan' }, thinkingLevel: 'off' })
 
 function emit(request: Record<string, unknown>): void {
   const envelope = { workspace: WS, sessionPath: SESSION, sessionId: 'plan-session', source: 'interactive', request: { type: 'extension_ui_request', id: `r${++seq}`, ...request } }
   for (const handler of handlers) handler({ payload: envelope })
 }
 const pushPlan = (reason: 'created' | 'updated' | 'sync') => emit({ method: 'setStatus', statusKey: 'agent-plan', statusText: JSON.stringify({ plan, reason }) })
-const pushMode = () => emit({ method: 'setStatus', statusKey: 'agent-mode', statusText: mode })
+const pushMode = () => {
+  emit({ method: 'setStatus', statusKey: 'agent-mode', statusText: mode })
+  emit({ method: 'setStatus', statusKey: 'session-preferences', statusText: JSON.stringify(preferences()) })
+}
 const notify = (message: string, level = 'info') => emit({ method: 'notify', message, level })
 const unconfirmed = () => plan?.status === 'drafting' || plan?.status === 'ready'
 
@@ -85,6 +90,7 @@ function runCommand(line: string): void {
     if (plan.status !== 'ready' || Number(rev) !== plan.rev) return notify('计划不能确认执行。', 'warning')
     plan = { ...plan, status: 'executing' }
     mode = 'agent'
+    preferenceRevision++
     pushPlan('updated')
     pushMode()
     return notify('计划已确认，切到 Agent 模式开始执行。')
@@ -107,6 +113,8 @@ installBridge({
     return () => handlers.delete(handler)
   },
   invoke: async (command: string, args: Record<string, unknown>) => {
+    if (command === 'agent_get_state') return { sessionFile: SESSION, sessionPath: SESSION, preferences: preferences() }
+    if (command === 'agent_get_session_defaults') return { revision: 0, mode: 'agent', approval: 'auto' }
     if (command === 'agent_prompt') {
       track(`prompt-target:${String(args.targetSessionPath ?? '')}`)
       runCommand(String(args.message ?? ''))
@@ -115,11 +123,13 @@ installBridge({
     if (command === 'agent_set_mode') {
       const next = String(args.mode)
       track(`set-mode:${next}`)
-      if (unconfirmed() && (next === 'agent' || next === 'debug' || next === 'brainstorm')) {
+      if (unconfirmed() && ['agent', 'debug', 'ultra'].includes(next)) {
         return { ok: false, blocked: 'PLAN_UNCONFIRMED', mode, message: BLOCK_MESSAGE }
       }
       mode = next
-      return { ok: true, mode }
+      preferenceRevision++
+      pushMode()
+      return { ok: true, mode, sessionPath: SESSION, preferences: preferences() }
     }
     track(`unstubbed:${command}`)
     return undefined
@@ -152,7 +162,7 @@ exposeActions({
 exposeData({ longStep: LONG_STEP, blockMessage: BLOCK_MESSAGE, session: SESSION })
 
 useSessionStore.setState({ worksDir: '/works', activeWorkspace: WS, activeSessionPath: SESSION, draftConversationCwd: null })
-useModeStore.setState({ byWorkspace: { [WS]: 'plan' }, bySession: {} })
+useModeStore.setState({ byWorkspace: { [WS]: 'agent' }, bySession: {} })
 useModeStore.getState().setSessionMode(SESSION, 'plan')
 useDockStore.setState({
   tabs: [],

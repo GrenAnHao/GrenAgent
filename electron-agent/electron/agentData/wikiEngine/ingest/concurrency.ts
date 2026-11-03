@@ -41,48 +41,61 @@ export function getWikiIngestMode(env: NodeJS.ProcessEnv = process.env): 'two-st
   return configured('KNOWLEDGE_WIKI_INGEST_MODE', env)?.trim() === 'single-stage' ? 'single-stage' : 'two-stage';
 }
 
-/** 每次取用时重读并发；数值变了就换一个新的限流器，进行中的调用仍用旧限流器。 */
+/** Refresh one scheduler's budget, retaining active and queued work across changes. */
 export function createRefreshingLimit(read: () => number): () => LimitFunction {
-  let concurrency = read();
-  let limit = createLimit(concurrency);
+  const scheduler = createScheduler(read());
   return () => {
-    const next = read();
-    if (next !== concurrency) {
-      concurrency = next;
-      limit = createLimit(next);
-    }
-    return limit;
+    scheduler.refresh(read());
+    return scheduler.limit;
   };
 }
 
 /** Minimal p-limit compatible limiter (no extra dependency). */
-export type LimitFunction = <T>(fn: () => Promise<T> | T) => Promise<T>;
+export type LimitFunction = <T>(fn: () => Promise<T> | T, options?: { signal?: AbortSignal }) => Promise<T>;
 
 export function createLimit(concurrency: number): LimitFunction {
-  const max = Math.max(1, concurrency);
-  let active = 0;
-  const queue: Array<() => void> = [];
+  return createScheduler(concurrency).limit;
+}
 
-  const next = () => {
-    if (active >= max) return;
-    const job = queue.shift();
-    if (!job) return;
-    active += 1;
-    job();
+function createScheduler(concurrency: number): { limit: LimitFunction; refresh(value: number): void } {
+  let max = Math.max(1, concurrency);
+  let active = 0;
+  const queue: Array<{ start(): void; cancel(): void }> = [];
+
+  const drain = () => {
+    while (active < max && queue.length > 0) {
+      const job = queue.shift()!;
+      active += 1;
+      job.start();
+    }
   };
 
-  return function limit<T>(fn: () => Promise<T> | T): Promise<T> {
+  const limit: LimitFunction = function<T>(fn: () => Promise<T> | T, options?: { signal?: AbortSignal }): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      queue.push(() => {
-        Promise.resolve()
-          .then(fn)
-          .then(resolve, reject)
-          .finally(() => {
-            active -= 1;
-            next();
-          });
-      });
-      next();
+      const signal = options?.signal;
+      const abortError = () => signal?.reason instanceof Error ? signal.reason : Object.assign(new Error('aborted'), { name: 'AbortError' });
+      if (signal?.aborted) { reject(abortError()); return; }
+      const job = {
+        start: () => {
+          signal?.removeEventListener('abort', job.cancel);
+          // Keep the slot until fn actually settles, even when its caller aborts.
+          Promise.resolve().then(() => {
+            if (signal?.aborted) throw abortError();
+            return fn();
+          }).then(resolve, reject).finally(() => { active -= 1; drain(); });
+        },
+        cancel: () => {
+          const index = queue.indexOf(job);
+          if (index < 0) return;
+          queue.splice(index, 1);
+          signal?.removeEventListener('abort', job.cancel);
+          reject(abortError());
+        },
+      };
+      queue.push(job);
+      signal?.addEventListener('abort', job.cancel, { once: true });
+      drain();
     });
   };
+  return { limit, refresh(value) { max = Math.max(1, value); drain(); } };
 }

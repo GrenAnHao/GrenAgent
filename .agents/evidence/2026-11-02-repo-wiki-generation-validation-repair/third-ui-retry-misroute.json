@@ -1,0 +1,40 @@
+{
+  "job": {
+    "id": "5206a5a5-fff5-44ac-a620-65bd587af5e0",
+    "kind": "repoWiki.generate",
+    "workspace": "D:\\System Dir\\Downloads\\note-pocock-flow",
+    "state": "running",
+    "progress": 0,
+    "error": null,
+    "created_at": 1793618498111,
+    "updated_at": 1793618502197,
+    "metadata": "{\"target\":{\"type\":\"repoWiki\",\"id\":\"D:\\\\System Dir\\\\Downloads\\\\note-pocock-flow\",\"language\":\"zh\"},\"payload\":{\"projectId\":\"f658fc02ef7446a202f5c339\",\"language\":\"zh\",\"target\":\"wiki\",\"force\":false,\"confirmExternal\":true},\"repoWiki\":{\"version\":1,\"key\":{\"workspaceInstanceId\":\"0e5d52484f460f3ae80e2f8b206786997bfb9f631410bfaae2508317fc18057d\",\"projectId\":\"f658fc02ef7446a202f5c339\",\"portableProjectId\":\"0fe5de9771b6\",\"branch\":\"master\",\"language\":\"zh\",\"domain\":\"wiki\"},\"intent\":\"generate\",\"revision\":8,\"phase\":\"overview\",\"requestId\":\"830f27af-b9da-46f3-97f8-e60375566c16\",\"currentItem\":\"overview\",\"sourceSnapshotId\":\"5206a5a5-fff5-44ac-a620-65bd587af5e0:b9ff4a1fc9f91f76c635027869c07ea3dec7576b29a741ad96fdd5b33345e4e0\",\"modelIdentity\":\"54cad5de8be9454872d8bd4e15a743b6b34079d8964d3eb3ed1fc109184e70e4\",\"pipelineConfigHash\":\"knowledge-kernel-qoder-v2\",\"budgets\":{\"version\":1,\"unit\":{\"maxModelRequests\":20,\"maxToolCalls\":60,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":300000,\"maxFileBytes\":262144,\"maxReadBytes\":2097152,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":600000},\"run\":{\"maxItems\":500,\"maxDepth\":6,\"maxModelRequests\":1000,\"maxTotalTokens\":5000000}},\"executionPolicy\":{\"version\":2,\"catalogueConcurrency\":3,\"pageConcurrency\":3,\"maxCatalogueNodes\":64,\"profiles\":{\"overview\":{\"maxModelRequests\":12,\"maxToolCalls\":40,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":200000,\"maxFileBytes\":262144,\"maxReadBytes\":2097152,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":600000},\"plan\":{\"maxModelRequests\":6,\"maxToolCalls\":16,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":120000,\"maxFileBytes\":262144,\"maxReadBytes\":1048576,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":300000},\"catalogue\":{\"maxModelRequests\":8,\"maxToolCalls\":24,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":160000,\"maxFileBytes\":262144,\"maxReadBytes\":1048576,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":300000},\"page\":{\"maxModelRequests\":20,\"maxToolCalls\":60,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":300000,\"maxFileBytes\":262144,\"maxReadBytes\":2097152,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":600000},\"module-card\":{\"maxModelRequests\":20,\"maxToolCalls\":60,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":300000,\"maxFileBytes\":262144,\"maxReadBytes\":2097152,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":600000},\"repository-card\":{\"maxModelRequests\":12,\"maxToolCalls\":32,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":200000,\"maxFileBytes\":262144,\"maxReadBytes\":2097152,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":600000},\"relations\":{\"maxModelRequests\":8,\"maxToolCalls\":24,\"maxAttempts\":2,\"maxOutputTokens\":8192,\"maxTotalTokens\":160000,\"maxFileBytes\":262144,\"maxReadBytes\":1048576,\"maxReadLines\":400,\"maxResultBytes\":32768,\"maxSearchMatches\":100,\"maxDirectoryEntries\":200,\"modelTimeoutMs\":120000,\"activeTimeMs\":300000}}},\"planHash\":\"822294bed11b85bc918b5104b6471c9692a007fcf7a7e866c13a35fff92c3b52\",\"resumePolicy\":\"auto\",\"fence\":{\"ledgerId\":\"6f2c4e20-20a7-4308-8fb2-50d37999197f\",\"controllerEpoch\":\"dbbebdfc-25f5-4ea2-99f7-f68eff724402\",\"ownerId\":\"04599ba0-1c07-4a6f-881a-a46a0cad6a2e\",\"generation\":16},\"counts\":{\"planned\":0,\"prepared\":0,\"failed\":0,\"blocked\":0,\"published\":0}}}"
+  },
+  "usage": [
+    {
+      "kind": "model",
+      "state": "dispatched",
+      "n": 1
+    },
+    {
+      "kind": "model",
+      "state": "settled",
+      "n": 9
+    },
+    {
+      "kind": "time",
+      "state": "reserved",
+      "n": 1
+    },
+    {
+      "kind": "time",
+      "state": "settled",
+      "n": 21
+    },
+    {
+      "kind": "tool",
+      "state": "settled",
+      "n": 32
+    }
+  ]
+}

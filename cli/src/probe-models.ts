@@ -3,6 +3,8 @@
 //
 // collectModels 是纯逻辑（无 pi 依赖，便于单测）；runModelProbe 动态 import pi，仅在实际运行子命令时加载。
 
+import { supportsFastMode } from "../../extensions/_shared/fast-mode.js";
+
 export interface ModelRow {
   provider: string;
   id: string;
@@ -12,13 +14,14 @@ export interface ModelRow {
   contextWindow: number;
   maxTokens: number;
   reasoning: boolean;
+  fast?: boolean;
   input: string[];
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** pi 档位 → 供应商原生取值；桌面端按它列出可选思考档（设置页测活、无项目时的输入栏）。 */
   thinkingLevelMap?: Record<string, string | null>;
 }
 
-type RawModel = Partial<ModelRow> & { provider: string; id: string };
+type RawModel = Partial<ModelRow> & { provider: string; id: string; compat?: unknown };
 
 /** ModelRegistry 的最小契约：getAll() 返回内置 + 自定义全部模型。 */
 export interface RegistryLike {
@@ -35,6 +38,7 @@ export function collectModels(registry: RegistryLike): ModelRow[] {
     contextWindow: m.contextWindow ?? 0,
     maxTokens: m.maxTokens ?? 0,
     reasoning: m.reasoning ?? false,
+    fast: supportsFastMode(m),
     input: m.input ?? ["text"],
     cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),

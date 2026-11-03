@@ -23,6 +23,16 @@ describe('lastOpen 读写', () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => localStorage.clear());
 
+  it('草稿重载还原同一身份，而不是复用同项目另一份草稿', () => {
+    writeLastOpen({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' });
+    expect(readLastOpen()).toEqual({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' });
+    expect(lastOpenFromState({ activeWorkspace: 'D:/proj', activeSessionPath: '', draftConversationCwd: 'D:/proj', draftConversationId: 'draft:one' }))
+      .toEqual({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' });
+    expect(lastOpenEquals({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' }, { workspace: 'D:/proj', sessionPath: null, draftId: 'draft:two' })).toBe(false);
+    expect(pickStartupTarget({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' }, [], works))
+      .toEqual({ kind: 'projectDraft', workspace: 'D:/proj', draftId: 'draft:one' });
+  });
+
   it('往返；坏数据和空工作区读成 null', () => {
     expect(readLastOpen()).toBeNull();
     writeLastOpen({ workspace: 'D:/proj', sessionPath: 'D:/proj/.pi/a.jsonl' });
@@ -94,6 +104,10 @@ describe('pickStartupTarget', () => {
     expect(pickStartupTarget({ workspace: `${works}/abc`, sessionPath: null }, sessions, works)).toBeNull();
     // worksDir 取不到时没法判断是不是 works 下的目录，按项目草稿处理
     expect(pickStartupTarget({ workspace: `${works}/abc`, sessionPath: null }, sessions, '')).toEqual({ kind: 'projectDraft', workspace: `${works}/abc` });
+  });
+
+  it('works 草稿已被另一窗口首发使用时，不再把同一目录当未使用草稿恢复', () => {
+    expect(pickStartupTarget({ workspace: `${works}/conv1`, sessionPath: null, draftId: 'draft:already-used' }, sessions, works)).toBeNull();
   });
 
   it('没有记忆：null', () => {

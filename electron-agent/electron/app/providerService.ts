@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFastPreferences, writeFastPreference } from '../../../extensions/_shared/fast-mode-preferences.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -60,6 +61,14 @@ export class ProviderService {
 
   constructor(private readonly options: ProviderServiceOptions) {
     this.fetchImpl = options.fetch ?? fetch;
+  }
+
+  getFastPreferences() {
+    return readFastPreferences(this.options.agentDir);
+  }
+
+  setFastPreference(provider: string, modelId: string, enabled: boolean) {
+    return writeFastPreference(this.options.agentDir, provider, modelId, enabled);
   }
 
   async getConfig(): Promise<{ modelsJson: string | null; authJson: string | null; agentDir: string }> {

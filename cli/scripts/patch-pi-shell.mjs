@@ -1,69 +1,81 @@
-/**
- * Patch @earendil-works/pi-coding-agent shell resolution on Windows:
- * - use SystemRoot\System32\where.exe (process PATH may omit System32)
- * - search registry Machine+User PATH when locating git/bash
- * - derive Git Bash from `where git.exe` for non-default install paths
- *
- * Run after npm install.
- */
+/** Supplement Pi's Windows shell discovery; preserve the upstream shell checks. */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const shellPath = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'node_modules',
-  '@earendil-works',
-  'pi-coding-agent',
-  'dist',
-  'utils',
-  'shell.js',
-);
+// Each package's postinstall passes its own root. The original CLI invocation
+// without an argument remains supported, independently of the caller's cwd.
+const projectRoot = process.argv[2]
+  ? resolve(process.argv[2])
+  : join(dirname(fileURLToPath(import.meta.url)), '..');
+const shellPath = join(projectRoot, 'node_modules/@earendil-works/pi-coding-agent/dist/utils/shell.js');
 
 if (!existsSync(shellPath)) {
   console.warn('patch-pi-shell: shell.js not found, skip');
   process.exit(0);
 }
 
-let src = readFileSync(shellPath, 'utf8');
-if (src.includes('function getWindowsSearchPath()')) {
-  console.log('patch-pi-shell: already patched');
+const source = readFileSync(shellPath, 'utf8');
+const patchMarker = '// GrenAgent Windows shell discovery v2';
+const whereCall = 'const result = spawnWhere([executable]);';
+const gitFallback = `const gitBashFromCmd = findGitBashFromGitCmd();
+        if (gitBashFromCmd) {
+            return getBashShellConfig(gitBashFromCmd);
+        }
+        `;
+
+function unexpectedShape() {
+  console.error('patch-pi-shell: unexpected shell.js shape; reinstall the supported Pi SDK before patching');
+  process.exit(1);
+}
+
+if (source.includes(patchMarker)) {
+  if (!source.includes(whereCall) || !source.includes(gitFallback) ||
+      !source.includes('if (shellPathExists(bashPath))') || source.includes('spawnSync("where",')) {
+    unexpectedShape();
+  }
+  console.log('patch-pi-shell: already patched', shellPath);
   process.exit(0);
 }
 
-const marker = 'function isLegacyWslBashPath(path) {';
-const helpers = `function winWhereExe() {
-    const root = process.env.SystemRoot || process.env.WINDIR || "C:\\\\Windows";
-    return \`\${root}\\\\System32\\\\where.exe\`;
+const helperAnchor = 'function isLegacyWslBashPath(path) {';
+const fallbackAnchor = '// 3. Fallback: search bash.exe on PATH (Cygwin, MSYS2, WSL, etc.)';
+const upstreamWhere = /const result = spawnSync\("where", \[executable\], \{[\s\S]*?\}\);/g;
+if (source.includes('function getWindowsSearchPath()') ||
+    source.split(helperAnchor).length !== 2 || source.split(fallbackAnchor).length !== 2 ||
+    !source.includes('function shellPathExists(path) {') ||
+    !source.includes('import { delimiter, join, win32 } from "node:path";') ||
+    [...source.matchAll(upstreamWhere)].length !== 1) {
+  unexpectedShape();
+}
+
+const helpers = String.raw`${patchMarker}
+function winWhereExe() {
+    return win32.join(process.env.SystemRoot || process.env.WINDIR || "C:/Windows", "System32", "where.exe");
 }
 function getWindowsSearchPath() {
     const seen = new Set();
     const parts = [];
-    for (const chunk of (process.env.PATH ?? "").split(";")) {
-        if (chunk && !seen.has(chunk.toLowerCase())) {
-            seen.add(chunk.toLowerCase());
-            parts.push(chunk);
+    const add = (value) => {
+        for (const chunk of value.split(";")) {
+            if (chunk && !seen.has(chunk.toLowerCase())) {
+                seen.add(chunk.toLowerCase());
+                parts.push(chunk);
+            }
         }
-    }
+    };
+    add(process.env.PATH ?? "");
     try {
-        const ps = \`\${process.env.SystemRoot || process.env.WINDIR || "C:\\\\Windows"}\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\`;
+        const ps = win32.join(process.env.SystemRoot || process.env.WINDIR || "C:/Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
         const result = spawnSync(ps, ["-NoProfile", "-Command", "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"], {
             encoding: "utf-8",
             timeout: 5000,
             windowsHide: true,
         });
-        if (result.status === 0 && result.stdout) {
-            for (const chunk of result.stdout.trim().split(";")) {
-                if (chunk && !seen.has(chunk.toLowerCase())) {
-                    seen.add(chunk.toLowerCase());
-                    parts.push(chunk);
-                }
-            }
-        }
+        if (result.status === 0 && result.stdout) add(result.stdout.trim());
     }
     catch {
-        // Ignore errors
+        // Registry PATH is an optional supplement to the process PATH.
     }
     return parts.join(";");
 }
@@ -79,47 +91,26 @@ function findGitBashFromGitCmd() {
     try {
         const result = spawnWhere(["git.exe"]);
         if (result.status === 0 && result.stdout) {
-            const gitExe = result.stdout.trim().split(/\\r?\\n/)[0];
+            const gitExe = result.stdout.trim().split(/\r?\n/)[0];
             if (gitExe) {
-                const gitRoot = gitExe.replace(/\\\\cmd\\\\git\\.exe$/i, "").replace(/\\\\git\\.exe$/i, "");
-                const bashPath = \`\${gitRoot}\\\\bin\\\\bash.exe\`;
-                if (existsSync(bashPath)) {
+                const gitRoot = gitExe.replace(/\\cmd\\git\.exe$/i, "").replace(/\\git\.exe$/i, "");
+                const bashPath = win32.join(gitRoot, "bin", "bash.exe");
+                if (shellPathExists(bashPath)) {
                     return bashPath;
                 }
             }
         }
     }
     catch {
-        // Ignore errors
+        // Continue with Pi's normal bash-on-PATH fallback.
     }
     return null;
 }
-${marker}`;
+`;
 
-if (!src.includes(marker)) {
-  console.error('patch-pi-shell: unexpected shell.js shape');
-  process.exit(1);
-}
-
-src = src.replace(marker, helpers);
-
-src = src.replace(
-  /const result = spawnSync\("where", \["bash\.exe"\], \{[\s\S]*?\}\);/,
-  'const result = spawnWhere(["bash.exe"]);',
-);
-
-src = src.replace(
-  /(\s+)for \(const path of paths\) \{\s+if \(existsSync\(path\)\) \{\s+return getBashShellConfig\(path\);\s+\}\s+\}/,
-  `$1for (const path of paths) {
-$1    if (existsSync(path)) {
-$1        return getBashShellConfig(path);
-$1    }
-$1}
-$1const gitBashFromCmd = findGitBashFromGitCmd();
-$1if (gitBashFromCmd) {
-$1    return getBashShellConfig(gitBashFromCmd);
-$1}`,
-);
-
-writeFileSync(shellPath, src);
+const patched = source
+  .replace(helperAnchor, helpers + helperAnchor)
+  .replace(upstreamWhere, whereCall)
+  .replace(fallbackAnchor, gitFallback + fallbackAnchor);
+writeFileSync(shellPath, patched);
 console.log('patch-pi-shell: patched', shellPath);

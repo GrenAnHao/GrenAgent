@@ -1,0 +1,61 @@
+{
+  "name": "@gren/repowiki",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-electron.mjs && npm --prefix apps/web run build",
+    "build:core": "tsc -p tsconfig.json",
+    "start": "node dist/packages/service/src/cli.js",
+    "dev": "node dist/packages/service/src/cli.js",
+    "demo": "node dist/scripts/demo.js",
+    "test": "node --import tsx --test packages/*/tests/*.test.ts",
+    "test:all": "npm test && npm run test:example && npm --prefix apps/web test",
+    "package": "node dist/scripts/package.js",
+    "test:example": "node --import tsx --test examples/atlas-service/tests/*.test.ts",
+    "migrate": "node dist/scripts/migrate.js",
+    "build:electron": "node scripts/build-electron.mjs"
+  },
+  "dependencies": {
+    "diff": "8.0.2",
+    "ignore": "7.0.5",
+    "fflate": "0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "6.0.2",
+    "tsx": "4.21.0",
+    "esbuild": "0.27.7"
+  },
+  "exports": {
+    "./core": {
+      "types": "./dist/packages/core/src/engine.d.ts",
+      "import": "./dist/packages/core/src/engine.js"
+    },
+    "./contracts": {
+      "types": "./dist/packages/contracts/src/index.d.ts",
+      "import": "./dist/packages/contracts/src/index.js"
+    },
+    "./process": {
+      "types": "./dist/packages/process/src/client.d.ts",
+      "import": "./dist/packages/process/src/client.js"
+    },
+    "./electron": {
+      "types": "./dist/packages/electron/src/index.d.ts",
+      "import": "./dist/packages/electron/src/index.js"
+    },
+    "./renderer": {
+      "types": "./dist/packages/renderer/src/index.d.ts",
+      "import": "./dist/packages/renderer/src/index.js"
+    },
+    "./preload": {
+      "types": "./dist/packages/electron/src/preload.d.ts",
+      "import": "./dist/packages/electron/src/preload.js"
+    },
+    "./panel": "./apps/web/src/RepoWikiPanel.tsx"
+  }
+}

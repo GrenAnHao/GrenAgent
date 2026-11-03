@@ -93,7 +93,6 @@ const SLASH_HIDDEN_NAMES = new Set([
   'plan-confirm',
   'plan-cancel',
   'plan-finish',
-  'brainstorm-deliver',
   'session-state',
   'im',
   'imgateway',

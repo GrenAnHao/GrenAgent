@@ -1,0 +1,38 @@
+[
+  {
+    "file": "grenagent-logo.svg",
+    "bytes": 7695,
+    "sha256": "a1929117736f6873073a3993d373620c7489422b7049545d2f77a5c85fd1a896",
+    "matches_original_zip": true
+  },
+  {
+    "file": "grenagent-icon.svg",
+    "bytes": 512,
+    "sha256": "f97ebc0687d5fbe4041e5ee56f9b0f7be678696f274d2b47174284b5710c508f",
+    "matches_original_zip": true
+  },
+  {
+    "file": "grenagent-logo-white.svg",
+    "bytes": 7690,
+    "sha256": "a8f0399a4057fcbc9feb52a9368a97d03f164bed0d5a17d8761521fe133f36fc",
+    "matches_original_zip": true
+  },
+  {
+    "file": "grenagent-icon-white.svg",
+    "bytes": 507,
+    "sha256": "05f3ea5e2a52768c848040955ae94a454053d159779a3bc27e3cd3582768efac",
+    "matches_original_zip": true
+  },
+  {
+    "file": "grenagent-preview.png",
+    "bytes": 73907,
+    "sha256": "efc74b085f7ec3f0924e4cdef94564e227413478d888f23604e8957d6dd5898b",
+    "matches_original_zip": true
+  },
+  {
+    "file": "README.txt",
+    "bytes": 1782,
+    "sha256": "8f040ad6c83e63e7d5f2f40f85cc1134fe25a14e58abd9ed197508496925c0f5",
+    "matches_original_zip": true
+  }
+]

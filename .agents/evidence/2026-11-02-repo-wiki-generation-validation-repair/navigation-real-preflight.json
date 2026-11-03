@@ -1,0 +1,101 @@
+[
+  {
+    "page": "architecture",
+    "valid": true,
+    "warnings": []
+  },
+  {
+    "page": "getting-started",
+    "valid": true,
+    "warnings": []
+  },
+  {
+    "page": "modules/bin",
+    "valid": true,
+    "warnings": []
+  },
+  {
+    "page": "modules/notes/method",
+    "valid": true,
+    "warnings": [
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/notes/method",
+        "target": "scripts/evidence"
+      },
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/notes/method",
+        "target": "scripts/cli"
+      },
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/notes/method",
+        "target": "scripts/installer"
+      }
+    ]
+  },
+  {
+    "page": "modules/notes/scripts",
+    "valid": true,
+    "warnings": [
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/notes/scripts",
+        "target": "scripts/cli"
+      },
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/notes/scripts",
+        "target": "modules/method"
+      },
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/notes/scripts",
+        "target": "scripts/evidence"
+      }
+    ]
+  },
+  {
+    "page": "modules/notes/templates",
+    "valid": true,
+    "warnings": []
+  },
+  {
+    "page": "modules/scripts/evidence",
+    "valid": true,
+    "warnings": []
+  },
+  {
+    "page": "modules/scripts/installer",
+    "valid": true,
+    "warnings": [
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/scripts/installer",
+        "target": "templates"
+      }
+    ]
+  },
+  {
+    "page": "modules/templates",
+    "valid": true,
+    "warnings": []
+  },
+  {
+    "page": "overview",
+    "valid": true,
+    "warnings": []
+  },
+  {
+    "page": "modules/pocock/upstream",
+    "valid": true,
+    "warnings": [
+      {
+        "code": "UNKNOWN_WIKI_LINK",
+        "page": "modules/pocock/upstream",
+        "target": "modules/pocock/pocock.md"
+      }
+    ]
+  }
+]

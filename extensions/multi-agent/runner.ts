@@ -1,4 +1,4 @@
-// 子代理共用的部分：结果类型、模型路由、worker 入口、派生运行时配置（能力限制、MCP、记忆开关）。
+// 子代理共用的部分：结果类型、模型路由、worker 入口、派生运行时配置（能力限制、MCP、知识注入开关）。
 // 子代理不再跑 `pi --mode json -p` 再解析 stdout：两个后端都是真会话（进程内，或 worker 进程里经 RPC，
 // 见 worker-session.ts）。打印模式的启动和 JSONL 解析只剩 im-platforms 在用，搬到了 im-platforms/pi-process.ts。
 
@@ -68,20 +68,16 @@ export function resolvePiCommand(): { cmd: string; baseArgs: string[] } {
   return { cmd: process.execPath, baseArgs: [entry] };
 }
 
-// Memory/KB switches a sub-agent forces OFF relative to the main agent: re-running
-// embeddings / extraction in every one-shot child is wasteful and can recurse.
+// Knowledge injection is disabled in sub-agents to avoid repeating retrieval.
 // MCP is handled separately (resolveMcpServers) because it's on-demand per profile.
-const SUBAGENT_MEMORY_OFF: Record<string, string> = {
-  MEMORY_EXTRACT: "0",
-  MEMORY_AUTO_INJECT: "0",
-  MEMORY_AUTO_CAPTURE: "0",
+const SUBAGENT_KNOWLEDGE_OFF: Record<string, string> = {
   KB_AUTO_INJECT: "0",
 };
 
 interface SubagentRuntimeConfig {
   /** Path to the derived config file, or undefined when there is no parent config file. */
   path: string | undefined;
-  /** Env overrides to inject into the child (profile env + memory-off + MCP_SERVERS). */
+  /** Env overrides to inject into the child (profile env + knowledge-off + MCP_SERVERS). */
   env: Record<string, string>;
   cleanup: () => void;
 }
@@ -90,7 +86,7 @@ interface SubagentRuntimeConfig {
 // fallback, so a spawn-time env override can't turn off a key already present in
 // that file (e.g. GUI-written MCP_SERVERS). To make sub-agent overrides actually
 // win, we derive a child config: inherit every parent setting, then layer on the
-// profile env, the memory-off switches, and the on-demand MCP_SERVERS. The same
+// profile env, the knowledge-off switches, and the on-demand MCP_SERVERS. The same
 // overrides are returned as `env` so they still apply when there is no parent
 // config file. `mcp` (from profile.mcp) decides how much of the parent's MCP the
 // sub-agent inherits (none / all / allowlist) — see resolveMcpServers.
@@ -147,7 +143,7 @@ export function buildSubagentRuntimeConfig(
   const env = withoutSensitiveProcessConfig({
     ...extraEnv,
     ...inheritedFsLimits(extraEnv),
-    ...SUBAGENT_MEMORY_OFF,
+    ...SUBAGENT_KNOWLEDGE_OFF,
     SAFETY_DENY_TOOLS: Array.from(denyTools).join(","),
     MCP_SERVERS: resolveMcpServers(mcp, parentMcp),
   });

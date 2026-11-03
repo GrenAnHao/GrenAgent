@@ -429,6 +429,7 @@ describe('dockStore session-owned tabs', () => {
   beforeEach(() => {
     reset();
     useDockStore.setState({ activeBySession: {}, rightOpenBySession: {}, rightFillBySession: {} });
+    useSessionStore.setState({ draftConversationCwd: null, draftConversationId: null });
     useLayoutStore.setState({ rightPanelFill: false });
     useSessionStore.setState({ activeSessionPath: A.sessionPath, activeWorkspace: '/ws' });
   });
@@ -436,8 +437,16 @@ describe('dockStore session-owned tabs', () => {
   /** 模拟一次会话切换（与 useDockSessionSwitch 的行为一致）。 */
   function switchTo(next: DockSessionView) {
     const st = useSessionStore.getState();
-    const prev = { sessionPath: st.activeSessionPath || null, workspace: st.activeWorkspace };
-    useSessionStore.setState({ activeSessionPath: next.sessionPath ?? '', activeWorkspace: next.workspace });
+    const prev = {
+      sessionPath: st.activeSessionPath || null,
+      workspace: st.activeWorkspace,
+      draftId: st.activeSessionPath ? null : st.draftConversationId,
+    };
+    useSessionStore.setState({
+      activeSessionPath: next.sessionPath ?? '',
+      activeWorkspace: next.workspace,
+      ...(next.sessionPath ? {} : { draftConversationCwd: next.workspace, draftConversationId: next.draftId ?? null }),
+    });
     useDockStore.getState().switchSessionView(prev, next);
   }
 
@@ -599,6 +608,75 @@ describe('dockStore session-owned tabs', () => {
     expect(useDockStore.getState().tabs[0].ownerSessionPath).toBeNull();
     expect(visibleRight({ sessionPath: null, workspace: '/ws' }).ids).toEqual(['d']);
     expect(visibleRight({ sessionPath: null, workspace: '/other' }).ids).toEqual([]);
+    expect(visibleRight(A).ids).toEqual([]);
+  });
+
+  it('两份未落盘草稿各有自己的右栏标签与展开态，互不串', () => {
+    const d1 = { sessionPath: null, workspace: '/ws', draftId: 'draft:one' };
+    const d2 = { sessionPath: null, workspace: '/ws', draftId: 'draft:two' };
+    useSessionStore.setState({ activeSessionPath: '', activeWorkspace: '/ws', draftConversationCwd: '/ws', draftConversationId: 'draft:one' });
+    useDockStore.getState().openPage({ url: 'https://one', content: 'one' });
+    const one = useDockStore.getState().tabs[0];
+    expect(one).toMatchObject({ ownerSessionPath: null, ownerDraftId: 'draft:one' });
+    expect(visibleRight(d1)).toEqual({ ids: ['page:https://one'], active: 'page:https://one' });
+    expect(visibleRight(d2).ids).toEqual([]);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+
+    switchTo(d2);
+    expect(visibleRight(d2).ids).toEqual([]);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+    useDockStore.getState().openPage({ url: 'https://two', content: 'two' });
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ ownerSessionPath: null, ownerDraftId: 'draft:two' });
+
+    switchTo(d1);
+    expect(visibleRight(d1)).toEqual({ ids: ['page:https://one'], active: 'page:https://one' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('adoptDraftView 传 draftId 时只过户那份草稿，另一份草稿原样保留', () => {
+    const d1 = { sessionPath: null, workspace: '/ws', draftId: 'draft:one' };
+    const d2 = { sessionPath: null, workspace: '/ws', draftId: 'draft:two' };
+    useSessionStore.setState({ activeSessionPath: '', activeWorkspace: '/ws', draftConversationCwd: '/ws', draftConversationId: 'draft:one' });
+    switchTo(d1);
+    useDockStore.getState().openPage({ url: 'https://one', content: 'one' });
+    switchTo(d2);
+    useDockStore.getState().openPage({ url: 'https://two', content: 'two' });
+
+    // 后台草稿 one 首发落盘：当前画面还是草稿 two。
+    useDockStore.getState().adoptDraftView('/ws', '/ws/one.jsonl', 'draft:one');
+    const tabs = useDockStore.getState().tabs;
+    const adopted = tabs.find((t) => t.id === 'page:https://one')!;
+    expect(adopted.ownerSessionPath).toBe('/ws/one.jsonl');
+    expect(adopted.ownerDraftId).toBeUndefined();
+    expect(tabs.find((t) => t.id === 'page:https://two')).toMatchObject({ ownerSessionPath: null, ownerDraftId: 'draft:two' });
+
+    // 当前画面没变：草稿 two 的标签与展开态不受影响，也没有被误当成一次「草稿过户切换」。
+    expect(visibleRight(d2)).toEqual({ ids: ['page:https://two'], active: 'page:https://two' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    // 草稿 one 记下的激活项跟着过户到新会话；草稿 one 自己的键被清掉。
+    const remembered = useDockStore.getState().activeBySession;
+    expect(remembered['d:/ws#draft:one']).toBeUndefined();
+    expect(remembered['s:/ws/one.jsonl']?.right).toBe('page:https://one');
+  });
+
+  it('旧数据里没有 ownerDraftId 的草稿标签仍在该工作区的草稿里可见（兼容一次）', () => {
+    useDockStore.setState({
+      tabs: [
+        {
+          id: 'legacy',
+          kind: 'page',
+          region: 'right',
+          title: '旧',
+          closable: true,
+          order: 0,
+          payload: { url: 'https://legacy', content: '' },
+          ownerSessionPath: null,
+          ownerWorkspace: '/ws',
+        },
+      ],
+    });
+    expect(visibleRight({ sessionPath: null, workspace: '/ws', draftId: 'draft:one' }).ids).toEqual(['legacy']);
+    expect(visibleRight({ sessionPath: null, workspace: '/other', draftId: 'draft:x' }).ids).toEqual([]);
     expect(visibleRight(A).ids).toEqual([]);
   });
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn() }));
 import { getConfig } from "../_shared/runtime-config.js";
-import { assertRouteAllowed, assertThinkingLevel, readModelSelectionPolicy, resolveRouteAlias, THINKING_LEVELS } from "./model-selection.js";
+import { assertRouteAllowed, assertThinkingLevel, readModelSelectionPolicy, resolveRouteAlias, resolveThinkingLevel, supportedThinkingLevels, THINKING_LEVELS } from "./model-selection.js";
 
 function cfg(map: Record<string, string | undefined>): void {
   vi.mocked(getConfig).mockImplementation((k: string) => map[k]);
@@ -31,7 +31,7 @@ describe("readModelSelectionPolicy", () => {
     cfg({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: "not json" });
     expect(readModelSelectionPolicy().enabled).toBe(false);
   });
-  it("allowlist is re-read on every access; enabled stays as decided at load", () => {
+  it("allowlist and enabled are re-read from current settings", () => {
     cfg({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: '["a/b"]' });
     const p = readModelSelectionPolicy();
     cfg({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: '["c/d"]' });
@@ -43,6 +43,7 @@ describe("readModelSelectionPolicy", () => {
     const p = readModelSelectionPolicy();
     cfg({ SUBAGENT_MODEL_SELECTION: "0", SUBAGENT_MODEL_ALLOWLIST: '["a/b"]' });
     expect(p.allowlist.size).toBe(0);
+    expect(p.enabled).toBe(false);
   });
 });
 
@@ -99,11 +100,54 @@ describe("assertThinkingLevel", () => {
   it("accepts high on a reasoning model", () => {
     expect(() => assertThinkingLevel("high", model("a", "b", true))).not.toThrow();
   });
-  it("rejects a level the model maps to null", () => {
+  it("rejects a level the model maps to null and says what is available", () => {
     const m = { ...(model("a", "b", true) as object), thinkingLevelMap: { xhigh: null } } as never;
     expect(() => assertThinkingLevel("xhigh", m)).toThrow("模型 a/b 不支持思考档 xhigh");
+    expect(() => assertThinkingLevel("xhigh", m)).toThrow("可用 off/minimal/low/medium/high");
   });
   it("exports the SDK enum", () => {
     expect(THINKING_LEVELS).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  });
+});
+
+describe("supportedThinkingLevels", () => {
+  it("non-reasoning models only have off", () => {
+    expect(supportedThinkingLevels(model("a", "b", false))).toEqual(["off"]);
+  });
+  it("drops levels mapped to null", () => {
+    const m = { ...(model("a", "b", true) as object), thinkingLevelMap: { minimal: null, medium: null } } as never;
+    expect(supportedThinkingLevels(m)).toEqual(["off", "low", "high"]);
+  });
+  it("requires an explicit map entry for xhigh / max, matching the SDK", () => {
+    const unmapped = { ...(model("a", "b", true) as object), thinkingLevelMap: { low: "low", high: "high", xhigh: "xhigh" } } as never;
+    // 没写 max → 不报 max；没写的 medium 仍可用（只有 xhigh / max 需要显式映射）。
+    expect(supportedThinkingLevels(unmapped)).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
+  });
+});
+
+describe("resolveThinkingLevel", () => {
+  // 实际配置过的那个模型：只有 low / high / xhigh，medium 被标 null。
+  const deepseek = {
+    provider: "custom-mvjk9w7k",
+    id: "deepseek-v4.1-flash",
+    name: "deepseek-v4.1-flash",
+    reasoning: true,
+    thinkingLevelMap: { minimal: null, low: "low", medium: null, high: "high", xhigh: "xhigh" },
+  } as never;
+
+  it("keeps a supported level as is", () => {
+    expect(resolveThinkingLevel("high", deepseek)).toEqual({ level: "high", requested: "high", coerced: false });
+  });
+  it("coerces an unsupported level to the nearest higher one", () => {
+    expect(resolveThinkingLevel("medium", deepseek)).toEqual({ level: "high", requested: "medium", coerced: true });
+  });
+  it("falls back downwards when nothing above is available", () => {
+    expect(resolveThinkingLevel("max", deepseek)).toEqual({ level: "xhigh", requested: "max", coerced: true });
+  });
+  it("coerces any reasoning level to off on a non-reasoning model", () => {
+    expect(resolveThinkingLevel("medium", model("a", "b", false))).toEqual({ level: "off", requested: "medium", coerced: true });
+  });
+  it("still rejects a value outside the enum", () => {
+    expect(() => resolveThinkingLevel("turbo", deepseek)).toThrow("thinking_level 无效");
   });
 });

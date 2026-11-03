@@ -1,4 +1,4 @@
-import { AudioLines, Bell, Bot, Cpu, Database, GitBranch, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
+import { AudioLines, Bell, Bot, Cpu, Database, GitBranch, Globe, Image, Palette, Settings2, ShieldCheck, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { parseRepeatGuardConfig } from '@extensions/loop-guard/chain';
 import { NOTIFY_SETTING_DEFAULTS } from '../../../electron/app/attentionContract';
@@ -149,7 +149,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         label: '增强提示词结合项目（实验）',
         type: 'boolean',
         default: '0',
-        description: '打开后允许查阅会话目标、wiki/记忆和代码图；更慢，且依赖索引。默认关',
+        description: '打开后允许查阅会话目标、Wiki 和代码图；更慢，且依赖索引。默认关',
       },
       {
         key: 'AUTO_COMPACT_PERCENT',
@@ -340,7 +340,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             label: '单会话最大子代理数',
             type: 'number',
             placeholder: '6',
-            description: '一次对话累计可启动的子代理上限；默认 6，设 0＝不限。达到后主代理再 spawn 会被拒绝，可开新对话重置。',
+            description: '一次对话累计可启动的子代理上限；默认 6，设 0＝不限。达到后主代理再 spawn 会被拒绝，可开新对话重置。Ultra 与普通模式共用这个上限（执行器资源，不因模式放宽）。',
           },
           {
             key: 'SUBAGENT_BACKEND',
@@ -348,7 +348,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'select',
             placeholder: '进程内（默认）',
             description:
-              '进程内：和主 agent 共用 agent-host 进程，启动快、省内存。独立 worker 进程：每个子代理一个进程，死循环、内存耗尽、原生模块崩溃不连累主 agent，启动慢、内存高。两种都能续聊和 fork；命名角色的 backend 字段优先于这里。',
+              '进程内：和主 agent 共用 agent-host 进程，启动快、省内存。独立 worker 进程：每个子代理一个进程，死循环、内存耗尽、原生模块崩溃不连累主 agent，启动慢、内存高。两种都能续聊和 fork；命名角色的 backend 字段优先于这里。Ultra 与普通模式共用这个选择。',
             options: [
               { value: 'in-process', label: '进程内' },
               { value: 'worker', label: '独立 worker 进程' },
@@ -360,7 +360,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'number',
             default: '2',
             placeholder: '2',
-            description: '同时运行的子代理 worker 进程数；超出的子代理排队，等有进程结束再起。只对走 worker 的子代理生效。',
+            description: '同时运行的子代理 worker 进程数；超出的子代理排队，等有进程结束再起。只对走 worker 的子代理生效。Ultra 与普通模式共用。',
             validate: validateBoundedInt(1, 16),
           },
           {
@@ -369,7 +369,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'number',
             default: '8',
             placeholder: '8',
-            description: '所有会话加起来同时在跑的子代理数（进程内和 worker 都算）；超出的排队。子代理再派的孙代理只计数不排队，避免互相等名额卡死。',
+            description: '所有会话加起来同时在跑的子代理数（进程内和 worker 都算）；超出的排队。子代理再派的孙代理只计数不排队，避免互相等名额卡死。Ultra 与普通模式共用这个上限，不从 Ultra 绕过去。',
             validate: validateBoundedInt(1, 64),
           },
           {
@@ -378,7 +378,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'number',
             default: '8',
             placeholder: '8',
-            description: '进程内的可续聊子代理结束后先不释放，续聊时不用重新加载；超过这个数按最久未用释放。设 0 关闭驻留，每次续聊都从会话日志恢复。',
+            description: '进程内的可续聊子代理结束后先不释放，续聊时不用重新加载；超过这个数按最久未用释放。设 0 关闭驻留，每次续聊都从会话日志恢复。Ultra 与普通模式共用。',
             validate: validateBoundedInt(0, 64),
           },
           {
@@ -387,7 +387,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'number',
             default: '60000',
             placeholder: '60000',
-            description: '子代理要做需要批准的操作时，请求出现在派它的会话的输入框上方，最多等这么久，没人批准按拒绝处理。设 0 不转发，子代理需要批准的操作一律自动拒绝。',
+            description: '子代理要做需要批准的操作时，请求出现在派它的会话的输入框上方，最多等这么久，没人批准按拒绝处理。设 0 不转发，子代理需要批准的操作一律自动拒绝。Ultra 与普通模式共用同一套审批。',
             validate: validateBoundedInt(0, 600000),
           },
           {
@@ -396,7 +396,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'number',
             default: '2',
             placeholder: '2',
-            description: '顶层为 0，子代理为 1，孙代理为 2。设为 1 即禁止子代理再委派',
+            description: '顶层为 0，子代理为 1，孙代理为 2。设为 1 即禁止子代理再委派。Ultra 与普通模式共用。',
           },
         ],
       },
@@ -408,7 +408,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             label: '子代理空闲超时(ms)',
             type: 'number',
             placeholder: '300000',
-            description: '连续没有任何动静超过此值才判卡死并终止；每段输出都会重置计时。工具在跑、等模型回复时不计，分别由工具自己的超时和下面的上游卡住判定处理',
+            description: '连续没有任何动静超过此值才判卡死并终止；每段输出都会重置计时。工具在跑、等模型回复时不计，分别由工具自己的超时和下面的上游卡住判定处理。Ultra 与普通模式共用。',
           },
           {
             key: 'SUBAGENT_STREAM_STALL_MS',
@@ -418,7 +418,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             max: 3600000,
             placeholder: '120000',
             description:
-              '模型开始输出后，两段输出之间安静超过此值，就在本地中断这次请求并自动续跑。留空＝120000。模型会在输出中途长时间不推送内容时调大',
+              '模型开始输出后，两段输出之间安静超过此值，就在本地中断这次请求并自动续跑。留空＝120000。模型会在输出中途长时间不推送内容时调大。Ultra 与普通模式共用。',
             validate: validateBoundedInt(10000, 3600000),
           },
           {
@@ -429,7 +429,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             max: 3600000,
             placeholder: '同空闲超时',
             description:
-              '请求发出后等第一段输出的最长时间，超过就中断这次请求并自动续跑。留空＝与空闲超时相同。用不推送思考过程的长思考模型时调大',
+              '请求发出后等第一段输出的最长时间，超过就中断这次请求并自动续跑。留空＝与空闲超时相同。用不推送思考过程的长思考模型时调大。Ultra 与普通模式共用。',
             validate: validateBoundedInt(10000, 3600000),
           },
           {
@@ -439,7 +439,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             min: 0,
             max: 10,
             placeholder: '2',
-            description: '上游卡住时最多自动续跑几次，用完还卡就按空闲超时结束。留空＝2，0＝不续跑',
+            description: '上游卡住时最多自动续跑几次，用完还卡就按空闲超时结束。留空＝2，0＝不续跑。Ultra 与普通模式共用。',
             validate: validateBoundedInt(0, 10),
           },
           {
@@ -447,7 +447,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             label: '子代理卡死阈值(ms)',
             type: 'number',
             placeholder: '300000',
-            description: '后台子代理无活动超过此时长判为卡死并自动终止',
+            description: '后台子代理无活动超过此时长判为卡死并自动终止。Ultra 与普通模式共用。',
           },
         ],
       },
@@ -459,7 +459,9 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             label: '子代理模型策略',
             type: 'select',
             placeholder: '继承父模型（默认）',
-            description: '禁用子代理＝主代理不再 spawn；继承父模型＝子代理用主对话模型；选定模型＝用下方指定',
+            description:
+              '禁用子代理＝主代理不再 spawn；继承父模型＝子代理用主对话模型；选定模型＝用下方指定。' +
+              '只对非 Ultra 生效：Ultra 有自己的模型分组，不受这里的禁用/继承/选定影响。',
             options: [
               { value: 'inherit', label: '继承父模型' },
               { value: 'custom', label: '选定模型' },
@@ -471,7 +473,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             label: '子代理模型',
             type: 'model',
             placeholder: '如 deepseek/deepseek-chat',
-            description: '策略＝选定模型时生效，作为子代理默认模型（spawn 调用里显式指定的优先）',
+            description: '策略＝选定模型时生效，作为子代理默认模型（spawn 调用里显式指定的优先）。仅非 Ultra 生效；Ultra 用 Ultra 分组里的键。',
             showWhen: { key: 'SUBAGENT_MODE', equals: ['custom', ''] },
           },
           {
@@ -479,7 +481,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             label: '子代理便宜模型（档案别名 cheap）',
             type: 'model',
             placeholder: '如 deepseek/deepseek-chat',
-            description: '能力档案 model:"cheap" 解析到此；留空回退「子代理模型」',
+            description: '能力档案 model:"cheap" 解析到此；留空回退「子代理模型」。仅非 Ultra 生效。',
             showWhen: { key: 'SUBAGENT_MODE', equals: ['custom', ''] },
           },
           {
@@ -487,21 +489,83 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             label: '子代理强模型（档案别名 strong）',
             type: 'model',
             placeholder: '如 openai/gpt-4o',
-            description: '能力档案 model:"strong" 解析到此；留空回退「子代理模型」',
+            description: '能力档案 model:"strong" 解析到此；留空回退「子代理模型」。仅非 Ultra 生效。',
             showWhen: { key: 'SUBAGENT_MODE', equals: ['custom', ''] },
           },
           {
             key: 'SUBAGENT_MODEL_SELECTION',
             label: '允许模型为子代理自选路由',
             type: 'boolean',
-            description: '开启后 spawn_agent 可显式指定模型，只能选下方白名单，以及上面配的 cheap / strong 别名；开关本身对之后新建的会话生效，白名单增删对已打开的会话也立即生效',
+            description: '开启后 spawn_agent 可显式指定模型，只能选下方白名单，以及上面配的 cheap / strong 别名；开关本身对之后新建的会话生效，白名单增删对已打开的会话也立即生效。仅非 Ultra 生效；Ultra 用自己的白名单，不受这里开关/白名单影响。',
           },
           {
             key: 'SUBAGENT_MODEL_ALLOWLIST',
             label: '可自选的路由白名单',
             type: 'model-list',
-            description: '至少勾一条才算开启；cheap / strong 对应的模型不用在这里重复勾；不在当前目录里的条目会标「不可用」，可手动移除',
+            description: '至少勾一条才算开启；cheap / strong 对应的模型不用在这里重复勾；不在当前目录里的条目会标「不可用」，可手动移除。仅非 Ultra 生效。',
             showWhen: { key: 'SUBAGENT_MODEL_SELECTION', equals: ['1'] },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // Ultra 是独立模式，配置与普通子代理完全分开：这里的所有键只在 Ultra 路由域生效，
+    // 普通 SUBAGENT_MODE / SUBAGENT_MODEL* 不参与 Ultra 选模，Ultra 的这些键也不影响普通模式。
+    // 空值不回退普通字段，只回退到 Ultra 默认 → 调用者当前主模型（Ultra 默认也空时）。
+    id: 'ultra',
+    title: 'Ultra Mode',
+    group: '能力',
+    icon: Sparkles,
+    sections: [
+      {
+        title: '模型策略',
+        fields: [
+          {
+            key: 'ULTRA_SUBAGENT_MODEL',
+            label: 'Ultra 默认子代理模型',
+            type: 'model',
+            placeholder: '如 anthropic/claude-sonnet',
+            description:
+              'Ultra 模式下子代理的默认模型（Ultra 默认）。留空＝调用者当前主模型（不读普通子代理设置）。' +
+              '角色槽位（Scout / Worker / Planner / Reviewer）留空时先回退到这个 Ultra 默认，再回退当前主模型。',
+          },
+          {
+            key: 'ULTRA_SUBAGENT_MODEL_SCOUT',
+            label: 'Scout 角色模型',
+            type: 'model',
+            placeholder: '留空＝Ultra 默认',
+            description: '侦察 / 检索类子代理。留空＝Ultra 默认（ULTRA_SUBAGENT_MODEL），再留空＝当前主模型。',
+          },
+          {
+            key: 'ULTRA_SUBAGENT_MODEL_WORKER',
+            label: 'Worker 角色模型',
+            type: 'model',
+            placeholder: '留空＝Ultra 默认',
+            description: '执行类子代理。留空＝Ultra 默认（ULTRA_SUBAGENT_MODEL），再留空＝当前主模型。',
+          },
+          {
+            key: 'ULTRA_SUBAGENT_MODEL_PLANNER',
+            label: 'Planner 角色模型',
+            type: 'model',
+            placeholder: '留空＝Ultra 默认',
+            description: '规划类子代理。留空＝Ultra 默认（ULTRA_SUBAGENT_MODEL），再留空＝当前主模型。',
+          },
+          {
+            key: 'ULTRA_SUBAGENT_MODEL_REVIEWER',
+            label: 'Reviewer 角色模型',
+            type: 'model',
+            placeholder: '留空＝Ultra 默认',
+            description: '审查类子代理。留空＝Ultra 默认（ULTRA_SUBAGENT_MODEL），再留空＝当前主模型。',
+          },
+          {
+            key: 'ULTRA_SUBAGENT_MODEL_ALLOWLIST',
+            label: 'Ultra 可自选路由白名单',
+            type: 'model-list',
+            description:
+              'Ultra 子代理还能显式自选哪些路由（provider/id）。留空＝只能使用上面配的 Ultra 默认 / 角色模型；' +
+              'cheap 别名在 Ultra 里映射到 Scout 槽位、strong 映射到 Worker 槽位，Scout / Worker 留空时再回退 Ultra 默认（不冒用普通模式的 cheap / strong）。' +
+              '不在当前目录里的条目会标「不可用」，可手动移除。',
           },
         ],
       },
@@ -514,32 +578,6 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
     icon: Database,
     sections: [
       {
-        title: '记忆',
-        fields: [
-          {
-            key: 'MEMORY_AUTO_INJECT',
-            label: '自动注入记忆',
-            type: 'boolean',
-            default: '1',
-            description: '对话开始时把相关记忆放进上下文。默认开。',
-          },
-          {
-            key: 'MEMORY_AUTO_CAPTURE',
-            label: '自动捕获对话',
-            type: 'boolean',
-            default: '1',
-            description: '对话结束后保存原文。默认开。',
-          },
-          {
-            key: 'MEMORY_EXTRACT',
-            label: '对话后提炼记忆',
-            type: 'boolean',
-            default: '1',
-            description: '在捕获之上调用模型生成记忆。关闭后仍保存原文，只是不提炼。默认开。',
-          },
-        ],
-      },
-      {
         title: '模型',
         fields: [
           {
@@ -548,7 +586,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'model',
             effect: 'instant',
             placeholder: '留空＝应用默认模型',
-            description: '记忆提炼与 Wiki 抽取共用。留空＝应用默认模型。',
+            description: '用于 Wiki 抽取。留空＝应用默认模型。',
           },
         ],
       },

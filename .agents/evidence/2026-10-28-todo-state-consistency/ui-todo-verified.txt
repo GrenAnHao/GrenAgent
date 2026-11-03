@@ -1,0 +1,50 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs todo-consistency
+
+构建产物和源码一致，跳过构建（--rebuild 强制重建）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[30860:1028/151951.737:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ todo-consistency
+  PASS 起点：与截图一致的两完成、一进行中
+  PASS 起点：进行中任务仍在执行
+  PASS 缺失 start：最终成功结果立即显示
+  PASS 缺失 start：最终成功结果立即显示：没有残留进行中
+  PASS 展开：保留三个任务行
+  PASS 迟到进度：不会把终态退回待办
+  PASS 迟到进度：不会把终态退回待办：没有残留进行中
+  PASS 失败写入：保留上一成功清单
+  PASS 失败写入：保留上一成功清单：没有残留进行中
+  PASS 显式清空：任务条立即消失
+  PASS 仅 toolResult：成功清单恢复
+  PASS 仅 toolResult：成功清单恢复：没有残留进行中
+  PASS 回合完整结果：补回缺失最终写入
+  PASS 回合完整结果：补回缺失最终写入：没有残留进行中
+  PASS 较长 UI 历史：以后端 todo 结果校准
+  PASS 较长 UI 历史：以后端 todo 结果校准：没有残留进行中
+  PASS 中断：不把进行中伪装成完成
+  PASS 中断：派生标记为未完成
+  PASS 切回缓存：正常收尾状态立即恢复
+  PASS 切回缓存：正常收尾状态立即恢复：没有残留进行中
+  PASS 后台通知唤起：已经收尾的任务不重新变为进行中
+  PASS 后台通知唤起：已经收尾的任务不重新变为进行中：没有残留进行中
+  PASS 同帧连续更新：新清单不被旧调用的迟到结果覆盖
+  PASS 同帧连续更新：新清单不被旧调用的迟到结果覆盖：没有残留进行中
+  PASS 缺失开始帧加乱序：完整结果恢复源顺序
+  PASS 缺失开始帧加乱序：完整结果恢复源顺序：没有残留进行中
+  PASS 乱序恢复：成功快照本身已完成，不靠显示层补成完成
+  PASS 缺失 agent_end：最终 settled 仍能从消息恢复收尾
+  PASS 缺失 agent_end：最终 settled 仍能从消息恢复收尾：没有残留进行中
+  PASS 最终 settled：运行态已结束
+  PASS 浅色：状态与深色一致
+  PASS 浅色：状态与深色一致：没有残留进行中
+  PASS 最终展开：三个任务仍完整
+  PASS 最终展开：没有仍在执行的任务行
+  INFO 截图 todo-completed-light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\todo-consistency-todo-completed-light.png
+  PASS 下一轮：已完成任务条收起
+  ── 35 passed, 0 failed
+
+通过：todo-consistency（12.1s）。只跑了 1/37 个场景，其余 36 个没指定，未运行

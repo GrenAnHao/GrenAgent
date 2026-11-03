@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
+  // 视图展开 hook 用的是可选版；这里没有 Provider，按「无会话身份」降级成本地 state。
+  useOptionalAgentStoreContext: () => undefined,
 }));
 vi.mock('./LazyHighlighter', () => ({
   LazySyntaxHighlighter: (p: { animated?: boolean; language: string; children: string }) => (

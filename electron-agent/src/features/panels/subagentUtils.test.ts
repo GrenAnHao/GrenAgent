@@ -224,7 +224,6 @@ describe('expandSubAgents', () => {
       { tasks: ['a', { task: 'b', model: 'anthropic/claude-opus' }] },
       {},
       'running',
-      true,
     );
     expect(units.map((u) => u.status)).toEqual(['starting', 'starting']);
     expect(units.map((u) => u.model)).toEqual([undefined, 'anthropic/claude-opus']);
@@ -236,7 +235,6 @@ describe('expandSubAgents', () => {
       { tasks: ['a', 'b', 'c'] },
       { details: { results: [{ task: 'a', agentId: 'sa-1', sessionPath: '/tmp/a.jsonl', model: 'anthropic/claude-opus', status: 'running' }, { task: 'b', model: 'anthropic/claude-opus', status: 'starting' }] } },
       'running',
-      true,
     );
     expect(units.map((u) => u.status)).toEqual(['running', 'starting', 'starting']);
     expect(units[0]?.model).toBe('anthropic/claude-opus');
@@ -249,7 +247,6 @@ describe('expandSubAgents', () => {
       { thinking_level: 'low', tasks: ['a', 'b'] },
       { details: { results: [{ task: 'a', sessionPath: '/tmp/a.jsonl', model: 'p/m', thinkingLevel: 'high', status: 'running' }] } },
       'running',
-      true,
     );
     expect(units.map((u) => u.thinkingLevel)).toEqual(['high', 'low']);
   });

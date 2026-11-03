@@ -40,12 +40,9 @@ vi.mock('../lib/pi', () => ({
     return Promise.resolve(() => {});
   },
 }));
-// agent.ts 直接 import 的符号在本工作树 todo-model 里尚未落地；单测只关心消息载入路径。
-vi.mock('@extensions/_shared/todo-model', () => ({
-  todoListFinishedInTranscript: () => false,
-}));
 
 import { createAgentStore } from './agent';
+import type { AgentMessage } from '../lib/pi';
 import { clearThinkingDurationsForTest } from '../lib/thinkingDurations';
 import { getCachedSession, invalidateCachedSession } from '../lib/sessionMessageCache';
 import { useInlineQuestionStore } from './inlineQuestionStore';
@@ -100,6 +97,78 @@ describe('createAgentStore', () => {
     rafCallbacks = [];
     for (const cb of cbs) cb(performance.now());
   };
+
+  const todoHistory = (stopReason: 'stop' | 'aborted' = 'stop') => [
+    { role: 'toolResult', toolName: 'todo', toolCallId: 'todo-lifecycle', content: [], details: { todos: [{ id: 1, text: '收尾', status: 'in_progress' }], nextId: 2 } },
+    { role: 'assistant', content: [{ type: 'text', text: '相同正文' }], stopReason },
+  ] as AgentMessage[];
+
+  it('未绑定的新草稿切到旧会话，不能把草稿的乐观气泡和等待态停靠到旧路径', () => {
+    store = createAgentStore('.');
+    const previous = '/s/unbound-draft-previous.jsonl';
+    store.loadMessages([{ role: 'user', content: 'real previous history' }] as never, { force: true, sessionPath: previous });
+    store.reset();
+    store.pushUserMessage('new draft still creating');
+    store.useStore.setState({ awaitingResponse: true });
+    expect(store.getLoadedSessionPath()).toBeUndefined();
+    expect(store.showCachedSession(previous, previous)).toBe(true);
+    expect(store.useStore.getState().messages).toEqual([
+      expect.objectContaining({ kind: 'user', text: 'real previous history' }),
+    ]);
+    expect(store.useStore.getState().awaitingResponse).toBeFalsy();
+  });
+
+  it('同签名快照也同步停止原因和 todo 完成标记', () => {
+    store = createAgentStore('.');
+    store.loadMessages(todoHistory(), { force: true, sessionPath: '/s/todo-markers.jsonl' });
+    expect(store.useStore.getState().todoListFinished).toBe(true);
+    store.loadMessages(todoHistory('aborted'), { force: true, sessionPath: '/s/todo-markers.jsonl' });
+    expect(store.useStore.getState().assistantStop).toBe('aborted');
+    expect(store.useStore.getState().todoListFinished).toBe(false);
+  });
+
+  it('空闲会话缓存恢复后收尾标记立即可用', () => {
+    store = createAgentStore('.');
+    store.loadMessages(todoHistory(), { force: true, sessionPath: '/s/todo-cached.jsonl' });
+    store.loadMessages([], { force: true, sessionPath: '/s/todo-other.jsonl' });
+    expect(store.showCachedSession('/s/todo-cached.jsonl')).toBe(true);
+    expect(store.useStore.getState().todoListFinished).toBe(true);
+    expect(store.useStore.getState().assistantStop).toBe('stop');
+  });
+
+  it('后台从缓存唤起时保留旧 todo 的完成标记', () => {
+    store = createAgentStore('.');
+    const path = '/s/todo-background.jsonl';
+    store.loadMessages(todoHistory(), { force: true, sessionPath: path });
+    store.loadMessages([], { force: true, sessionPath: '/s/todo-foreground.jsonl' });
+    emit({ type: 'agent_start' }, 'interactive', path);
+    flushRAF();
+    expect(store.showCachedSession(path)).toBe(true);
+    expect(store.useStore.getState().todoListFinished).toBe(true);
+  });
+
+  it('截断后快照读失败不沿用旧的收尾标记，并明确提示同步失败', async () => {
+    store = createAgentStore('.');
+    store.loadMessages(todoHistory(), { force: true, sessionPath: '/s/todo-unknown-cut.jsonl' });
+    piMock.getMessages.mockRejectedValue(new Error('snapshot unavailable'));
+    await store.truncateTo('not-in-local-list', 'drop-target');
+    expect(store.useStore.getState().todoListFinished).not.toBe(true);
+    expect(store.useStore.getState().assistantStop).toBeUndefined();
+    expect(store.useStore.getState().lastError).toContain('截断');
+  });
+
+  it('截断去掉终态以后，不继续沿用旧 todo 完成标记', async () => {
+    store = createAgentStore('.');
+    store.loadMessages([
+      { role: 'toolResult', toolName: 'todo', toolCallId: 'old-list', content: [], details: { todos: [{ id: 1, text: '尚未收尾', status: 'in_progress' }], nextId: 2 } },
+      { role: 'user', content: [{ type: 'text', text: '从这里删除' }], entryId: 'cut-todo' },
+      ...todoHistory(),
+    ] as never, { force: true, sessionPath: '/s/todo-cut.jsonl' });
+    expect(store.useStore.getState().todoListFinished).toBe(true);
+    await store.truncateTo('cut-todo', 'drop-target');
+    expect(store.useStore.getState().todoListFinished).toBe(false);
+    expect(store.useStore.getState().assistantStop).toBeUndefined();
+  });
 
   it('前景进程退出先应用排队事件，再清掉运行标记，迟到帧不会恢复运行', () => {
     store = createAgentStore('.');
@@ -268,25 +337,6 @@ describe('createAgentStore', () => {
 
     store.reset();
     expect(store.getLoadedSessionPath()).toBeUndefined();
-  });
-
-  it('loadMessages 把 memory_extract 会话展开成原对话气泡', () => {
-    store = createAgentStore('.');
-    const prompt = [
-      'Extract durable memory as strict JSON with optional keys l1 (object), l2 (string), and l3 (string). Return JSON only.',
-      'Task kind: memory_extract',
-      'Input: {"delta":"user: 你是什么模型?\\nassistant: 我是 Claude。"}',
-    ].join('\n');
-    store.loadMessages(
-      [
-        { role: 'user', content: [{ type: 'text', text: prompt }] },
-        { role: 'assistant', content: [{ type: 'text', text: '{"l2":"用户询问模型身份"}' }] },
-      ] as never,
-      { force: true, sessionPath: '/sessions/extract.jsonl' },
-    );
-    const msgs = store.useStore.getState().messages;
-    expect(msgs[0]).toMatchObject({ kind: 'user', text: '你是什么模型?' });
-    expect(msgs[1]).toMatchObject({ kind: 'assistant', text: '我是 Claude。' });
   });
 
   it('loadMessages 在 uiHistory 比后端更长时使用 UI 完整历史', () => {

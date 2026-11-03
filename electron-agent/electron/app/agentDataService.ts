@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { AgentDataClient } from '../agentData/client';
-import type { AgentDataRuntimeOptions } from '../agentData/runtime';
+import type { AgentDataRuntimeOptions, KnowledgeCompletionInput } from '../agentData/runtime';
 import { AgentDataRuntime } from '../agentData/runtime';
 import type { AgentDataEndpoint } from '../agentData/protocol';
 import type { Item, Thread, Turn } from './appServer/types';
@@ -46,7 +46,7 @@ export interface AgentDataChildOptions {
 }
 
 /**
- * 崩溃后不等主进程的下一条请求就重拉：扩展直连命名管道、记忆 / Wiki 的定时任务在子进程里，
+ * 崩溃后不等主进程的下一条请求就重拉：扩展直连命名管道、Wiki 的后台任务在子进程里，
  * 都不会触发 AgentProcessClient 的按需拉起。连续崩溃的预算仍由 AgentProcessClient 管；这里只在它拒绝时隔一会儿再试，
  * 连续这么多次拉不起来就停手，交还给主进程请求按需拉起。
  */
@@ -184,6 +184,35 @@ export class AgentDataService {
   async runServiceTask(input: Omit<QueueTaskInput, 'system'>): Promise<unknown> {
     if (!this.runtime) throw new Error('agent data runtime is not started');
     return this.runtime.runServiceTask(input);
+  }
+
+  async describeKnowledgeModel(): Promise<string> {
+    await this.start();
+    if (this.child) return this.child.request<string>('agentdata.knowledge.describe');
+    if (!this.runtime) throw new Error('agent data runtime is not started');
+    return this.runtime.describeKnowledgeModel();
+  }
+
+  async completeKnowledge(input: KnowledgeCompletionInput, options: { signal?: AbortSignal } = {}): Promise<string> {
+    const signal = options.signal;
+    const checkAbort = () => {
+      if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : Object.assign(new Error('aborted'), { name: 'AbortError' });
+    };
+    checkAbort();
+    await this.start();
+    checkAbort();
+    if (!this.child) {
+      if (!this.runtime) throw new Error('agent data runtime is not started');
+      return this.runtime.completeKnowledge(input, options);
+    }
+    const child = this.child;
+    const requestId = randomUUID();
+    const call = child.request<string>('agentdata.knowledge.complete', { requestId, input });
+    const onAbort = () => { void child.request('agentdata.knowledge.cancel', { requestId }).catch(() => undefined); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    try { return await call; }
+    finally { signal?.removeEventListener('abort', onAbort); }
   }
 
   /** PluginManager 的持久化（主进程不再打开 agent-data.db）。 */

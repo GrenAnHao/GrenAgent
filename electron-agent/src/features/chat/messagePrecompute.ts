@@ -1,6 +1,5 @@
 import type { DisplayMessage } from './groupMessages';
 import {
-  argsLookParallel,
   expandSubAgents,
   followUpAgentId,
   followUpCardStatus,
@@ -54,7 +53,7 @@ export function computeSubAgentUnits(messages: DisplayMessage[]): SubAgentIndex 
       noteSpawnTask(remembered, msg);
       continue;
     }
-    let units = expandSubAgents(msg.id, msg.args, msg.result, msg.status, argsLookParallel(msg.args)).map((unit) => ({
+    let units = expandSubAgents(msg.id, msg.args, msg.result, msg.status).map((unit) => ({
       unit,
       no: ++counter,
     }));
@@ -65,7 +64,7 @@ export function computeSubAgentUnits(messages: DisplayMessage[]): SubAgentIndex 
     unitsByMessage.set(msg.id, units);
     noteSpawnTask(remembered, msg);
     const ids = startedAgentIds(msg.args, msg.result);
-    const single = ids.length <= 1;
+    const single = units.length === 1 && units[0]?.unit.subIndex == null;
     for (const id of ids) {
       if (!originByAgent.has(id)) originByAgent.set(id, { messageId: msg.id, single, result: msg.result });
     }

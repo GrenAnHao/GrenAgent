@@ -1,7 +1,7 @@
 import { cssVar } from 'antd-style';
 import { Braces, FilePlus, Globe, ListChecks, Plug, Search, Sparkles, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { normalizeTodos, todoSummary } from '@extensions/_shared/todo-model';
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { CodeSurface } from '../chat/conv/CodeSurface';
 import { ConvRow } from '../chat/conv/ConvRow';
@@ -17,10 +17,12 @@ import {
   jobTiming,
 } from './bashCardModel';
 import { BashJobMeta, BashJobTerminal } from './BashJobTerminal';
+import { SendMessageCard } from './SendMessageCard';
 import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { PromptPendingRow } from '../chat/PromptPendingRow';
 import { todoRowCopy } from '../chat/input/todoRow';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { useSessionViewExpandedState } from '../chat/useSessionViewExpanded';
 import { useJobLive } from '../../stores/jobLiveStore';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
@@ -494,8 +496,11 @@ const CodemodeExecution = memo(function CodemodeExecution({
   startedAt,
   durationMs,
   nested,
+  toolCallId,
 }: ToolExecutionProps) {
-  const [expanded, setExpanded] = useState(false);
+  const { expanded, setExpanded } = useSessionViewExpandedState(
+    toolCallId ? `codemode:${toolCallId}` : null,
+  );
   const items = useMemo(() => mergeCodemodeCalls(codemodeCalls(result), nested), [result, nested]);
   const wallMs = useMemo(() => parseCodemodeOutput(result).wallMs, [result]);
   const code = codemodeCode(args);
@@ -525,7 +530,14 @@ const CodemodeExecution = memo(function CodemodeExecution({
         meta={meta ? <span data-testid="codemode-meta">{meta}</span> : undefined}
         open={expanded}
         onToggle={canExpand ? () => setExpanded((v) => !v) : undefined}
-        inline={<CodemodeCalls items={items} renderLive={renderNestedTool} />}
+        inline={
+          <CodemodeCalls
+            items={items}
+            renderLive={renderNestedTool}
+            viewId={toolCallId ? `codemode-calls:${toolCallId}` : null}
+            recordViewPrefix={toolCallId ? `codemode-record:${toolCallId}` : null}
+          />
+        }
         body={
           canExpand ? (
             <ErrorBoundary>
@@ -547,14 +559,27 @@ function opensWhileRunning(toolName: string): boolean {
 function ToolExecutionInner(props: ToolExecutionProps) {
   // Before the per-tool cards: their args are `{}` here, so they would show an empty command or path.
   const invalid = props.status === 'error' ? parseInvalidArguments(props.result) : undefined;
-  if (invalid) return <InvalidArgumentsExecution toolName={props.toolName} invalid={invalid} />;
+  if (invalid) {
+    return <InvalidArgumentsExecution toolName={props.toolName} invalid={invalid} toolCallId={props.toolCallId} />;
+  }
   if (isCodemodeTool(props.toolName)) return <CodemodeExecution {...props} />;
+  if (props.toolName.toLowerCase() === 'send_message') return <SendMessageCard {...props} />;
   return <PlainToolExecution {...props} />;
 }
 
 /** The model sent arguments that are not a JSON object; the tool never ran (pi 1.3.0). */
-function InvalidArgumentsExecution({ toolName, invalid }: { toolName: string; invalid: InvalidArguments }) {
-  const [expanded, setExpanded] = useState(false);
+function InvalidArgumentsExecution({
+  toolName,
+  invalid,
+  toolCallId,
+}: {
+  toolName: string;
+  invalid: InvalidArguments;
+  toolCallId?: string;
+}) {
+  const { expanded, setExpanded } = useSessionViewExpandedState(
+    toolCallId ? `invalid:${toolCallId}` : null,
+  );
   return (
     <div className={cardStyles.toolRow} data-testid="invalid-arguments-card">
       <ConvRow
@@ -581,10 +606,23 @@ function InvalidArgumentsExecution({ toolName, invalid }: { toolName: string; in
   );
 }
 
-function PlainToolExecution({ toolName, args, result, status, argsComplete, startedAt, durationMs }: ToolExecutionProps) {
+function PlainToolExecution({
+  toolName,
+  toolCallId,
+  args,
+  result,
+  status,
+  argsComplete,
+  startedAt,
+  durationMs,
+}: ToolExecutionProps) {
   const { workspace } = useAgentStoreContext();
   const hasPendingQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
-  const [expanded, setExpanded] = useState(status === 'running' && opensWhileRunning(toolName));
+  // 运行中的命令行默认展开（既有语义）；用户关掉后记录到会话视图状态，不会随流式追加重开。
+  const { expanded, setExpanded } = useSessionViewExpandedState(
+    toolCallId ? `tool:${toolCallId}` : null,
+    status === 'running' && opensWhileRunning(toolName),
+  );
   const bareName = toolName.toLowerCase();
   const isShell = bareName === 'bash' || bareName === 'shell' || bareName === 'run_terminal_cmd';
   const argsStreaming = status === 'running' && argsComplete === false;

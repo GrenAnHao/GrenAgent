@@ -26,8 +26,7 @@ Status: implemented
 
 - 计的是**同步段**：方法被调用到返回（或返回 promise）为止，加上应答序列化与写出。这正是挡住事件循环的时间。await 之后的续体不在请求入口的统计里，所以已知会在续体里做重活的地方在调用点单独计时：
   - `AgentDataRuntime.handleLine`（全部 socket 请求，含 agent-host 经主进程转来的 `item.upsert` 等）与 `requestAdmin`。
-  - `task.<kind>.complete`（记忆任务完成后的结算）、`taskQueue.pump`（含每个任务启动前的同步写）、`taskQueue.settle`（结果校验与终态写入）。
-  - `memory.timer.flush`、`memory.timer.scene`（空闲补抽与场景层定时器）。
+  - `taskQueue.pump`（含每个任务启动前的同步写）、`taskQueue.settle`（结果校验与终态写入）。记忆任务及其定时器按[裁撤决定](../simplification/2026-10-31-remove-agentdata-memory.md)移除，旧日志中的 memory.timer 与 task.memory_* 只作为历史样本。
   - `wiki.rebuildPageIndex`（每次写页的全量索引重建，ingest 续体里也会调到）。
   - `codegraph.<tool>`：只计到 `executeCodeGraphTool` 第一次 await 为止，explore / context 的后半段不在其中。
 - 方法名来自 socket，调用方可以随便填：解析不出处理函数的请求统一记作 `rejected`，非法帧记作 `invalid`，未知管理方法记作 `admin.unknown`；单窗口最多 200 个键，超出的并入 `(other)`。统计表不会被调用方撑大。
@@ -35,7 +34,7 @@ Status: implemented
 ### 涉及文件
 
 - `electron-agent/electron/agentData/methodTiming.ts`（新）：`AgentDataTiming`、进程内单例 `agentDataTiming`、`timeSync`。
-- `electron-agent/electron/agentData/runtime.ts`、`electron/app/appServer/taskQueue.ts`、`electron/app/memoryService.ts`、`electron/agentData/wikiEngine/service.ts`、`electron/app/codeGraph/codeGraphEngine.ts`：埋点，每处 1~10 行，不改返回值与错误。
+- `electron-agent/electron/agentData/runtime.ts`、`electron/app/appServer/taskQueue.ts`、`electron/agentData/wikiEngine/service.ts`、`electron/app/codeGraph/codeGraphEngine.ts`：埋点，每处 1~10 行，不改返回值与错误。
 - `electron-agent/electron/runtimeDiag.ts`：采样时取走并写入。
 - `electron-agent/scripts/diag-agentdata-report.mjs`（新）：读日志，给出 M0 闸门结论。
 

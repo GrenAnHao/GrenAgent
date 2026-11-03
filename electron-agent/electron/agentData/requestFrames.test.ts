@@ -5,7 +5,7 @@ import type { RpcRequest } from './protocol';
 const FRAME_BYTES = 1_048_576;
 const CHUNK_BYTES = 65_536;
 const REQUEST_BYTES = 32 * FRAME_BYTES;
-const request: RpcRequest = { id: 'request-1', version: 1, token: 'secret', method: 'memory.capture', params: {} };
+const request: RpcRequest = { id: 'request-1', version: 1, token: 'secret', method: 'test.payload', params: {} };
 
 function chunk(chunk: string, last: boolean, patch: Record<string, unknown> = {}): string {
   return JSON.stringify({ ...request, method: 'system.request_chunk', params: { chunk, last }, ...patch });

@@ -2,19 +2,15 @@ import { invoke } from '../platform/runtime';
 import type { JobMetadata } from '../../electron/agentData/operationsContracts';
 import type { TaskRef, TaskView, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, AuditQuery, AuditPage, AuditExport, DiagnosticReport, WorkbenchOverview } from '../../electron/agentData/operationsContracts';
 export type { TaskRef, TaskView, TaskStatus, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceRef, ResourceNavigation, AuditQuery, AuditView, AuditPage, AuditExport, DiagnosticItem, DiagnosticReport, WorkbenchOverview } from '../../electron/agentData/operationsContracts';
-import type { MemoryRecord, ManagedMemoryRecord, MemoryListInput, MemoryPage, MemoryReadInput, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail } from '../../electron/ipc/contracts';
-export type { MemoryRecord, ManagedMemoryRecord, MemoryOwner, MemoryFilter, MemoryLevel, MemoryOrigin, MemoryListInput, MemoryPage, MemoryReadInput, MemoryDraft, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail, MemoryItem } from '../../electron/ipc/contracts';
 import type { IngestResult, WikiAssetDetail, WikiRawSource, WikiSearchHit, WikiSearchResponse } from '../../electron/agentData/wikiEngine/service';
 export type { IngestResult, WikiAssetDetail, WikiRawSource, WikiSearchHit, WikiSearchResponse };
 
 export interface AgentDataStatus { state: 'ready' | 'closed'; version: number }
 export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
-export type AgentJobState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AgentJobState = 'pending' | 'running' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 export interface AgentJob { id: string; kind: string; workspace: string; state: AgentJobState; progress: number; error?: string; createdAt: number; updatedAt: number; metadata?: JobMetadata }
 export interface AgentConfig { version: number; value: Record<string, unknown> }
-export interface MemoryScope { userId: string; workspace?: string; projectId?: string; sessionId?: string; includeOtherProjects?: boolean }
-export interface MemoryOverview { total: number; byLevel: { L0: number; L1: number; L2: number; L3: number } }
-export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number; lastIndexedAt?: number | null; phase?: CodeGraphSyncPhase; mode?: 'incremental' | 'full'; trigger?: 'manual' | 'watch' | 'activate' | 'retry'; progress?: { stage: string; processed?: number; total?: number }; lastSuccessAt?: number; lastError?: { message: string; at: number; code?: string }; consecutiveFailures?: number; nextRetryAt?: number; pendingChanges?: number; generation?: number; watcher?: { active: boolean; degraded: boolean; reason?: string }; servingStale?: boolean; autoSync?: boolean }
+export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number; lastIndexedAt?: number | null; phase?: CodeGraphSyncPhase; mode?: 'incremental' | 'full'; trigger?: 'manual' | 'branch_switch' | 'watch' | 'activate' | 'poll' | 'startup' | 'retry'; progress?: { stage: string; processed?: number; total?: number }; lastSuccessAt?: number; lastError?: { message: string; at: number; code?: string }; consecutiveFailures?: number; nextRetryAt?: number; pendingChanges?: number; generation?: number; watcher?: { active: boolean; degraded: boolean; reason?: string }; servingStale?: boolean; autoSync?: boolean }
 /** codegraph-host 调度器的阶段：增量同步（syncing）期间仍可查询，全量重建（rebuilding）期间 state 是 indexing。 */
 export type CodeGraphSyncPhase = 'idle' | 'queued' | 'syncing' | 'rebuilding' | 'backoff' | 'failed';
 export interface CodeGraphProject { workspace: string; indexed: boolean }
@@ -76,20 +72,7 @@ export const agentDataApi = {
     cancel: (id: string) => invoke<AgentJob | undefined>('agentData_admin_jobs_cancel', { id }),
     remove: (id: string) => invoke<{ deleted: boolean }>('agentData_admin_jobs_remove', { id }),
     clear: (ids: string[]) => invoke<{ deletedIds: string[] }>('agentData_admin_jobs_clear', { ids }),
-    create: (input: AgentJobCreateInput) => invoke<AgentJob>('agentData_jobs_create', input),
-  },
-  memory: {
-    list: (input: MemoryListInput) => invoke<MemoryPage<ManagedMemoryRecord>>('agentData_memory_list', { ...input }),
-    read: (input: MemoryReadInput) => invoke<ManagedMemoryRecord>('agentData_memory_read', { ...input }),
-    create: (input: MemoryCreateInput) => invoke<ManagedMemoryRecord>('agentData_memory_create', { ...input }),
-    update: (input: MemoryUpdateInput) => invoke<ManagedMemoryRecord>('agentData_memory_update', { ...input }),
-    conversations: {
-      list: (input: MemoryListInput) => invoke<MemoryPage<MemoryConversation>>('agentData_memory_conversations_list', { ...input }),
-      read: (input: MemoryReadInput) => invoke<MemoryConversationDetail>('agentData_memory_conversations_read', { ...input }),
-    },
-    overview: (scope: MemoryScope) => invoke<MemoryOverview>('agentData_memory_overview', scope),
-    search: (scope: MemoryScope, query: string, limit = 50) => invoke<MemoryRecord[]>('agentData_memory_search', { ...scope, query, limit }),
-    delete: (scope: { userId: string; workspace?: string }, id: string) => invoke<void>('agentData_memory_delete', { ...scope, id }),
+    create: (input: AgentJobCreateInput) => invoke<AgentJob>('agentData_jobs_create', { ...input }),
   },
   wiki: {
     create: (input: { name: string; wikiId?: string }) => invoke<WikiAssetDetail>('agentData_wiki_create', { ...input }),

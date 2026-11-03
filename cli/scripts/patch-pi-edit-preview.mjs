@@ -1,11 +1,13 @@
 /** Keep Pi edit result diffs at five context lines for the desktop preview. */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const projectRoot = process.argv[2]
+  ? resolve(process.argv[2])
+  : join(dirname(fileURLToPath(import.meta.url)), '..');
 const editDiffPath = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
+  projectRoot,
   'node_modules',
   '@earendil-works',
   'pi-coding-agent',

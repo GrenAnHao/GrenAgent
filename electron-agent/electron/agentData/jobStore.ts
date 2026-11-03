@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { JobMetadata } from './operationsContracts';
+import type { JobMetadata, RepoWikiJobPayload } from './operationsContracts';
+import { parseKnowledgeTaskMetadata } from '../../shared/knowledgeKernelContracts';
 export type { JobMetadata } from './operationsContracts';
 
-export type JobState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type JobState = 'pending' | 'running' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 export interface Job { id: string; kind: string; workspace: string; state: JobState; progress: number; error?: string; metadata?: JobMetadata; createdAt: number; updatedAt: number }
 export interface ConfigValue { version: number; value: Record<string, unknown> }
 
@@ -28,7 +29,8 @@ export class JobStore {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const job = this.get(id);
-      if (job?.state === 'pending' || job?.state === 'running') throw new Error('JOB_ACTIVE');
+      if (job && ['pending', 'running', 'paused', 'blocked'].includes(job.state)) throw new Error('JOB_ACTIVE');
+      this.assertUnreferenced(id);
       const result = this.db.prepare("DELETE FROM agent_jobs WHERE id=? AND state IN ('completed','failed','cancelled')").run(id);
       const deleted = Number(result.changes) > 0;
       if (deleted) this.record('job.remove', { id, ...jobSnapshot(job) });
@@ -44,6 +46,7 @@ export class JobStore {
       const remove = this.db.prepare("DELETE FROM agent_jobs WHERE id=? AND state IN ('completed','failed','cancelled')");
       for (const id of new Set(ids)) {
         const job = this.get(id);
+        if (job && ['completed', 'failed', 'cancelled'].includes(job.state)) this.assertUnreferenced(id);
         if (Number(remove.run(id).changes) > 0) {
           deletedIds.push(id);
           this.record('job.remove', { id, ...jobSnapshot(job) });
@@ -119,6 +122,31 @@ export class JobStore {
     return this.get(id);
   }
 
+  /**
+   * 自动同步熔断后留一条失败的 codegraph.sync，任务中心能看见、能重试。
+   * 直接写成 failed，不经过 create：create 出来的 pending 会被执行器马上跑起来。
+   * 同一工作区已有未结束的同步任务时不另建；已有熔断失败则刷新错误。
+   */
+  recordBreaker(workspace: string, error: string): Job {
+    const message = error.slice(0, 2000);
+    const now = Date.now();
+    const same = this.list().filter((job) => job.kind === 'codegraph.sync' && job.workspace === workspace);
+    const active = same.find((job) => job.state === 'pending' || job.state === 'running');
+    if (active) return active;
+    const previous = same.find((job) => job.metadata?.origin === 'breaker' && job.state === 'failed');
+    if (previous) {
+      this.db.prepare('UPDATE agent_jobs SET error=?,updated_at=? WHERE id=?').run(message, now, previous.id);
+      this.record('job.breaker', { id: previous.id, workspace });
+      return this.get(previous.id)!;
+    }
+    const id = randomUUID();
+    const metadata: JobMetadata = { target: { type: 'project', id: workspace }, resourceName: workspace, origin: 'breaker' };
+    this.db.prepare('INSERT INTO agent_jobs(id,kind,workspace,state,progress,error,created_at,updated_at,metadata) VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(id, 'codegraph.sync', workspace, 'failed', 0, message, now, now, JSON.stringify(metadata));
+    this.record('job.breaker', { id, workspace, error: message.slice(0, 200) });
+    return this.get(id)!;
+  }
+
   /** 该 workspace 是否已有同 kind 的未结束 job（供并发拒绝）。 */
   hasActive(kind: string, workspace: string): boolean {
     const row = this.db.prepare("SELECT count(*) as count FROM agent_jobs WHERE kind=? AND workspace=? AND state IN ('pending','running')").get(kind, workspace) as { count: number };
@@ -128,8 +156,13 @@ export class JobStore {
   config(module: string): ConfigValue { const row = this.db.prepare('SELECT version,value FROM agent_config WHERE module=?').get(module) as { version?: number; value?: string } | undefined; return row ? { version: Number(row.version), value: JSON.parse(row.value!) as Record<string, unknown> } : { version: 0, value: {} }; }
   audit(limit = 100): Array<{ id: string; action: string; detail: Record<string, unknown>; createdAt: number }> { return (this.db.prepare('SELECT id,action,detail,created_at as createdAt FROM agent_audit ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(limit, 500))) as Array<Record<string, unknown>>).map((r) => ({ id: String(r.id), action: String(r.action), detail: JSON.parse(String(r.detail)) as Record<string, unknown>, createdAt: Number(r.createdAt) })); }
   diagnostics(): { jobs: { total: number; failed: number }; auditEvents: number } { const jobs = this.db.prepare("SELECT count(*) as total, sum(state='failed') as failed FROM agent_jobs").get() as { total: number; failed: number }; const audit = this.db.prepare('SELECT count(*) as count FROM agent_audit').get() as { count: number }; return { jobs: { total: Number(jobs.total), failed: Number(jobs.failed ?? 0) }, auditEvents: Number(audit.count) }; }
-  exportData(): { jobs: Job[]; configs: Record<string, ConfigValue>; audit: ReturnType<JobStore['audit']> } { const configs: Record<string, ConfigValue> = {}; for (const row of this.db.prepare('SELECT module FROM agent_config').all() as Array<{ module: string }>) configs[row.module] = this.config(row.module); return { jobs: this.list(), configs, audit: this.audit(500) }; }
-  importData(data: { configs?: Record<string, ConfigValue> }): void { this.db.exec('BEGIN'); try { for (const [module, config] of Object.entries(data.configs ?? {})) this.db.prepare('INSERT INTO agent_config(module,version,value) VALUES(?,?,?) ON CONFLICT(module) DO UPDATE SET version=excluded.version,value=excluded.value').run(module, config.version, JSON.stringify(config.value)); this.db.exec('COMMIT'); this.record('data.import', { modules: Object.keys(data.configs ?? {}).length }); } catch (error) { this.db.exec('ROLLBACK'); throw error; } }
+  exportData(): { jobs: Job[]; configs: Record<string, ConfigValue>; audit: ReturnType<JobStore['audit']> } { const configs: Record<string, ConfigValue> = {}; for (const row of this.db.prepare("SELECT module FROM agent_config WHERE module != 'memory'").all() as Array<{ module: string }>) configs[row.module] = this.config(row.module); return { jobs: this.list(), configs, audit: this.audit(500) }; }
+  importData(data: { configs?: Record<string, ConfigValue> }): void { this.db.exec('BEGIN'); try { for (const [module, config] of Object.entries(data.configs ?? {}).filter(([name]) => name !== 'memory')) this.db.prepare('INSERT INTO agent_config(module,version,value) VALUES(?,?,?) ON CONFLICT(module) DO UPDATE SET version=excluded.version,value=excluded.value').run(module, config.version, JSON.stringify(config.value)); this.db.exec('COMMIT'); this.record('data.import', { modules: Object.keys(data.configs ?? {}).length }); } catch (error) { this.db.exec('ROLLBACK'); throw error; } }
+  private assertUnreferenced(id: string): void {
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='native_wiki_projection'").get() && this.db.prepare('SELECT 1 FROM native_wiki_projection WHERE task_id=? LIMIT 1').get(id)) throw new Error('JOB_REFERENCED');
+    if (this.db.prepare("SELECT 1 FROM agent_jobs WHERE json_valid(metadata) AND json_extract(metadata,'$.retryOf')=? LIMIT 1").get(id)) throw new Error('JOB_REFERENCED');
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_build_items'").get() && this.db.prepare('SELECT 1 FROM knowledge_build_items WHERE source_task_id=? LIMIT 1').get(id)) throw new Error('JOB_REFERENCED');
+  }
   private record(action: string, detail: Record<string, unknown>): void { this.db.prepare('INSERT INTO agent_audit VALUES(?,?,?,?)').run(randomUUID(), action, JSON.stringify(detail), Date.now()); }
   private mapJob(row: Record<string, unknown>): Job { return { id: String(row.id), kind: String(row.kind), workspace: String(row.workspace), state: String(row.state) as JobState, progress: Number(row.progress), error: row.error == null ? undefined : String(row.error), metadata: parseJobMetadata(row.metadata), createdAt: Number(row.createdAt), updatedAt: Number(row.updatedAt) }; }
 }
@@ -147,16 +180,47 @@ export function parseJobMetadata(value: unknown): JobMetadata | undefined {
     const row = parsed as Record<string, unknown>; const metadata: JobMetadata = {};
     if (row.target && typeof row.target === 'object') {
       const target = row.target as Record<string, unknown>;
-      if (['wiki', 'project', 'memory'].includes(String(target.type)) && typeof target.id === 'string' && target.id) metadata.target = { type: target.type as NonNullable<JobMetadata['target']>['type'], id: target.id };
+      if (['wiki', 'project', 'repoWiki'].includes(String(target.type)) && typeof target.id === 'string' && target.id) metadata.target = {
+        type: target.type as NonNullable<JobMetadata['target']>['type'], id: target.id,
+        ...(target.type === 'repoWiki' && typeof target.language === 'string' && /^[A-Za-z][A-Za-z0-9-]{0,19}$/.test(target.language) ? { language: target.language } : {}),
+      };
     }
     if (row.payload && typeof row.payload === 'object') {
       const payload = row.payload as Record<string, unknown>;
-      if (typeof payload.kbId === 'string' && Array.isArray(payload.sourceIds) && payload.sourceIds.every((id) => typeof id === 'string')) metadata.payload = { kbId: payload.kbId, sourceIds: [...payload.sourceIds] };
+      if ('projectId' in payload) metadata.payload = parseRepoWikiJobPayload(payload);
+      else if (typeof payload.kbId === 'string' && Array.isArray(payload.sourceIds) && payload.sourceIds.every((id) => typeof id === 'string')) metadata.payload = { kbId: payload.kbId, sourceIds: [...payload.sourceIds] };
       else if (typeof payload.workspace === 'string') metadata.payload = { workspace: payload.workspace };
     }
     for (const field of ['retryOf', 'resourceName', 'cancellationError', 'stage'] as const) if (typeof row[field] === 'string') metadata[field] = row[field];
+    if (typeof row.message === 'string' && row.message.length <= 1000) metadata.message = row.message;
+    if (typeof row.currentPage === 'string' && row.currentPage.length <= 500) metadata.currentPage = row.currentPage;
+    if (row.origin === 'breaker') metadata.origin = 'breaker';
     if (typeof row.cancellationRequested === 'boolean') metadata.cancellationRequested = row.cancellationRequested;
     for (const field of ['processed', 'total'] as const) if (Number.isSafeInteger(row[field]) && Number(row[field]) >= 0) metadata[field] = Number(row[field]);
+    if (row.repoWiki !== undefined) { try { metadata.repoWiki = parseKnowledgeTaskMetadata(row.repoWiki); } catch { /* Damaged kernel metadata cannot authorize recovery. */ } }
+    if (row.nativeWiki && typeof row.nativeWiki === 'object' && !Array.isArray(row.nativeWiki)) {
+      const native = row.nativeWiki as Record<string, any>, pub = native.publication;
+      if (native.engine === 'qoder-wiki-local-v1' && typeof native.operationId === 'string' && native.operationId.length > 0 && native.operationId.length <= 200 && Number.isSafeInteger(native.revision) && native.revision >= 0) {
+        const result: NonNullable<JobMetadata['nativeWiki']> = { engine: native.engine, operationId: native.operationId, revision: native.revision };
+        if (typeof native.projectId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(native.projectId)) result.projectId = native.projectId;
+        if (pub && typeof pub === 'object' && typeof pub.id === 'string' && pub.id.length > 0 && pub.id.length <= 200 && pub.coverage && Number.isSafeInteger(pub.coverage.published) && pub.coverage.published >= 0 && Number.isSafeInteger(pub.coverage.readable) && pub.coverage.readable >= 0 && Array.isArray(pub.coverage.failed) && pub.coverage.failed.length <= 10000 && pub.coverage.failed.every((id: unknown) => typeof id === 'string' && id.length <= 200) && typeof pub.coverage.partial === 'boolean' && ['pending','ready','conflict','error'].includes(pub.projection?.status)) {
+          result.publication = { id: pub.id, coverage: { published: pub.coverage.published, readable: pub.coverage.readable, failed: [...pub.coverage.failed], partial: pub.coverage.partial }, projection: { status: pub.projection.status, ...(typeof pub.projection.error === 'string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(pub.projection.error) ? { error: pub.projection.error } : {}) } };
+        }
+        metadata.nativeWiki = result;
+      }
+    }
     return metadata;
   } catch { return undefined; }
+}
+
+/** Recover only the exact generation request the user confirmed; unknown or damaged records never call a model. */
+export function parseRepoWikiJobPayload(value: unknown): RepoWikiJobPayload | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const p = value as Record<string, unknown>;
+  if (typeof p.projectId !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(p.projectId)
+    || typeof p.language !== 'string' || !/^[A-Za-z][A-Za-z0-9-]{0,19}$/.test(p.language)
+    || !['wiki', 'cards'].includes(String(p.target)) || typeof p.force !== 'boolean' || p.confirmExternal !== true
+    || p.runId !== undefined && (typeof p.runId !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(p.runId))) return undefined;
+  return { projectId: p.projectId, language: p.language, target: p.target as 'wiki' | 'cards', force: p.force, confirmExternal: true,
+    ...(typeof p.runId === 'string' ? { runId: p.runId } : {}) };
 }
