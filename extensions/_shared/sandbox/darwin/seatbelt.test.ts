@@ -1,3 +1,6 @@
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { seatbeltArgv, seatbeltProfile } from "./seatbelt.js";
 
@@ -57,5 +60,27 @@ describe("seatbeltArgv", () => {
       profile,
       ...caller,
     ]);
+  });
+});
+
+describe("seatbeltProfile follows no symlinks", () => {
+  it("allows the real path as well as the spelling it was given", () => {
+    // macOS 的 /tmp、/var 都是符号链接；内核按真实路径比对 subpath，
+    // 所以 profile 里必须两种写法都有，否则 /var/folders/... 下的工作区写不进去。
+    const link = join(tmpdir(), `pi-seatbelt-link-${process.pid}-${Date.now()}`);
+    const real = mkdtempSync(join(tmpdir(), "pi-seatbelt-real-"));
+    try {
+      try {
+        symlinkSync(real, link, process.platform === "win32" ? "junction" : "dir");
+      } catch {
+        return; // 没有建链接的权限（Windows 非开发者模式），这条前提就不成立。
+      }
+      const profile = seatbeltProfile({ mode: "workspace-write", workspaceRoot: link }, tempDir);
+      expect(profile).toContain(writeAllow(link.replace(/\\/g, "/")));
+      expect(profile).toContain(writeAllow(realpathSync.native(real).replace(/\\/g, "/")));
+    } finally {
+      rmSync(link, { recursive: true, force: true });
+      rmSync(real, { recursive: true, force: true });
+    }
   });
 });

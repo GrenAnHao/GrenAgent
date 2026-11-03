@@ -824,8 +824,9 @@ describe.skipIf(process.platform !== "win32")("Git Bash bootstrap live", () => {
       expect(result.code).toBe(5);
       expect(result.out).toContain("中文");
       // runner 的 %TEMP% 是 8.3 短名（RUNNER~1 / runneradmin），`pwd -W` 回的是长名；
-      // 两边都取真实路径再比，不然跑在 GitHub runner 上会误报。
-      expect(result.out).toContain(realpathSync(cwd).replace(/\\/g, "/"));
+      // 两边都取真实路径再比。注意必须用 native：普通 realpathSync 不解 8.3 短名，
+      // 后者只在 native 里展开。
+      expect(result.out).toContain(realpathSync.native(cwd).replace(/\\/g, "/"));
       expect(result.out).toContain("leaked=no/no");
       expect(result.out).toContain(`a'b"c`);
       expect(result.err).toBe("");
