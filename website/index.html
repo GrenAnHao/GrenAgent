@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#111310">
+<meta name="description" content="GrenAgent：本地优先的桌面 AI 编码 Agent。让代码理解、任务执行与权限控制在同一个工作环境中协同。">
+<title>GrenAgent — 让 Agent 真正进入开发流程</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header class="header">
+ <a class="logo" href="#top" aria-label="GrenAgent 首页"><span class="logo-symbol"><svg viewBox="0 0 36 36"><path d="M18 3.5 31 11v14L18 32.5 5 25V11L18 3.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M25 13a9 9 0 1 0 1 10h-8v-5h13v2a13 13 0 1 1-4-10l-2 3Z" fill="currentColor"/></svg></span><span>GrenAgent</span></a>
+ <nav class="nav"><a href="#能力">产品能力</a><a href="#工作方式">工作方式</a><a href="#架构">技术架构</a><a href="#常见问题">常见问题</a></nav>
+ <div class="header-right"><a class="github" href="https://github.com/GrenAnHao/GrenAgent" target="_blank" rel="noreferrer">GitHub ↗</a><a class="button button-light" href="#获取">了解项目 <span>↗</span></a></div>
+ <button class="menu" aria-label="打开导航" aria-expanded="false"><i></i><i></i></button>
+</header>
+<main id="top">
+<section class="hero wrap">
+ <div class="hero-copy">
+  <div class="kicker"><span class="dot"></span> 本地优先的桌面 AI 编码 Agent</div>
+  <h1>让 Agent<br>真正进入<br><em>开发流程。</em></h1>
+  <p class="hero-intro">理解你的代码库，拆解复杂任务，调用工具持续执行。GrenAgent 将代码智能、Agent 运行时与权限控制带入同一个本地工作环境。</p>
+  <div class="hero-actions"><a class="button button-sage" href="#能力">探索产品能力 <span>↘</span></a><a class="text-button" href="https://github.com/GrenAnHao/GrenAgent" target="_blank" rel="noreferrer">查看项目源码 <span>↗</span></a></div>
+  <div class="hero-foot"><span>桌面应用 · Electron</span><span>数据本地存储</span><span>由你决定执行边界</span></div>
+ </div>
+ <div class="hero-art" aria-label="代码关系图示意">
+  <div class="art-top"><span>代码关系图</span><span class="art-state"><i></i> 本地索引</span></div>
+  <div class="graph">
+   <svg viewBox="0 0 640 470" role="img" aria-label="代码文件、符号和模块之间的关系示意">
+    <defs><radialGradient id="halo"><stop stop-color="#9eaa8b" stop-opacity=".18"/><stop offset="1" stop-color="#9eaa8b" stop-opacity="0"/></radialGradient></defs>
+    <circle cx="320" cy="228" r="205" fill="url(#halo)"/>
+    <g class="edges"><path d="M320 228 154 103 77 211 160 350 320 228 475 92 563 213 485 365 320 228M154 103 320 67 475 92M77 211 320 390 485 365M160 350 242 175 475 92M242 175 563 213M242 175 485 365M320 67 320 390M154 103 563 213"/></g>
+    <g class="nodes"><circle cx="320" cy="228" r="14" class="node-main"/><circle cx="154" cy="103" r="8"/><circle cx="77" cy="211" r="6"/><circle cx="160" cy="350" r="8"/><circle cx="320" cy="67" r="7"/><circle cx="475" cy="92" r="9"/><circle cx="563" cy="213" r="6"/><circle cx="485" cy="365" r="8"/><circle cx="320" cy="390" r="6"/><circle cx="242" cy="175" r="7"/></g>
+    <g class="graph-labels"><text x="105" y="83">auth.ts</text><text x="33" y="197">router.ts</text><text x="113" y="379">session.ts</text><text x="294" y="43">user.ts</text><text x="482" y="67">api.ts</text><text x="520" y="195">index.ts</text><text x="486" y="391">store.ts</text><text x="291" y="423">types.ts</text><text x="203" y="154">AuthService</text></g>
+   </svg>
+   <div class="graph-center"><span>G</span><small>代码关系</small></div>
+  </div>
+  <div class="art-bottom"><div><b>CodeGraph</b><span>符号 · 调用 · 依赖</span></div><div class="art-metrics"><b>LOCAL</b><span>在本机分析</span></div></div>
+  <div class="art-index">工作区 / 核心模块 <span>示意图</span></div>
+ </div>
+ <div class="hero-rule"><span>理解代码 · 组织任务 · 控制执行</span><span>01 / GRENA GENT</span></div>
+</section>
+<section class="manifesto"><div class="wrap manifesto-inner"><span class="section-index">产品理念 / 01</span><p>模型负责思考，工具负责行动，<br><strong>而工作环境应该始终由开发者掌控。</strong></p><span class="manifesto-aside">不是又一个聊天窗口。<br>而是一套完整的本地 Agent 工作环境。</span></div></section>
+<section class="section wrap" id="能力">
+ <div class="section-head"><div><span class="section-index">核心能力 / 02</span><h2>让复杂开发任务<br>有迹可循。</h2></div><p>从理解代码到执行变更，把分散的开发能力连接成连续的工作过程。</p></div>
+ <article class="feature feature-main"><div class="feature-copy"><span class="feature-no">01 — 代码理解</span><h3>不只读取文件，<br>更理解代码之间的关系。</h3><p>内置 CodeGraph，围绕文件、符号、调用关系和依赖结构建立代码索引。结合 LSP、AST 工具与诊断反馈，为 Agent 提供更贴近真实项目的上下文。</p><div class="feature-tags"><span>CodeGraph</span><span>LSP</span><span>AST</span><span>诊断反馈</span></div></div><div class="feature-visual code-visual"><div class="code-head"><span>项目结构</span><span>已建立索引</span></div><div class="code-lines"><div><i>01</i><span class="folder">▾ src</span></div><div><i>02</i><span class="folder indent">▾ auth</span></div><div><i>03</i><span class="file indent2">◇ auth.service.ts</span><b>12 个引用</b></div><div><i>04</i><span class="file indent2">◇ session.ts</span><b>8 个引用</b></div><div><i>05</i><span class="folder indent">▾ api</span></div><div><i>06</i><span class="file indent2">◇ router.ts</span><b>4 个引用</b></div><div><i>07</i><span class="file">◇ types.ts</span></div><div class="code-summary"><span>当前视图</span><strong>符号依赖关系</strong><span>本地索引 · 增量同步</span></div></div></div></article>
+ <div class="feature-grid">
+  <article class="feature feature-small"><div class="feature-visual agent-visual"><div class="agent-orbit"><span class="orbit-core">G</span><i class="orbit-a">主 Agent</i><i class="orbit-b">子 Agent</i><i class="orbit-c">后台任务</i><i class="orbit-d">计划</i></div></div><div class="feature-copy"><span class="feature-no">02 — 任务编排</span><h3>让多个 Agent<br>各自承担一部分工作。</h3><p>Agent、Ask、Debug、Plan 与 Ultra 模式，配合子代理和后台任务处理更复杂的开发目标。</p></div></article>
+  <article class="feature feature-small"><div class="feature-visual extension-visual"><div class="extension-stack"><div><span>◇</span><b>MCP</b><small>连接外部工具</small></div><div><span>⌘</span><b>Skills</b><small>复用专业工作流</small></div><div><span>＋</span><b>内置扩展</b><small>按需启用能力</small></div></div></div><div class="feature-copy"><span class="feature-no">03 — 能力扩展</span><h3>工具可以连接，<br>工作流可以组合。</h3><p>通过 MCP、Skills 与内置扩展连接外部工具，按项目和任务组织 Agent 的能力边界。</p></div></article>
+ </div>
+ <article class="feature feature-wide"><div class="feature-copy"><span class="feature-no">04 — 本地数据</span><h3>让项目上下文<br>在本机持续沉淀。</h3><p>会话、Wiki 知识、代码索引、任务审计与用量账本由本地运行时管理。模型请求仍按你配置的供应商进行，不把“本地优先”误解为所有模型推理都离线完成。</p></div><div class="local-rows"><div><span>会话记录</span><b>本地保存</b><i>LOCAL</i></div><div><span>代码索引</span><b>增量维护</b><i>INDEXED</i></div><div><span>任务与审计</span><b>状态可追溯</b><i>TRACKED</i></div><div><span>用量账本</span><b>按模型聚合</b><i>RECORDED</i></div></div></article>
+</section>
+<section class="workflow" id="工作方式"><div class="wrap"><div class="section-head"><div><span class="section-index">执行方式 / 03</span><h2>从目标，到结果。<br>每一步都看得见。</h2></div><p>Agent 可以持续推进任务，也可以在关键节点停下来等待确认。过程透明，介入方式明确。</p></div>
+ <div class="steps"><article><span>01</span><div class="step-icon">⌕</div><h3>理解项目</h3><p>读取工作区，检索代码符号、调用关系与相关知识。</p><small>上下文准备</small></article><article><span>02</span><div class="step-icon">▤</div><h3>制定计划</h3><p>拆分目标与执行步骤，明确待处理事项和完成条件。</p><small>任务拆解</small></article><article><span>03</span><div class="step-icon">↗</div><h3>执行任务</h3><p>调用工具、委派子代理，或将耗时工作转入后台。</p><small>受控执行</small></article><article><span>04</span><div class="step-icon">✓</div><h3>检查结果</h3><p>查看文件变更、诊断反馈与执行记录，再决定下一步。</p><small>验证与审查</small></article></div>
+ <div class="workflow-note"><span class="note-mark">↳</span><p>任务执行过程中，你可以审批操作、调整权限、暂停任务，或直接接管工作。</p><b>开发者始终在环</b></div>
+</div></section>
+<section class="section wrap" id="架构"><div class="section-head"><div><span class="section-index">系统架构 / 04</span><h2>本地运行时，<br>清晰的进程边界。</h2></div><p>当前桌面主线采用 Electron。界面、应用服务与 Agent 运行时分层协作，避免把所有职责塞进单一进程。</p></div>
+ <div class="architecture"><div class="arch-caption"><span>GRENA GENT / RUNTIME MAP</span><span>当前 Electron 架构</span></div><div class="arch-layer"><small>界面层</small><div class="arch-box"><strong>React 19 + Vite</strong><span>桌面界面 · 工作区 · 面板</span><em>RENDERER</em></div></div><div class="arch-bridge">window.gren · IPC 请求与事件</div><div class="arch-layer"><small>应用层</small><div class="arch-box"><strong>Electron 主进程</strong><span>窗口管理 · IPC 路由 · 应用服务</span><em>HOST</em></div></div><div class="arch-bridge">Node IPC · RPC</div><div class="arch-runtime"><div><small>Agent 运行时</small><strong>agent-host</strong><span>Pi SDK · 扩展 · 子代理 · 后台任务</span></div><div><small>数据运行时</small><strong>agentdata-host</strong><span>Wiki · 任务 · 审计 · SQLite</span></div><div><small>代码索引</small><strong>CodeGraph</strong><span>符号检索 · 调用关系 · 增量同步</span></div></div><div class="arch-foot"><span>本机进程协作</span><span>数据保存在本地</span></div></div>
+</section>
+<section class="control"><div class="wrap control-inner"><div><span class="section-index">权限与安全 / 05</span><h2>自主执行，<br><em>不代表不受约束。</em></h2><p>每个会话都可以选择不同的审批级别。路径保护、危险命令拦截与操作系统沙箱，为 Agent 的执行行为设定清晰边界。</p><a class="text-button" href="https://github.com/GrenAnHao/GrenAgent/blob/master/docs/architecture.md" target="_blank" rel="noreferrer">阅读架构与实现说明 ↗</a></div><div class="permission"><div class="permission-head"><span>会话权限级别</span><small>五档策略</small></div><button class="permission-item active" data-policy="0"><i>01</i><span><b>仅查看</b><small>只允许读取工作区内容</small></span><em>当前示例</em></button><button class="permission-item" data-policy="1"><i>02</i><span><b>请求批准</b><small>敏感操作前等待确认</small></span></button><button class="permission-item" data-policy="2"><i>03</i><span><b>替我审批</b><small>按授权策略处理操作</small></span></button><button class="permission-item" data-policy="3"><i>04</i><span><b>工作区编辑</b><small>允许修改工作区内文件</small></span></button><button class="permission-item" data-policy="4"><i>05</i><span><b>完全权限</b><small>在明确授权下开放完整能力</small></span></button><div class="permission-foot" id="policy-note">当前示例：Agent 只能读取项目文件，不会执行修改。</div></div></div></section>
+<section class="section wrap faq" id="常见问题"><div class="section-head"><div><span class="section-index">常见问题 / 06</span><h2>关于 GrenAgent。</h2></div><p>先把运行边界讲清楚，再谈 Agent 能做什么。</p></div><div class="faq-list"><details><summary>GrenAgent 是完全离线的吗？<span>＋</span></summary><p>不是。GrenAgent 的桌面运行时、会话和索引以本地为主，但调用云端模型供应商时仍需要网络。是否使用本地模型取决于你的供应商配置。</p></details><details><summary>它当前使用什么技术栈？<span>＋</span></summary><p>当前主线是 Electron 桌面应用，界面采用 React 19 与 Vite；Agent 运行时基于 Pi SDK，并由独立子进程承载。早期 Tauri 版本已经封存，不代表当前主线。</p></details><details><summary>可以连接自己的模型和工具吗？<span>＋</span></summary><p>可以配置多个模型供应商，并通过 MCP 与 Skills 扩展工具和工作流。具体兼容范围以仓库当前实现为准。</p></details><details><summary>Agent 会不会擅自修改文件？<span>＋</span></summary><p>工具执行受会话审批策略、路径保护、危险命令拦截与沙箱约束。你可以按任务选择只读、请求批准、自动审批、工作区编辑或完全权限。</p></details><details><summary>项目采用什么许可证？<span>＋</span></summary><p>当前仓库采用 PolyForm Noncommercial License 1.0.0。商业用途需要另行获得书面授权，具体以仓库中的 LICENSE 与 COMMERCIAL.md 为准。</p></details></div></section>
+<section class="closing" id="获取"><div class="wrap closing-inner"><span class="section-index">开始了解 / GRENA GENT</span><h2>把 Agent 带进<br><em>你的开发环境。</em></h2><p>查看源码、了解当前能力，或参与项目建设。</p><div class="hero-actions"><a class="button button-sage" href="https://github.com/GrenAnHao/GrenAgent" target="_blank" rel="noreferrer">前往 GitHub <span>↗</span></a><a class="text-button" href="https://github.com/GrenAnHao/GrenAgent/tree/master/docs" target="_blank" rel="noreferrer">阅读项目文档 ↗</a></div><small>当前安装包发布状态请以 GitHub Releases 页面为准。</small></div></section>
+</main>
+<footer class="footer"><div class="wrap footer-top"><a class="logo" href="#top"><span class="logo-symbol"><svg viewBox="0 0 36 36"><path d="M18 3.5 31 11v14L18 32.5 5 25V11L18 3.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M25 13a9 9 0 1 0 1 10h-8v-5h13v2a13 13 0 1 1-4-10l-2 3Z" fill="currentColor"/></svg></span><span>GrenAgent</span></a><p>让 Agent 真正进入开发流程。</p><div><a href="https://github.com/GrenAnHao/GrenAgent" target="_blank" rel="noreferrer">GitHub ↗</a><a href="https://github.com/GrenAnHao/GrenAgent/blob/master/LICENSE" target="_blank" rel="noreferrer">使用许可 ↗</a></div></div><div class="wrap footer-bottom"><span>© <span id="year"></span> GrenAgent</span><span>本地优先 · 开发者掌控</span></div></footer>
+<script src="./script.js"></script>
+</body></html>
