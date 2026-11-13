@@ -23,7 +23,7 @@
 | `promptSnippet` | 一行摘要，写入 Available tools | 必填。没有这一行，自定义工具不会出现在该段 |
 | `promptGuidelines` | 工具激活时追加到 Guidelines 的条目 | 有路由或纪律时必填；每条必须写出工具名，禁止写 `this tool` |
 
-官方说明见 [pi.dev Extensions](https://pi.dev/docs/latest/extensions)：`promptGuidelines` 是扁平追加、没有工具名前缀，必须写成 `Use my_tool when...`。覆盖内置工具时，`promptSnippet` / `promptGuidelines` **不会**从原工具继承，覆盖定义里要自己写。
+官方说明见 [Pi SDK 扩展文档（v1.5.1）](https://github.com/earendil-works/pi/blob/v1.5.1/packages/coding-agent/docs/extensions.md#piregistertooldefinition)：`promptGuidelines` 是扁平追加、没有工具名前缀，必须写成 `Use my_tool when...`。覆盖内置工具时，`promptSnippet` / `promptGuidelines` **不会**从原工具继承，覆盖定义里要自己写。
 
 ### 写法
 
@@ -46,7 +46,7 @@ pi.registerTool({
 
 - `promptSnippet` 只写一行，不要复述整个 schema。
 - `promptGuidelines` 只写模型不看字段就会用错的纪律。不要给每个工具都堆一条复述 snippet 的空话，以免撑爆 Guidelines、反复重建系统提示前缀缓存。
-- AgentData 一族只在主工具上写 `promptGuidelines`（`code_explore` / `wiki_search`）。代码检索只注册 `code_explore`，不要再加 `code_search` 等兄弟工具。wiki 不要把同一段纪律复制到每个兄弟工具上。索引是否存在只由 `code-retrieval` 每轮 hint 说一次。Fable 默认只注行为核，不要把工具手册再抄回去。
+- 代码检索只注册 `code_explore`，在该工具上写 `promptGuidelines`，不要再加 `code_search` 等兄弟工具。索引是否存在只由 `code-retrieval` 每轮 hint 说一次。Fable 默认只注行为核，不要把工具手册再抄回去。
 - 动态投射的 MCP 工具用 server 给出的 description 填 `promptSnippet`；不要在 Fable 里枚举 `mcp__*` 名字。
 - 懒加载、会话中途才激活的工具：加上 `promptSnippet` / `promptGuidelines` 会重建系统提示。需要进 Available tools 的产品工具仍然要写 snippet；纯发现/代理类工具可以只靠 `description`。
 
@@ -59,7 +59,7 @@ cd extensions
 npx vitest run prompt-metadata.test.ts
 ```
 
-该测试要求所有静态注册工具都有非空 `promptSnippet`，并检查 AgentData 工具的 guidelines 点了名。
+该测试要求所有静态注册工具都有非空 `promptSnippet`，并检查 `code_explore` 的工具指引有明确名称，不使用 `this tool`。
 
 ## 决策记录（docs/decisions/ 已冻结）
 
@@ -128,13 +128,7 @@ npx vitest run prompt-metadata.test.ts
 
 - 按模型压缩预算：`model-compaction-budgets`（真实 SettingsPanel / 预算分区；精确 provider/model 身份、SDK 继承/桌面覆盖/有效值、显式0与清除、A/B隔离、旧表单保存不覆写预算、已保存/同步失败分别回显、仅重试同步及深浅主题。实际当前模型投射、进行中 preparation 快照及 main/host/worker IPC 另由真实 SDK/生产探针覆盖。只跑 `npm run ui:check -- model-compaction-budgets`）
 
-- 请求观测：`request-observability`（真实请求详情与脱敏预览；按会话/请求隔离、采集开关、有限元数据、清除、先预览后导出及退出清理；主进程 I/O 使用桩，公开 SDK 回调、真实 worker 传输和文件导出另由定向集成探针覆盖。只跑 `npm run ui:check -- request-observability`）
-
 - 用量来源：`usage-provenance`（真实用量展示；供应商原始费用/本地估算/未知分开，预热与助手统计分列、未知不补零；外部历史不计入本机账单、派生历史去重及延迟补录另由 registry/ledger 和真实会话集成覆盖。只跑 `npm run ui:check -- usage-provenance`）
-
-- 会话树与上下文：`session-tree`、`session-context-edits`（真实会话工作流面板；树叶/标签/键盘导航、摘要确认与取消、忙碌/过期状态、原生编辑与恢复、旧排除状态分开呈现，深浅主题和窄列；实际 SDK 追加、刷新失败恢复和旧 pulse 一致性另由定向 IPC 探针覆盖。只点名运行本次改到的场景）
-
-- 会话导入导出：`session-portability`（真实工作流导入导出界面；预览、确认/取消、派生与导入状态、只读历史及错误反馈、深浅主题和窄列；原生文件对话框、严格 JSONL、候选发布、HTML 离线安全及来源记账由临时目录的真实 SDK/IPC 探针覆盖。只跑 `npm run ui:check -- session-portability`）
 
 - Pi 1.5 模型兼容：`model-compat`（真实 ProvidersSettings / ProviderModelCard / 配置 adapter，主进程 I/O 用内存盘桩；四个新版兼容字段按协议展示和保存，布尔项区分跟随 SDK / 开启 / 关闭，显式 false 保存与重挂恢复、还原默认删除覆盖；OpenAI 与 Anthropic / Responses 往返、深浅主题和窄屏。真实 SDK 请求由 modelCompat.integration.test.ts 在注入 fetch 的传输边界另验。只跑 `npm run ui:check -- model-compat`）
 
@@ -181,7 +175,7 @@ npx vitest run prompt-metadata.test.ts
 - 后台任务结算：`task-notices`（真实 reducer → groupMessages → renderMessageBody；job-done / subagent-settled 的完成、非零退出、失败、取消、超时及未知状态，默认紧凑收起、标题交代任务和终态，展开显示完整结果/诊断；已有 job_snapshot 补留存输出与耗时、记录缺失时如实说明；长正文、字段缺失、历史回放与实时重复帧；深浅主题和窄屏）
 - Goal 续跑卡片：`goal-round-card`（真实 reducer → renderMessageBody；Goal 每一轮续跑的 `goal-round` 自定义消息是 display: false，仍画成「目标续跑 · 第 N 轮」卡片，正文用真实 `buildGoalRoundPrompt` 造；标题不写轮次预算；默认收起、展开看这一轮的完成条件、再点收起；别的 display: false 消息照旧不显示；probe 经 act 推一轮实时的（message_start / message_end）只出一张；浅色主题）
 - 等待中的引导取消 / 编辑：`steer-cancel`（真实 createAgentStore → renderMessageBody，`agent_cancel_steer` 用桩、正文是「已经在注入的那条」时回 cancelled: false，输入框只装 composerBridge 的回填接缝；等待中的引导悬停才浮现操作栏，按钮是取消引导（X）/ 编辑 / 复制、没有「更多」；点 X 按正文撤这一条、气泡去掉、输入框不动；撤不回来时提示并保留气泡；编辑先取消、撤下后原文和图片回到输入框；已引导的消息没有取消；浅色主题 X 可见）
-- Agent 数据代码索引：`code-retrieval-panel`（真实 CodeRetrievalPanel + AgentDataTaskProvider，外面套 AgentDataCenter 的 `styles.panel`，`agentData_code_*` / `agentData_tasks_list` / `read_file` 用桩，项目 3000 个文件、两份源码（400 行小文件、12000 行大文件，每 200 行一条折成多行的长注释）；搜索框留空时桩按 limit / offset 分页返回并把每次请求记成事件，只画已加载的页、尾部「显示更多」滚得到点得到、点一次向主进程要一页、一路点到底 3000 个全在且按钮消失（不退回前端切页）、没有一次请求返回超过一页，顶部写真实总数；外层面板不被撑长、结果列表在左栏内滚动；原始结果展开前不画内容、展开后高度有上限并标注已截断；换成搜索后页数重置、不足一页没有「显示更多」；点结果进详情，详情栏与列表栏同高并在栏内滚动，小文件整块渲染，大文件虚拟化（DOM 里只有窗口附近的行、索引行居中、跳到第 9000 行居中、折行行高不一不重叠、滚到头尾都对）；矮窗口保住卡片 320px 的下限、放不下的部分由外层面板滚动；窄视口只显示详情栏时同样有上限）
+- 代码索引：`code-retrieval-panel`（真实 CodeRetrievalPanel，外面套定高的 `styles.panel`，用桩提供 `agentData_code_*` 和 `read_file`，项目 3000 个文件、两份源码（400 行小文件、12000 行大文件，每 200 行一条折成多行的长注释）；搜索框留空时桩按 limit / offset 分页返回并把每次请求记成事件，只画已加载的页、尾部「显示更多」滚得到点得到、点一次向主进程要一页、一路点到底 3000 个全在且按钮消失（不退回前端切页）、没有一次请求返回超过一页，顶部写真实总数；外层面板不被撑长、结果列表在左栏内滚动；原始结果展开前不画内容、展开后高度有上限并标注已截断；换成搜索后页数重置、不足一页没有「显示更多」；点结果进详情，详情栏与列表栏同高并在栏内滚动，小文件整块渲染，大文件虚拟化（DOM 里只有窗口附近的行、索引行居中、跳到第 9000 行居中、折行行高不一不重叠、滚到头尾都对）；矮窗口保住卡片 320px 的下限、放不下的部分由外层面板滚动；窄视口只显示详情栏时同样有上限）
 - 代码索引自动同步：`code-index-sync`（真实 CodeRetrievalPanel，`agentData_code_status` 的返回由 probe 经 act 切换，形状照 codegraph-host 的 `CodeGraphThreads.status`（state + phase / progress / lastError / watcher），每次读状态记一条事件；增量同步中标签「同步中」、搜索框可用、文件列表照常查出、title 带阶段与进度；调度器推进期间静默轮询、标签一帧不闪「检查中」，回到空闲后数字更新、轮询停下；被别的程序占锁写「等待重试」不写失败；全量重建「索引中」、搜索框不可用；熔断后横幅写明已暂停、轮询停下；文件监听不可用时提示手动同步）
 - 前台 run 转后台：`subagent-detached`（真实 messagesFromAgent → renderMessageBody，`subagent_list` 用桩，probe 经 act 在注册表里把转后台的子代理改成已完成；单任务回执 status: running / detached 时卡片按后台子代理画运行中；并行组里已完成的那项是已完成、转后台的那几项是运行中而不是出错，组头写「N 个在后台运行」且没有失败计数；卡片第一次读注册表时还没建出来的那一行从挂载起一次也不画成已中断（工具返回后再读一次确认），注册表里确实没有的那一行画「已中断」、不算失败也不算在后台，转后台时没有 agentId 的那一行按任务文字跟上注册表；注册表结束后经轮询变成已完成、后台计数消失；都结束后不再轮询（轮询停掉、store 清空时不能退回运行中再把轮询拉起来））
 - 右侧边栏跟会话走：`dock-session-binding`（真实 DockDndProvider（useDockSessionSwitch）+ RightPanelShell + DockPanel，左边两个会话行按侧栏 handleOpenSession 的字段写会话 store，「右栏」按钮走真实 toggleRightPanel，启动页点「文件管理器」开真实 FileTreeBody、目录用内存桩；启动页入口和 dock 标签条都写「文件管理器」；A 里打开的右栏和文件标签切到 B 不跟过来、B 默认收起，B 再打开只看到自己的空启动页；切回 A 按离开时的样子展开、标签是同一个 body 实例没被重建；B 自己开的文件标签是另一份，两份各自挂着、只显示当前会话那份；各会话的展开 / 收起互不带动）
@@ -190,6 +184,8 @@ npx vitest run prompt-metadata.test.ts
 - 独立工作区：`isolated-workspace`（真实 buildProjectGroups → ProjectHeaderRow、WorkspaceBar、IsolatedWorkspaceDialogs，`isolated_workspace_*` / `get_settings` / `subagent_get_session_messages` / git 概况用桥，形状照 `electron/app/isolatedWorkspaceService.ts`；独立工作区的组紧跟父项目、缩进、默认名 `gren/<id>`、「独立」标签，探测为 missing 的标「已删除」；独立工作区菜单有回传、没有再建，普通项目菜单有新建；新建弹窗默认 fresh、head 收在「其他基准…」里且选中显示冲突风险、fetch 默认跟设置、head 下 fetch 不可选、主进程报错原文显示且不自动改选、换基准收起报错、创建成功按项目打开；WorkspaceBar 在独立工作区里显示父项目名、「独立工作区」标签和回传按钮；管理弹窗的状态标签、未回传删除要「仍然删除」并带 force、已回传普通确认；已删除工作区的会话只读查看、没有输入框；浅色主题。antd Radio / Checkbox 的 data-testid 落在隐藏的 input 上，状态读 input、可见性和点击用 `label:has(input[data-testid=…])`；弹窗截图前等开合动画放完）
 
 harness 自检不在这个清单里，也不常驻 `scenarios/`。怀疑 harness 本身坏了（所有场景都「页面没就绪」、输入全部失效、升级 Electron / Vite 之后），用 electron-ui-harness skill 的 `scripts/smoke.mjs --app electron-agent` 跑一次，它跑完会自动删掉临时场景。在 `scenarios/` 里看到 `harness-smoke` 就是漏删的，直接删掉。
+
+保留的历史场景：`request-observability`、`session-tree`、`session-context-edits`、`session-portability` 不作为当前产品入口的验收依据。现行底层范围见[请求观测协议](docs/request-observability.md)和[会话工作流](docs/session-workflows.md)。
 
 ### 写场景
 
