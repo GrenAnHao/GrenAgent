@@ -1,6 +1,7 @@
 # Agent Note: 源码扫描排除工具输出目录，单文件上限提到 512 KiB
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

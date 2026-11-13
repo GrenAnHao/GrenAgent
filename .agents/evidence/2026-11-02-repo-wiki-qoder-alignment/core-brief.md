@@ -8,7 +8,7 @@
 
 **技术栈：** 现有 TypeScript、Pi SDK 1.4.0、SQLite、Electron、Vitest、ui-harness；不新增产品依赖。
 
-**规格：** [proposed 笔记（设计、取值和验收）](../../../.agents/notes/implemented/architecture/2026-11-02-repo-wiki-qoder-alignment.md)。[Qoder 静态证据](../../../.agents/evidence/2026-11-02-repo-wiki-qoder-alignment/qoder-reference.md)。既有内核规格中未被本提案修改的存储、授权和恢复协议继续适用。
+**规格：** [proposed 笔记（设计、取值和验收）](../../notes/archived/architecture/2026-11-02-repo-wiki-qoder-alignment.md)。[Qoder 静态证据](../../../.agents/evidence/2026-11-02-repo-wiki-qoder-alignment/qoder-reference.md)。既有内核规格中未被本提案修改的存储、授权和恢复协议继续适用。
 
 ## 全局约束
 

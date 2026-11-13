@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki 扫描尊重用户的 Git safe.directory
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

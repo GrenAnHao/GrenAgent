@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki 复用宿主知识调度与项目流程
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

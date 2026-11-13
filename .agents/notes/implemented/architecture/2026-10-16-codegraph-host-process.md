@@ -11,9 +11,9 @@ Status: implemented
 CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不再执行任何 SDK 调用。
 
 - 子进程入口 `electron/app/codeGraph/hostEntry.ts`（构建产物 `out/main/codegraph-host.js`）：同一份 Electron 可执行文件加 `ELECTRON_RUN_AS_NODE=1`，Node IPC（`serialization: 'advanced'`），`RpcPeer`。进程里是原来那一个 `CodeGraphService`，读写互斥、取消、空闲回收、错误文案都没有改。不带任何 V8 参数（字节码入口，见 [agent-host 子进程](./2026-10-09-agent-host-child-process.md)）。
-- 持有者：默认由 agentdata-host 子进程持有 `CodeGraphHostClient`（codegraph-host 是它的子进程），`GREN_AGENTDATA_PROCESS=inproc` 时由主进程持有；两边都用 `agentDataProcess/codeGraphClient.ts` 创建，见 [AgentData 运行在 agentdata-host 子进程](./2026-10-16-agentdata-host-process.md)。
+- 持有者：Electron 主进程持有 `CodeGraphHostClient`。旧的 agentdata-host 持有路径已退役；独立 SDK 子进程边界不变。
 - 门面 `CodeGraphHostClient`：方法与返回结构与原 `CodeGraphService` 相同（`projects / status / call / search / runSync / cancelSync / close`），`main.ts` 的注入点与 `CodeGraphJobs` 不变。`projects()` 只是 stat 探测，仍在主进程。
-- 进程管理复用 `AgentProcessClient`：按需拉起（第一次查询或同步时）、`host.ready` 握手、60 秒内 3 次崩溃后冷却 30 秒、关停超时整树杀掉、Windows 进程树守卫。
+- 进程管理复用 `AgentProcessClient`：按需拉起、`host.ready` 握手、60 秒内 3 次崩溃后冷却 30 秒、关停超时整树杀掉、Windows 进程树守卫。主进程的 `CodeGraphHostSupervisor` 会在宿主退出后恢复，不必等待下一条请求。
 - 线协议只从 `hostContract.ts` 取名字：方法 `codegraph.status / call / search / runSync / cancelSync`；事件 `codegraph.progress`（同步进度，按 jobId 回到 `CodeGraphJobs` 的 stage 回调）与 `codegraph.diag`（每 10 秒内存、事件循环延迟、在跑同步数，写进 `runtime-diag.jsonl` 的 `codegraph-host-sample`）；退出记 `codegraph-host-exit`。
 
 ### 子进程内的线程
@@ -42,7 +42,7 @@ CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不�
 
 ## Alternatives considered
 
-- **等 AgentData 整体移出主进程再把 CodeGraph 放进 agentdata-host。** 最强理由：AgentData 迁移方案的排序原定先迁 AgentData，避免先在主进程接一个 CodeGraph 客户端、之后再搬一次。没选：用户已经在日常操作里遇到 19.8 秒的窗口卡死，而 AgentData 迁移还卡在 M0 闸门等数据；CodeGraph 单独拆出只动 CodeGraph 自己的文件，之后如果 agentdata-host 落地，`CodeGraphHostClient` 换个持有者即可，返工很小。后来确实如此：[AgentData 运行在 agentdata-host 子进程](./2026-10-16-agentdata-host-process.md) 落地时只换了持有者。
+- **等 AgentData 整体移出主进程再把 CodeGraph 放进 agentdata-host。** 最强理由：AgentData 迁移方案的排序原定先迁 AgentData，避免先在主进程接一个 CodeGraph 客户端、之后再搬一次。没选：用户已经在日常操作里遇到 19.8 秒的窗口卡死，而 AgentData 迁移还卡在 M0 闸门等数据；CodeGraph 单独拆出只动 CodeGraph 自己的文件，之后如果 agentdata-host 落地，`CodeGraphHostClient` 换个持有者即可，返工很小。后来确实如此：[AgentData 运行在 agentdata-host 子进程](../../archived/architecture/2026-10-16-agentdata-host-process.md) 落地时只换了持有者。
 - **主进程里的 `worker_threads`。** 最强理由：少一个进程。没选：SDK 自己记录了 Windows 上结束 worker 线程可能让整个进程崩溃，宿主是主进程时风险落在窗口上；单个线程也不能单独限内存和降优先级。
 - **一次做完 [CodeGraph 自动同步方案](../../rejected/architecture/2026-10-16-codegraph-host-process-auto-sync.md)**（写调度、FileWatcher、状态模型、增量同步期间给旧结果）。最强理由：线程化是那篇的一部分，一起做只改一轮。没选：那篇大部分假设没验证，范围也大；用户要解决的是「同步时卡」，这两步（子进程 + 读写线程分离）就解决了，而且同一工作区的读写语义与原来完全一致。「同步期间仍给同一工作区的旧结果」会改变 `busy indexing` 语义和面板呈现，留给那篇。
 - **用 SDK 自带的 `QueryPool`（`mcp/query-pool`）作读池。** 最强理由：上游实现，带崩溃重试和忙碌兜底。没选：它不在 SDK 的公开导出里，要深引 `dist` 路径；它跑的是 SDK 的 MCP 工具处理器，不是本仓库的 `executeCodeGraphTool`，结果形状不同。
@@ -54,7 +54,7 @@ CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不�
 - 代价：多一个常驻（按需拉起后不退出）的子进程，冷启动约一秒；每次查询多一次 IPC 往返（8 路并发检索 25 ms → 34 ms）。
 - 一次长同步期间，其它工作区的查询在读线程上并行，不再排在同步后面；同一工作区仍互斥（`busy indexing`）。两个工作区同时同步时共用一个写线程，彼此仍会交替占用。
 - 内存：每个已启动的线程各加载一份 SDK 与自己的连接；读线程按需启动、不自动退出。
-- 生产字节码产物里的 worker 线程入口已验证可加载（见 [AgentData 运行在 agentdata-host 子进程](./2026-10-16-agentdata-host-process.md) 的验证）；仍留退路 `GREN_CODEGRAPH_THREADS=off`。
+- 生产字节码产物里的 worker 线程入口已验证可加载（见 [AgentData 运行在 agentdata-host 子进程](../../archived/architecture/2026-10-16-agentdata-host-process.md) 的验证）；仍留退路 `GREN_CODEGRAPH_THREADS=off`。
 - `--liftoff-only` 仍未传给 SDK（字节码入口不能带 V8 参数），与改动前相同；大仓库的 WASM Zone-OOM 现在只会让子进程退出、job 记为失败，不再带走主进程。
 
 ## 验证

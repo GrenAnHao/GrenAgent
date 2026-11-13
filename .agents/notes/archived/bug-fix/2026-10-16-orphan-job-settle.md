@@ -1,6 +1,7 @@
 # Agent Note: 上一个进程留下的任务在启动时落定，取消孤儿任务直接落定
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

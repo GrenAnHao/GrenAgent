@@ -1,6 +1,7 @@
 # Agent Note: runtime-diag 记录 AgentData 在主线程上的同步耗时
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

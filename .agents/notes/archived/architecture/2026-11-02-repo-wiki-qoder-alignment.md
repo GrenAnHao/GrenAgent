@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki 生成流水线与 Qoder 对齐
 
 Status: implemented
+Archived: 2026-11-13
 
 > **适用范围更新（2026-11-02）：** 本篇涉及的生成权威、依赖图、预算、全页发布与恢复合同适用于 legacy Wiki / 知识卡及其历史任务；不把它们作为 `qoder-wiki-local-v1` 的合同。native Wiki 的独立服务、部分发布和兼容边界见 [原版内核变更](../../proposed/architecture/2026-11-02-qoder-repowiki-native-replica.md)；该变更仍待整合和用户验收，旧任务不自动升级。原有历史证据仅证明当时的版本。
 

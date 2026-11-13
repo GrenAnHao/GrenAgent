@@ -1,6 +1,7 @@
 # Agent Note: AgentData 运行在 agentdata-host 子进程
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

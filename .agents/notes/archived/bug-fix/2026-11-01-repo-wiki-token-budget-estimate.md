@@ -1,6 +1,7 @@
 # Agent Note: 知识内核 token 预算按 token 估算，缓存命中按一成计
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

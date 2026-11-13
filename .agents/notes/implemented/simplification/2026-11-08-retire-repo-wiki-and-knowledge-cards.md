@@ -17,6 +17,8 @@ Status: implemented
 3. **数据、内容与历史记录一律不动。** `userData/repo-wiki/*.sqlite`、项目 `docs/repo-wiki/` 下的人工编辑与已发布正文、`.agents/notes/`、`.agents/evidence/`、`docs/decisions/`（冻结只读）、`docs/superpowers/`、`openspec/changes/` 历史规格、`.pi/visual/` 原型均保留。代码不再读取这些数据库，但不做删除、迁移或归档，也不清理用户目录。
 4. **历史笔记不改写、不归档。** 用户明确选择「只在新笔记里标注功能已裁撤」；本笔记的归属审计表承担取代说明，避免为标注状态而批量修改冻结或历史文件。
 
+2026-11-13 笔记清理仅调整记录位置和取代索引，不改变上述裁撤与数据保留边界。
+
 ## Scope
 
 **删除**：`electron-agent/vendor/repo-wiki/`、`electron-agent/electron/wikiService/`、`electron-agent/electron/knowledgeProcess/`、`electron-agent/electron/agentData/knowledgeKernel/`、`electron-agent/src/features/repoWiki/`；`electron/app/repoWikiService.ts`、`nativeWikiController.ts`、`nativeWikiModel.ts`、`repoWikiKnowledgeModel.ts`、`electron/agent/repoWikiHostBuild.ts`、`agentData/nativeWikiProjection.ts`、`shared/knowledgeKernelContracts.ts`、`shared/wikiLinks.ts`；上述目录内全部测试与 fixtures；`ui-harness/scenarios|probes/repo-wiki*`；`tsconfig.repo-wiki.json`、`tsconfig.knowledge-kernel.json`、`vitest.repo-wiki*.config.ts`、`scripts/test-repo-wiki*.mjs`、`scripts/verify-repo-wiki-catalogue.mjs`、`scripts/fixtures/repoWikiWorkflowAgentDataHost.ts`。
@@ -27,10 +29,30 @@ Status: implemented
 
 ## Related notes
 
-已检索 `proposed` / `implemented` / `rejected` 中的 repo-wiki、Kernel、裁撤关键词。以下记录描述的功能均已随本决定下线；按用户要求原文件保留作历史考据，不改写、不归档，取代关系以本节为准。
+Repo Wiki / 知识卡的旧实现笔记已封存，仅供历史对照：
 
-- 完全被取代：`implemented/architecture/2026-10-31-repo-wiki-process-integration.md`、`2026-10-31-repo-wiki-project-files-and-lazy-service.md`、`2026-11-01-repo-wiki-agentdata-durable-tasks.md`、`2026-11-01-repo-wiki-knowledge-kernel.md`、`2026-11-02-repo-wiki-qoder-alignment.md`；`implemented/bug-fix/2026-10-31-repo-wiki-host-workflow-alignment.md`、`2026-10-31-repo-wiki-windows-git-identity.md`、`2026-10-31-repo-wiki-windows-stream-and-wal-tests.md`、`2026-11-01-repo-wiki-git-safe-directory.md`、`2026-11-01-repo-wiki-partial-tool-output.md`、`2026-11-01-repo-wiki-real-model-shakedown.md`、`2026-11-01-repo-wiki-token-budget-estimate.md`、`2026-11-01-repo-wiki-unified-knowledge-ui.md`、`2026-11-03-repo-wiki-catalogue-failures.md`、`2026-11-05-repo-wiki-retired-task-import.md`。
-- 前提消失的提案：`proposed/architecture/2026-11-02-qoder-repowiki-native-replica.md`、`proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md`。二者状态保持 proposed，不再推进。
+- [Repo Wiki v3 独立进程接入](../../archived/architecture/2026-10-31-repo-wiki-process-integration.md)
+- [Repo Wiki 项目文件事实来源与按需服务](../../archived/architecture/2026-10-31-repo-wiki-project-files-and-lazy-service.md)
+- [Repo Wiki 融入 AgentData 与持久化生成任务](../../archived/architecture/2026-11-01-repo-wiki-agentdata-durable-tasks.md)
+- [AgentData 托管的 Repo Wiki KnowledgeKernel](../../archived/architecture/2026-11-01-repo-wiki-knowledge-kernel.md)
+- [Repo Wiki 生成流水线与 Qoder 对齐](../../archived/architecture/2026-11-02-repo-wiki-qoder-alignment.md)
+- [Repo Wiki 与知识卡的模型轮次预算按用途分层，剩余额度直接报给模型](../../archived/architecture/2026-11-04-stage-turn-budgets-and-diagnostics.md)
+- [Repo Wiki 复用宿主知识调度与项目流程](../../archived/bug-fix/2026-10-31-repo-wiki-host-workflow-alignment.md)
+- [Repo Wiki Windows Git 身份探测](../../archived/bug-fix/2026-10-31-repo-wiki-windows-git-identity.md)
+- [Repo Wiki Windows body-limit response and offline WAL fixture](../../archived/bug-fix/2026-10-31-repo-wiki-windows-stream-and-wal-tests.md)
+- [Repo Wiki 扫描尊重用户的 Git safe.directory](../../archived/bug-fix/2026-11-01-repo-wiki-git-safe-directory.md)
+- [工具输出被截断不再让整个阶段失败](../../archived/bug-fix/2026-11-01-repo-wiki-partial-tool-output.md)
+- [用真实模型跑通 Repo Wiki 知识内核](../../archived/bug-fix/2026-11-01-repo-wiki-real-model-shakedown.md)
+- [知识内核 token 预算按 token 估算，缓存命中按一成计](../../archived/bug-fix/2026-11-01-repo-wiki-token-budget-estimate.md)
+- [Repo Wiki catalogue 生成失败的三个根因与修复](../../archived/bug-fix/2026-11-03-repo-wiki-catalogue-failures.md)
+- [模型输出解析按形状分类，格式失败可重试而空回答不可](../../archived/bug-fix/2026-11-04-model-output-shape-tolerance.md)
+- [源码扫描排除工具输出目录，单文件上限提到 512 KiB](../../archived/bug-fix/2026-11-04-scan-excludes-tool-output.md)
+- [Wiki 历史迁移不调用退役任务 RPC](../../archived/bug-fix/2026-11-05-repo-wiki-retired-task-import.md)
+
+已删除旧知识 UI 细节和两篇失去前提的 Wiki 提案；如需追溯，见[清理前的笔记树](https://github.com/GrenAnHao/GrenAgent/blob/34c030c190f82f1faef3a94475e8bdb04c658dcf/.agents/notes/)。
+
+旧 AgentData 的[独立宿主](../../archived/architecture/2026-10-16-agentdata-host-process.md)、[同步耗时诊断](../../archived/process/2026-10-16-agentdata-sync-timing-diag.md)和[共享任务中心的孤儿任务修复](../../archived/bug-fix/2026-10-16-orphan-job-settle.md)只作历史对照。现行索引任务的收尾由 [IndexTaskStore 接线记录](../bug-fix/2026-11-08-code-index-sync-and-freshness.md)说明。
+
 - 部分重叠但仍有独立价值：[退役 AgentData 产品面](2026-11-04-retire-agentdata-surface.md)记录的共享基础设施保留边界继续成立，仅其「Repo Wiki 与知识卡各自持有运行时」这一前提失效；[轻量解耦评审](../../proposed/architecture/2026-11-03-agentdata-lightweight-decoupling-review.md)的代码证据与 CodeGraph 结论仍有效，其 Wiki/cards 改造路线不再推进；[移除长期记忆](2026-10-31-remove-agentdata-memory.md)与本次无关。
 
 ## Alternatives considered

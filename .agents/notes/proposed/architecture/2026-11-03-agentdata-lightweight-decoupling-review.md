@@ -2,6 +2,8 @@
 
 Status: proposed
 
+> 2026-11-13：本文是 2026-11-03 的评审证据。Wiki / 知识卡方案随[裁撤决定](../../implemented/simplification/2026-11-08-retire-repo-wiki-and-knowledge-cards.md)停止，不作为待办；CodeGraph 与共享设施的证据保留，当前拓扑见[架构文档](../../../../docs/architecture.md#代码索引)。
+
 ## Problem
 
 用户希望解决 AgentData 职责混杂、任务状态含义不清、UI 难以理解的问题，目标是解耦、更快捷、更轻量。当前问题贯穿执行权威、数据权威、状态投影和产品入口，单独重做页面不能完整解决。
@@ -629,13 +631,13 @@ P：保留“Agent 数据”作为兼容入口，主内容改为资源工作台�
 | 既有记录 | 分类及本稿处理 |
 | --- | --- |
 | [自有 AgentData Runtime](../../implemented/architecture/2026-08-31-self-owned-agent-data-runtime.md) | 部分重叠；本地共享宿主保留，本文建议进一步划分逻辑所有权 |
-| [AgentData 子进程](../../implemented/architecture/2026-10-16-agentdata-host-process.md) | 部分重叠；唯一库写者、主线程隔离、稳定端点与关停顺序保留 |
+| [AgentData 子进程](../../archived/architecture/2026-10-16-agentdata-host-process.md) | 部分重叠；唯一库写者、主线程隔离、稳定端点与关停顺序保留 |
 | [CodeGraph SDK](../../implemented/architecture/2026-09-07-embedded-codegraph-sdk.md) / [CodeGraph 子进程](../../implemented/architecture/2026-10-16-codegraph-host-process.md) | 部分重叠；不退回全局 CLI/MCP 或主线程重活 |
 | [CodeGraph 自动同步](../../implemented/architecture/2026-10-18-codegraph-auto-sync-and-stale-reads.md) / [补同步与读限制](../../implemented/architecture/2026-10-27-codegraph-catchup-and-read-limits.md) | 部分重叠；保留既有维护机制，补事件、freshness、监督与读写角色 |
 | [旧自动同步提案](../../rejected/architecture/2026-10-16-codegraph-host-process-auto-sync.md) | 已 rejected；不当成待实施方案，当前实现取后续 implemented 与源码 |
-| [持久 Repo Wiki 任务](../../implemented/architecture/2026-11-01-repo-wiki-agentdata-durable-tasks.md) / [KnowledgeKernel](../../implemented/architecture/2026-11-01-repo-wiki-knowledge-kernel.md) | 部分重叠；当前 cards/历史恢复合同继续有效，不能整篇宣告失效 |
-| [Native 复刻提案](2026-11-02-qoder-repowiki-native-replica.md) | 部分重叠；保留其生成/部分发布/独立权威合同，本稿不重新设计 Qoder 流水线，也不将 proposed 当验收通过 |
-| [Legacy 校验修复提案](../../proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md) | 局部相邻；不能用作 Native 当前验证保证 |
+| [持久 Repo Wiki 任务](../../archived/architecture/2026-11-01-repo-wiki-agentdata-durable-tasks.md) / [KnowledgeKernel](../../archived/architecture/2026-11-01-repo-wiki-knowledge-kernel.md) | 部分重叠；当前 cards/历史恢复合同继续有效，不能整篇宣告失效 |
+| [Native 复刻提案](https://github.com/GrenAnHao/GrenAgent/blob/34c030c190f82f1faef3a94475e8bdb04c658dcf/.agents/notes/proposed/architecture/2026-11-02-qoder-repowiki-native-replica.md) | 部分重叠；保留其生成/部分发布/独立权威合同，本稿不重新设计 Qoder 流水线，也不将 proposed 当验收通过 |
+| [Legacy 校验修复提案](https://github.com/GrenAnHao/GrenAgent/blob/34c030c190f82f1faef3a94475e8bdb04c658dcf/.agents/notes/proposed/bug-fix/2026-11-02-repo-wiki-generation-validation-repair.md) | 局部相邻；不能用作 Native 当前验证保证 |
 | [Memory 裁撤](../../implemented/simplification/2026-10-31-remove-agentdata-memory.md) | 边界约束；不恢复 Memory、不删除共享宿主数据 |
 
 ## 16. 源码证据索引

@@ -5,8 +5,8 @@ Status: rejected — 已被 [codegraph-host 子进程](../../implemented/archite
 > 范围（2026-10-17 收窄）：本篇原名「CodeGraph 移出主进程，并加自动索引与自动同步」。前半已经落地，不再属于本篇：
 >
 > - SDK 只在 codegraph-host 子进程里跑，子进程内一个写线程、N 个读线程、写前 evict，见 [CodeGraph 运行在 codegraph-host 子进程](../../implemented/architecture/2026-10-16-codegraph-host-process.md)。主进程在同步期间最长卡顿 452 ms → 25 ms，下文 S0 基线与 E1 响应性冒烟已在那篇做完；S1（只读连接与写者并发）、S6（`node:sqlite` 在 RunAsNode 的 worker 里可用）由 `codeGraphThreads.sdk.test.ts` 覆盖了一部分。
-> - `CodeGraphHostClient` 由 agentdata-host 持有（codegraph-host 是它的子进程），不在主进程，见 [AgentData 运行在 agentdata-host 子进程](../../implemented/architecture/2026-10-16-agentdata-host-process.md)。下文所有「主进程」一侧（状态表、`touch`、广播、关停顺序）落地时都改在 agentdata-host 里做，状态推送经它的诊断 / 事件通道回到主进程再广播。
-> - `codegraph.sync` 残留 job 的收尾已由 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
+> - `CodeGraphHostClient` 由 agentdata-host 持有（codegraph-host 是它的子进程），不在主进程，见 [AgentData 运行在 agentdata-host 子进程](../../archived/architecture/2026-10-16-agentdata-host-process.md)。下文所有「主进程」一侧（状态表、`touch`、广播、关停顺序）落地时都改在 agentdata-host 里做，状态推送经它的诊断 / 事件通道回到主进程再广播。
+> - `codegraph.sync` 残留 job 的收尾已由 [孤儿任务落定](../../archived/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
 > - （2026-10-18）增量同步期间给旧结果、写调度（合并、优先级、自动同步单车道、排队、退避、熔断、占锁延后）、触发器（FileWatcher、查询即激活的补同步、只维护已有索引）、状态里的 phase 等字段、结果里的 `meta`、同步失败进 `runtime-diag.jsonl`、面板同步中可查与静默轮询，见 [CodeGraph 自动同步，增量同步期间给旧结果](../../implemented/architecture/2026-10-18-codegraph-auto-sync-and-stale-reads.md)。那次落地与下文不同的决定（理由在那篇）：手动任务排在正在跑的自动同步后面而不是附着；自动同步一律增量，不升级为全量；手动同步不受车道限制；只有查询 / 搜索算激活，查状态不算；监听防抖 1000ms；状态没有 `disabled` / `unavailable` 阶段，总开关是 `GREN_CODEGRAPH_AUTO_SYNC=off`。
 >
 > （2026-10-27）读队列与超时、读单飞、混合读检测、写停滞、资源守卫、登记文件上的启动补同步 / 轮询 / HEAD 探测、熔断失败任务、`codegraph.state` 事件，见 [读限制、补同步与熔断任务](../../implemented/architecture/2026-10-27-codegraph-catchup-and-read-limits.md)。和原文不一致的地方以那篇为准。
@@ -24,7 +24,7 @@ Status: rejected — 已被 [codegraph-host 子进程](../../implemented/archite
 
 - ~~读与写互斥~~（2026-10-18 起只剩全量重建期间互斥，增量同步期间给旧结果）：同工作区有写者时读直接返回 `CodeGraph workspace is busy indexing`。手动同步偶发，自动同步每次保存都发生就不可接受。
 - 超时只在传输层（仍在）：`AgentDataClient` 65 秒超时、`closeOnTimeout: false`，客户端放弃后读线程里的计算继续跑完，没有取消，也没有排队上限。
-- ~~同步 job 崩溃后不收尾~~：已由 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
+- ~~同步 job 崩溃后不收尾~~：已由 [孤儿任务落定](../../archived/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
 - 生产环境没有给 SDK 传 `--liftoff-only`（仍在；SDK 的 WASM Zone-OOM 防护，`wasm-runtime-flags`）：`scripts/test-codegraph.mjs` 跑测试时传了，codegraph-host 的字节码入口不能带 V8 参数；现在 OOM 只会带走子进程。
 - `status().state === 'stale'` 在 SDK 里的含义是「索引由旧版抽取器建成」（`isIndexStale()`），不是「文件已变」。现在没有任何地方回答「磁盘上有多少文件还没进索引」。
 
@@ -173,7 +173,7 @@ interface CodeGraphStatusView {
 | 读 worker 崩溃/超时 | 重建 worker；该请求返回错误，不重放（读可重放但会放大雪崩，交给调用方） |
 | 子进程崩溃 | 在途请求以 `CODEGRAPH_HOST_EXITED`（可重试）拒绝；在途**写任务**对应的 job 标记失败并带原因；主进程按 `AgentProcessClient` 同样的预算重拉（60 秒内 3 次后冷却 30 秒），冷却期间读返回 `CODEGRAPH_BUSY`，状态显示 `host_restarting`；重拉后按状态表和 `getIndexState()` 重新规划（被打断的全量会是 `partial`，计划为全量；被打断的增量重新比对即可，幂等） |
 | 主进程退出 | 关停顺序：先 `codegraphHost.shutdown()`（停触发器 → 软取消写任务 → 等 `shutdownGraceMs` 默认 5 秒 → 关连接），再 `agentData.stop()`，因为进度回调还要写 AgentData；超时由进程树守卫清理。子进程在 IPC 断开时自行退出 |
-| 主进程崩溃后残留 job | 已落地（做法不同）：运行时启动时把未结束的 job 落定，已请求取消的记 cancelled，其余记 `JOB_INTERRUPTED` 失败，见 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) |
+| 主进程崩溃后残留 job | 已落地（做法不同）：运行时启动时把未结束的 job 落定，已请求取消的记 cancelled，其余记 `JOB_INTERRUPTED` 失败，见 [孤儿任务落定](../../archived/bug-fix/2026-10-16-orphan-job-settle.md) |
 | 心跳丢失 | 子进程每 2 秒发心跳；主进程 15 秒没收到就判无响应，杀掉重拉，同样计入崩溃预算 |
 
 ### 6. 资源约束

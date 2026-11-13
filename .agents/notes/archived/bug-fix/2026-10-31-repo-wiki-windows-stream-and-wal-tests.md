@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki Windows body-limit response and offline WAL fixture
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

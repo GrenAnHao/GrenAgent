@@ -17,9 +17,9 @@ AgentData 是共享宿主，不删除整个 agent-data.db；保留 Wiki、CodeGr
 已检索 memory / 记忆 / AgentData：
 
 - [记忆管线](../../archived/architecture/2026-09-18-memory-pipeline-upstream-aligned.md)被本决定完全取代并归档。该记录保留了成本、抽取失败与重复发送载荷的历史证据，不能当作当前用量。仅节流与截断已尝试过，未解决用户的低使用价值与管理负担。
-- [自有运行时](../../implemented/architecture/2026-08-31-self-owned-agent-data-runtime.md)和[AgentData 子进程](../../implemented/architecture/2026-10-16-agentdata-host-process.md)部分重叠；共享宿主、权限、Wiki 与代码检索边界继续成立，仅移除记忆职责。
+- [自有运行时](../../implemented/architecture/2026-08-31-self-owned-agent-data-runtime.md)和[AgentData 子进程](../../archived/architecture/2026-10-16-agentdata-host-process.md)部分重叠；共享宿主、权限、Wiki 与代码检索边界继续成立，仅移除记忆职责。
 - [上下文策略](../../implemented/architecture/2026-09-30-compaction-and-context-policy.md)保留：session-memory 服务当前分支的长对话连续性，与长期记忆不是同一功能。
-- [AgentData 同步诊断](../../implemented/process/2026-10-16-agentdata-sync-timing-diag.md)保留共享请求时序事实，记忆调用只作为历史样本。
+- [AgentData 同步诊断](../../archived/process/2026-10-16-agentdata-sync-timing-diag.md)保留共享请求时序事实，记忆调用只作为历史样本。
 
 ## Alternatives considered
 

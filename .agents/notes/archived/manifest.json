@@ -2,6 +2,26 @@
   "version": 1,
   "files": {
     "archived/architecture/2026-09-18-memory-pipeline-upstream-aligned.md": "sha256:9228174f23458d5e692db10c749751ee0b0cb93bf17120e37781e181d1e0779b",
-    "archived/feature/2026-10-29-gpt-with-taste-as-pi-extension.md": "sha256:1158e64ab5a1e0b465a994702fb823fa36aae0d6a214bde9c86a712d43aa5edc"
+    "archived/architecture/2026-10-16-agentdata-host-process.md": "sha256:bd7bb1d90ff45b6d1041f2b95a572117a93411fdce1e1b78dda3b0fb8ac22eec",
+    "archived/architecture/2026-10-31-repo-wiki-process-integration.md": "sha256:9b3671a91a0596923949b21de7b2a994ead41d2cb7c51741e71a0872a5ed5c36",
+    "archived/architecture/2026-10-31-repo-wiki-project-files-and-lazy-service.md": "sha256:a7089de5ff30b7e351c4123decd21a40697705f34cca953c0d0bb2812f6dacf0",
+    "archived/architecture/2026-11-01-repo-wiki-agentdata-durable-tasks.md": "sha256:8b9e6cd017ec5e6e6d49a14b008d078ede1d671cec89abb25d9f37e105b5f2da",
+    "archived/architecture/2026-11-01-repo-wiki-knowledge-kernel.md": "sha256:cc320b24cec9377ef11bcec010dbbccca38765c83a3f9ba47ea4d70a8d3297e1",
+    "archived/architecture/2026-11-02-repo-wiki-qoder-alignment.md": "sha256:0f2d768e63be0a1ceaea8af17505d9f38ea65a904491b37b2dd6fbb703e85ad5",
+    "archived/architecture/2026-11-04-stage-turn-budgets-and-diagnostics.md": "sha256:201782b7d29f6feed932a7dc85e4b824246717b0faad59f090715a1a841edcf6",
+    "archived/bug-fix/2026-10-16-orphan-job-settle.md": "sha256:afb4b2eeb9f2fed4657957821af0719879bf75fcc4ceab23c1f05d511bb90c5a",
+    "archived/bug-fix/2026-10-31-repo-wiki-host-workflow-alignment.md": "sha256:0793dbde144032d46f80e207f18ce4b6b494727cc7c6178fbf7fd0aee7419be7",
+    "archived/bug-fix/2026-10-31-repo-wiki-windows-git-identity.md": "sha256:74b694a2f277a55f5baeba9e178615b253468e55b721e41489d4b50fa79eb313",
+    "archived/bug-fix/2026-10-31-repo-wiki-windows-stream-and-wal-tests.md": "sha256:9050397ca837a85dbcdabbd1521e96f93b8acdcace9a8c7c42d355373ca89ef3",
+    "archived/bug-fix/2026-11-01-repo-wiki-git-safe-directory.md": "sha256:97e7f55599be0fdd6cfa3be1d53c4e366be15e087a820d8ec9041f6f0dc1ffe4",
+    "archived/bug-fix/2026-11-01-repo-wiki-partial-tool-output.md": "sha256:cf5deeb81bc14aff3e89d111b031f2f70edf1e244070c558c2d30860f3fff4ee",
+    "archived/bug-fix/2026-11-01-repo-wiki-real-model-shakedown.md": "sha256:2e7b7d3d3c78b81590e80c40fb9d6feaf170d01068b13444a76162a4ad938c3a",
+    "archived/bug-fix/2026-11-01-repo-wiki-token-budget-estimate.md": "sha256:1e23eadcde8064b2b0459981c12fc01e5611017faff21b13c6e6d3c9bc71299c",
+    "archived/bug-fix/2026-11-03-repo-wiki-catalogue-failures.md": "sha256:30cd603a5a3e57e8fb061e4ed0a56b274febac50a2ee7eee2a583f5fc2988942",
+    "archived/bug-fix/2026-11-04-model-output-shape-tolerance.md": "sha256:08720029a42df2a58fd6dbefcb148a62b66a0257a81b85c37288b8b59d8826f6",
+    "archived/bug-fix/2026-11-04-scan-excludes-tool-output.md": "sha256:a2211f2d1a1b66a3c185e28cdb673cbbfea5019f0fb48b2d6e6ed35c70778ac7",
+    "archived/bug-fix/2026-11-05-repo-wiki-retired-task-import.md": "sha256:9de00f10d02589c4ba9d437cf6e5737a6c7c4d412aebd5fb5b3a835778a40cb0",
+    "archived/feature/2026-10-29-gpt-with-taste-as-pi-extension.md": "sha256:1158e64ab5a1e0b465a994702fb823fa36aae0d6a214bde9c86a712d43aa5edc",
+    "archived/process/2026-10-16-agentdata-sync-timing-diag.md": "sha256:be1a2ab8623f89ed3eb20efafe302cee193ac76de87a936e9e3f013b770dcb22"
   }
 }

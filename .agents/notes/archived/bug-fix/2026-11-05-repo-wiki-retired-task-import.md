@@ -1,6 +1,7 @@
 # Agent Note: Wiki 历史迁移不调用退役任务 RPC
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

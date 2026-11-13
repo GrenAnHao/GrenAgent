@@ -37,7 +37,7 @@ Repo Wiki 独立 OS child 的模型桥
 | 原界面适配 | `vendor/repo-wiki/apps/web/src` 中宿主 props、自动选择、上下文隔离与草稿保护；`src/features/repoWiki/testing/runtimeFixture.ts`、`ui-harness/scenarios/repo-wiki.tsx`、`ui-harness/probes/repo-wiki.mjs` |
 | 子进程边界 | `vendor/repo-wiki/packages/process/src/{client,child}.ts`、`vendor/repo-wiki/packages/service/src/service.ts` |
 | 实际链验收 | `electron/app/repoWikiWorkflow.integration.test.ts`、`electron/app/repoWikiWorkflow.integration.fixture.ts`、`scripts/fixtures/repoWikiWorkflowAgentDataHost.ts`，及对应调度、项目、模型端口、UI 定向测试 |
-| 门禁与说明 | `tsconfig.repo-wiki.json`、根目录 `AGENTS.md`、[决策笔记](../../notes/implemented/bug-fix/2026-10-31-repo-wiki-host-workflow-alignment.md) |
+| 门禁与说明 | `tsconfig.repo-wiki.json`、根目录 `AGENTS.md`、[决策笔记](../../notes/archived/bug-fix/2026-10-31-repo-wiki-host-workflow-alignment.md) |
 
 ## 最终验证
 

@@ -1,6 +1,7 @@
 # Agent Note: 模型输出解析按形状分类，格式失败可重试而空回答不可
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

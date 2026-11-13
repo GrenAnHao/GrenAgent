@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki catalogue 生成失败的三个根因与修复
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

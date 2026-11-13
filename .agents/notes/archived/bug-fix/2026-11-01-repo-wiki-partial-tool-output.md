@@ -1,6 +1,7 @@
 # Agent Note: 工具输出被截断不再让整个阶段失败
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

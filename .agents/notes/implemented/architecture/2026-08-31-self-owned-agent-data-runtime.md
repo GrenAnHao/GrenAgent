@@ -8,6 +8,8 @@ Status: implemented
 
 原因（用户说明）：TencentDB 属于通用型平台，很多功能与自有 harness 冲突，所以采用它的功能内核，而不是平台本身。
 
+> 当前进程边界见[架构文档](../../../../docs/architecture.md#代码索引)。下文是替换 TencentDB 时的历史记录；旧 Wiki 和独立 AgentData 宿主已退役。
+
 ## Decision
 
 - 主进程启动自研 Agent Data Runtime：`127.0.0.1` 随机端口 JSONL RPC，`randomBytes(32)` token 鉴权；数据在 `<应用数据目录>/agent-data.db`（`node:sqlite`）。
@@ -17,7 +19,7 @@ Status: implemented
 ### 涉及文件
 
 - `electron-agent/electron/agentData/`
-- `docs/agent-data-migration.md`
+- [原迁移说明（历史）](https://github.com/GrenAnHao/GrenAgent/blob/7cea05eac673e7046ee92748c2f01bc649764ba4/docs/agent-data-migration.md)
 
 ### 来源
 

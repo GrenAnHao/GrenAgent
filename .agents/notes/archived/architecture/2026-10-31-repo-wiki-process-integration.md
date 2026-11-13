@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki v3 独立进程接入
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

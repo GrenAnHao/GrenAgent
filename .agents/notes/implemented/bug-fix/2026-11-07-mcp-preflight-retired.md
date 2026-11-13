@@ -22,7 +22,7 @@ Status: implemented
 
 - [退役 AgentData 产品面与运行时](../simplification/2026-11-04-retire-agentdata-surface.md)：本次的直接前提。那篇把扩展端点收窄成 `codeRetrieval.call` + `permission.tool.*`，本篇修的是它留下的断口。那篇只写了「工具审批未执行」，没有覆盖到「扩展里的预检会因此永远拒绝」。
 - [MCP 权限在模块挂载时独立读取](../bug-fix/2026-10-31-mcp-policy-initial-read.md)：部分重叠；`~/.pi/mcp-policy.json` 的读取与写入语义不变，本次不碰。
-- [AgentData 运行在 agentdata-host 子进程](../architecture/2026-10-16-agentdata-host-process.md)：已被上述退役决策取代，其中「`permission.authorize` 经 `main.method` 回主进程」的路径已不存在。
+- [AgentData 运行在 agentdata-host 子进程](../../archived/architecture/2026-10-16-agentdata-host-process.md)：已被上述退役决策取代，其中「`permission.authorize` 经 `main.method` 回主进程」的路径已不存在。
 
 未发现应被本次完整吸收或废弃的其他旧提案。
 

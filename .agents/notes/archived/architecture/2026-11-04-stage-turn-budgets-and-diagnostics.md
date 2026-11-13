@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki 与知识卡的模型轮次预算按用途分层，剩余额度直接报给模型
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

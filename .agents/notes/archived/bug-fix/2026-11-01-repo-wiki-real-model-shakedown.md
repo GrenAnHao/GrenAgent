@@ -1,6 +1,7 @@
 # Agent Note: 用真实模型跑通 Repo Wiki 知识内核
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 

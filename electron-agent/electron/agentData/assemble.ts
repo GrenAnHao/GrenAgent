@@ -1,7 +1,6 @@
 /**
- * AgentData 运行时的装配：两种宿主（主进程内 inproc、agentdata-host 子进程 child）共用这一份，
- * 保证两种模式下执行器、CodeGraph、系统任务的接法完全相同。只依赖注入的端口，不引入 electron。
- * 见 .agents/notes/implemented/architecture/2026-10-16-agentdata-host-process.md。
+ * 主进程内装配 AgentData 运行时与索引任务执行器。只依赖注入的端口，不引入 electron。
+ * 见 docs/architecture.md 的「代码索引」。
  */
 import { AgentDataRuntime, type AgentDataMethod, type AgentDataRuntimeOptions } from './runtime';
 import type { CodeGraphHostClient } from '../app/codeGraph/codeGraphHostClient';

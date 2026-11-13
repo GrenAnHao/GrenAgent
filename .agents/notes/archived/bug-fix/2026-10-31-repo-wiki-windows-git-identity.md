@@ -1,6 +1,7 @@
 # Agent Note: Repo Wiki Windows Git 身份探测
 
 Status: implemented
+Archived: 2026-11-13
 
 ## Problem
 
