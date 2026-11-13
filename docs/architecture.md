@@ -1,40 +1,24 @@
 # 架构文档
 
-本文介绍 GrenAgent 的整体架构、模块职责与运行时数据流。面向需要理解或参与开发的工程师。本文只写**事实**——系统当前如何运转；改动背后的取舍与「为什么」见 [`decisions/`](decisions/README.md)。
-
-> **桌面端主线是 Electron。** `electron-agent/` 为当前实现。历史 Tauri 版（`tauri-agent/`，Tauri 2 + Rust）已于 2026-09-13 封存并从工作区移除，完整快照见 git 标签 `archive/tauri-agent`；文中涉及 Tauri 的段落均标注为历史，仅作迁移对照。桌面能力从 Tauri command 迁移到 Electron 的收口点见 `electron-agent/docs/tauri-api-inventory.md`。
+GrenAgent 的桌面端位于 `electron-agent/`。本文说明当前的进程边界和数据归属；设计取舍见 [决策笔记](../.agents/notes/)，开发命令见 [开发指南](./development.md)。早期 Tauri 版见 Git 标签 `archive/tauri-agent`。
 
 ## 总览
 
-GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
+```text
+React 渲染层
+  ↕ window.gren（请求 gren:invoke，事件 gren:event:）
+Electron 主进程
+  ├─ Node IPC / RpcPeer ↔ agent-host：交互会话、扩展、后台任务
+  ├─ Node IPC / RpcPeer ↔ codegraph-host：索引调度、SDK 读写线程
+  └─ 进程内 AgentDataRuntime：线程、回合、授权和插件状态
 
-```
-┌────────────────────────────────────────────────────────┐
-│  electron-agent（桌面应用）                               │
-│  ┌────────────────┐   window.gren   ┌────────────────┐  │
-│  │ React 渲染层     │ ─────────────▶ │ 主进程服务层     │  │
-│  │ (Vite/Renderer) │ ◀───────────── │ (Electron)     │  │
-│  └───────┬────────┘   gren:event:   └────────┬───────┘  │
-│          │                                   │          │
-│  ┌───────▼───────────────────────────────────▼───────┐  │
-│  │ Wiki FTS5 / 线程 / 任务与审计（node:sqlite）    │  │
-│  └───────────────────────────────────────────────────┘  │
-│                                                          │
-│  主进程：ModelRuntime（短调用）                            │
-│    │ Node IPC（RpcPeer，结构化克隆）                         │
-│    ▼                                                     │
-│  agent-host 子进程（ELECTRON_RUN_AS_NODE，所有工作区共用）     │
-│    → AgentSessionRuntime / ModelRuntime（交互、Goal）        │
-│    → 全部扩展、MCP 管理器、后台 job、进程内子代理               │
-│    → spawn(process.execPath, [PI_WORKER_ENTRY])          │
-│      + ELECTRON_RUN_AS_NODE（CLI / worker 进程里的子代理）    │
-└────────────────────────────────────────────────────────┘
+扩展的 code_explore / 工具授权 → 主进程最小扩展端点
 ```
 
-- **请求**：渲染层通过 `window.gren.invoke(command, args)` 调用主进程，走单业务通道 `gren:invoke`（`electron/ipc/contracts.ts` 定义、按命令名分发）。运行时命令（`agent_*`、子代理、后台 job、MCP 热重载与探测）由主进程原样转发给 agent-host 子进程。
-- **流式回传**：Agent 运行过程中的事件（`agent_start` / `message_start` / `message_delta` / `agent_end` 等）在 agent-host 子进程里产生，经 IPC 的 `broadcast` 事件交给主进程，主进程 `broadcastPiEvent` 广播到所有窗口（`pi://event`、`pi://ui-request`、`pi://exit`、`pi://jobs`，统一 `gren:event:` 前缀）。
-- **执行**：Pi SDK 跑在 agent-host 子进程里。交互与 Goal 走 `AgentSessionRuntime`；主进程的短调用（知识库、增强提示词、测活）走主进程自己的 `ModelRuntime.completeSimple`；子代理默认在 agent-host 进程内跑；worker 后端（CLI、worker 进程里再派的子代理）由子进程 `spawn(process.execPath, [PI_WORKER_ENTRY])` 并设 `ELECTRON_RUN_AS_NODE=1`。worktree 是显式工具 `create_worktree`，只切换调用方会话的工作目录（`working_directory`），不开新进程。
-- **隔离**：业务代码只依赖 `src/platform/runtime.ts` 定义的 `GrenRuntimeBridge`，不直接引用 Electron；无 bridge 时自动降级为浏览器预览实现。
+- **渲染层**：业务组件经 `src/platform/runtime.ts` 使用 `GrenRuntimeBridge`，不直接依赖 Electron。浏览器预览没有 preload 桥时使用 `browserPreviewBridge`。
+- **主进程**：管理窗口、桌面 IPC 和两个宿主子进程；供应商测活、提示词增强等短调用由主进程的模型运行时执行。AgentData 在主进程内装配，不再启动 `agentdata-host`。
+- **agent-host**：所有工作区共用一个宿主进程。交互和 Goal 使用 Pi SDK；子代理默认在宿主内执行。CLI 或 worker 走进程式子代理后端时，通过 `PI_WORKER_ENTRY` 启动 worker。会话和任务事件经主进程转发给渲染层，包括 `pi://event`、`pi://ui-request`、`pi://exit` 和 `pi://jobs`。
+- **codegraph-host**：由主进程持有，独立于 agent-host，负责 CodeGraph SDK、索引查询和同步。宿主退出后由 `CodeGraphHostSupervisor` 恢复，不等待下一次用户查询。
 
 ## 模块职责
 
@@ -48,9 +32,9 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### extensions —— 内置扩展包
 
-包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进 agent-host 子进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。桌面端主进程保留 `PiPackageService` 与 `package_*` IPC 管理官方 `settings.packages`（渲染层已无扩展页签，没有入口调用）：可列出当前会话实际会加载的内置工厂（`filterManagedExtensions(filterExtensionsByProfile(manifestExtensions, profile), allowedPluginIds)`，与 `gren-runtime` 同源；内置清单向 agent-host 子进程要）以及用户 / 项目安装的 Pi Package；市场检索 npm `keywords:pi-package`，安装走 SDK `DefaultPackageManager`，写入后经子进程 `requestResourceReload()`。
+包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进 agent-host 子进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。桌面端主进程保留 `PiPackageService` 与 `package_*` IPC 管理官方 `settings.packages`：可列出当前会话实际会加载的内置工厂（`filterManagedExtensions(filterExtensionsByProfile(manifestExtensions, profile), allowedPluginIds)`，与 `gren-runtime` 同源；内置清单向 agent-host 子进程要）以及用户 / 项目安装的 Pi Package；市场检索 npm `keywords:pi-package`，安装走 SDK `DefaultPackageManager`，写入后经子进程 `requestResourceReload()`。
 
-扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS / Embedding）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
+扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
 
 #### 内置扩展
 
@@ -71,7 +55,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `diagram-hint` | Mermaid / KaTeX 渲染约定提示（隐式注入） | 策略 / 中间件，无显式工具 |
 | `fable-behavior` | Fable 5 + coding-agent 行为层（Tier 注入 + 子 agent 种子 + `fable_behavior_ref`） | `fable_behavior_ref` |
 | `goal` | 设定会话完成条件并自动驱动 / 判定 | `/goal` |
-| `code-retrieval` | 经 codegraph 宿主复用主进程内置 CodeGraph SDK 实例 | `code_explore` |
+| `code-retrieval` | 经主进程最小扩展端点查询 codegraph-host | `code_explore` |
 | `session-memory` | 带分支锚点的会话工作状态；压缩时一次抽取兼作压缩摘要，交给 Pi 摘要时压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
 | `web-fetch` | 单页 URL 抓取 | `fetch_url`（`format`: markdown / text / html / json / llms） |
 | `web-search` | 联网搜索。`web_search` 默认走 Bing，失败再回退搜狗、百度；可用 `WEB_SEARCH_PROVIDER` / `WEB_SEARCH_ENGINES` 指定。另内置 AnySearch（`ANYSEARCH_API_KEY` 可选，匿名走每日免费额度） | `web_search`、`anysearch_search`、`anysearch_sub_domains` |
@@ -96,21 +80,21 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### electron-agent —— 桌面应用（当前主线）
 
-包名 `electron-agent`，由渲染层、主进程服务层与自研 Agent Data Runtime 组成。
+包名 `electron-agent`，包含渲染层、主进程服务和两个宿主子进程。
 
 **渲染层（`electron-agent/src`）：**
 
-- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`fileExplorer`（Dock「文件管理器」标签：项目文件树 + 多文件标签）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`agentData`（知识资产与代码索引）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
+- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`fileExplorer`（Dock「文件管理器」标签：项目文件树 + 多文件标签）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`codeIndex`（代码索引入口）与 `agentData`（沿用目录名的索引组件）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
 - `stores/`：zustand store 群，`agent.ts` / `agentReducer.ts` 为核心，把 pi 事件流折叠为会话状态。
-- `lib/`：主进程能力封装——`pi.ts`（`onPiEvent` / `onPiUiRequest` / `onPiExit`）、`agentData.ts`（Wiki 与代码索引 API）等。
+- `lib/`：主进程能力封装——`pi.ts`（`onPiEvent` / `onPiUiRequest` / `onPiExit`）、`agentData.ts`（代码索引 IPC 封装）等。
 - `platform/`：**后端抽象层**。`runtime.ts` 定义 `GrenRuntimeBridge` 并对接 `window.gren`，无 bridge 时降级为 `browserPreviewBridge`，使渲染层可在纯浏览器预览态运行。
 - `components/` / `theme/`：通用组件与主题，运行时注入 `--gren-*` CSS 变量。
-- 首包只含对话界面。设置 / 连接 / 扩展 / 用量 / Agent 数据 / 开发者工作台面板、终端（xterm）、Mermaid（beautiful-mermaid、elkjs），以及 @lobehub/ui 的 Markdown / 高亮 / diff（经 `src/lib/lobeHeavy.ts` 中转）都按需加载；Markdown 与代码视图的预热在浏览器空闲后进行。
+- 首包只含对话界面。设置 / 扩展 / 用量 / 代码索引 / 开发者工作台面板、终端（xterm）、Mermaid（beautiful-mermaid、elkjs），以及 @lobehub/ui 的 Markdown / 高亮 / diff（经 `src/lib/lobeHeavy.ts` 中转）都按需加载；Markdown 与代码视图的预热在浏览器空闲后进行。
 
 **主进程（`electron-agent/electron`）：**
 
-- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `ModelRuntimeHost`（短调用）、拉起 agent-host 子进程（`AgentProcessClient`）；Agent Data Runtime 自 agentdata-host 下线后改为在进程内装配（`assembleAgentData`），`before-quit` 先关 agent-host 再停运行时。数据库由运行时独占。主进程不静态引入 `extensions/**` 的运行时模块。
-- `agentProcess/`：主进程与 agent-host 子进程之间的一层。`rpcPeer.ts` 是对称 RPC（请求 / 响应两个方向 + 单向事件），`contract.ts` 列出两个方向的方法名（`AGENT_METHODS` / `HOST_METHODS`）。`agentProcessClient.ts` 负责拉起（同一份 Electron 可执行文件 + `ELECTRON_RUN_AS_NODE`，不带 V8 参数：生产入口是字节码，参数不同缓存会被拒）、`host.ready` 握手、意外退出时拒绝在途请求并对打开过的工作区广播 `pi://exit`、下一条运行时命令再拉起（60 秒内崩 3 次暂停 30 秒）、关停（`host.shutdown`，10 秒不退就整树杀掉）。`mainBindings.ts` 是主进程这一侧的接线：子进程回调主进程的处理表（解析工作区、AgentData 令牌、MCP 运行配置、`pi.*` 授权、回合入库、带锁合并 `runtime-settings.json`），以及给 IPC 命令和各服务用的转发端口；释放 / 查询类端口只在子进程在跑时转发，不在就给兜底值。子进程每 10 秒报一次内存与事件循环延迟（`runtime-diag.jsonl` 里的 `agent-host-sample`）。`jobGuard.ts` 在 Windows 上为每个 agent-host 启动 `pi-job-guard.exe`（源码 `electron-agent/native/job-guard.c`，预编译入仓，构建时拷到 `out/main`）：把 agent-host 放进一个不允许静默脱离的 Job，agent-host 退出（崩溃、关停或主进程崩溃）后结束 Job 里残留的、没有可见窗口的子孙进程（`agent-host-sweep`）。`hostEntry.ts` 是子进程入口；进程级 `uncaughtException` / `unhandledRejection` 不让进程退出，按 AsyncLocalStorage 归到某个在跑的子代理的交给它按 error 结算（`extensions/_shared/leak-owner.ts`；`unhandledRejection` 等 1 秒，期间被接住的不算），其余只记日志。`runtimeGraph.ts` 在子进程里装配 `AgentHost` / `PiRuntimeService` / `SubagentService` / jobs 桥 / MCP 操作。冒烟脚本 `scripts/agent-host-smoke.mjs` 在临时 HOME 里跑真实子进程。
+- `main.ts` / `mainConfig.ts`：创建窗口、装配主进程服务，并管理 agent-host、codegraph-host 和本地数据的生命周期。
+- `agentProcess/`：主进程与 agent-host 子进程之间的一层。`rpcPeer.ts` 是对称 RPC（请求 / 响应两个方向 + 单向事件），`contract.ts` 列出两个方向的方法名（`AGENT_METHODS` / `HOST_METHODS`）。`agentProcessClient.ts` 负责拉起（同一份 Electron 可执行文件 + `ELECTRON_RUN_AS_NODE`，不带 V8 参数：生产入口是字节码，参数不同缓存会被拒）、`host.ready` 握手、意外退出时拒绝在途请求并对打开过的工作区广播 `pi://exit`、下一条运行时命令再拉起（60 秒内崩 3 次暂停 30 秒）、关停（`host.shutdown`，10 秒不退就整树杀掉）。`mainBindings.ts` 是主进程这一侧的接线：子进程回调主进程的处理表（解析工作区、扩展端点令牌、MCP 运行配置、`pi.*` 授权、回合入库、带锁合并 `runtime-settings.json`），以及给 IPC 命令和各服务用的转发端口；释放 / 查询类端口只在子进程在跑时转发，不在就给兜底值。子进程每 10 秒报一次内存与事件循环延迟（`runtime-diag.jsonl` 里的 `agent-host-sample`）。`jobGuard.ts` 在 Windows 上为每个 agent-host 启动 `pi-job-guard.exe`（源码 `electron-agent/native/job-guard.c`，预编译入仓，构建时拷到 `out/main`）：把 agent-host 放进一个不允许静默脱离的 Job，agent-host 退出（崩溃、关停或主进程崩溃）后结束 Job 里残留的、没有可见窗口的子孙进程（`agent-host-sweep`）。`hostEntry.ts` 是子进程入口；进程级 `uncaughtException` / `unhandledRejection` 不让进程退出，按 AsyncLocalStorage 归到某个在跑的子代理的交给它按 error 结算（`extensions/_shared/leak-owner.ts`；`unhandledRejection` 等 1 秒，期间被接住的不算），其余只记日志。`runtimeGraph.ts` 在子进程里装配 `AgentHost` / `PiRuntimeService` / `SubagentService` / jobs 桥 / MCP 操作。冒烟脚本 `scripts/agent-host-smoke.mjs` 在临时 HOME 里跑真实子进程。
 - `app/`：服务层——`piRuntimeService`（在 agent-host 子进程里运行：`agent_*` 到 `WorkspaceHandle`；模式 / 审批 / 删段经主进程带锁写 runtime config，另含 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`（工作区内的读写与按层列目录，路径一律 realpath 后校验不越界）、`fileWatchService`（文件浏览器展开的目录各开一个非递归 `fs.watch`，合并后经 `files://changed` 推回发起的窗口）、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。`jobsBridge` 在 agent-host 子进程里订阅同进程的 jobs 注册表，把后台 job 的状态与输出增量经 `pi://jobs` 广播（100ms 合并，经主进程转发到窗口），另有 `job_snapshot` / `job_kill` 命令；渲染层 `jobLiveStore` 按字节偏移接帧，bash 卡片凭结果 details 里的 `jobId` + `jobStartedAt` 跟随后台输出并可停止。后台任务归启动它的会话（owner = sessionId），没有全局入口；名下有存活任务的会话被切走时 `piRuntimeService` 把它的 handle 停靠在后台（`hasLiveJobs`），任务跑完才释放，否则 `session_shutdown` 会把任务一并取消。前台 bash 也是匿名 job（模型拿不到 id），运行中的 partial 更新把 `details.foregroundJob` 带给界面，卡片据此跟随输出并可单独停止这一条命令。
 - `pi/`：事件投影（`eventAdapter`）与短调用壳（`systemWorkerManager`）。
 - `agent/`：`WorkspaceHandle`、`AgentHost`、`ModelRuntimeHost`、`SessionUiAdapter`（`ModelRuntimeHost` 两个进程各一份，其余都在 agent-host 子进程里）。同一项目里空闲会话共用前景 handle，用 `switchSession` 换文件；正在跑的会话留在自己的 handle 上，再打开另一个会话不会拆掉它。
@@ -118,90 +102,41 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 - `preload.ts`：向渲染层暴露 `window.gren`（`invoke` / `subscribe` / 目录选择 / 打开外部 / 窗口控制 / webview 拖放）。
 - `webviewSecurity.ts` / `webviewPreload.ts`：对 webview 二次强制 `contextIsolation`、`sandbox`、关闭 `nodeIntegration`，并限制导航与 `window.open`。
 - `workerEntry.ts`：解析打包 / 开发态的 `PI_WORKER_ENTRY` 与 agent-host、codegraph-host、codegraph-worker 入口（打包后都从 `app.asar.unpacked/out/main/` 加载）。
-- `agentData/`：Agent Data Runtime 与主进程之间的装配层。`assemble.ts` 在同一进程里装配运行时（模型端口、CodeGraph 端口、任务执行器），`pipePath.ts` 定扩展端点名，`minimalEndpoint.ts` 只服务 `codeRetrieval.call` 与 `permission.tool.*` 两类仍需保留的扩展调用，其余方法返回 `METHOD_NOT_FOUND`。agentdata-host 子进程已下线，不再有跨进程管理与崩溃重拉。
+- `agentData/`：`assemble.ts` 在主进程内装配 `AgentDataRuntime` 和索引任务执行器；`AgentDataService` 为桌面 IPC 提供进程内调用。运行时保存线程、回合及条目、工具授权和插件状态。Pi 会话历史仍以会话 JSONL 为准。
+- `agentData/minimalEndpoint.ts`：对扩展开放本地命名管道（Windows）或 Unix socket。工作区由令牌确定；只接受只读的 `codeRetrieval.call` 和 `permission.tool.evaluate / remember / settle`，不开放索引写入或管理 RPC。
 
-**Agent Data Runtime（`electron-agent/electron/agentData`）：**
+### 代码索引
 
-自研的本地数据运行时，取代历史版本随包分发的 TencentDB 托管服务。agentdata-host 已下线，运行时改为在 Electron 主进程内装配；面向扩展仍保留一个最小命名管道端点，只接受 codeRetrieval.call 与 permission.tool.*，JSONL 帧与工作区令牌沿用原协议。数据落在 <应用数据目录>/agent-data.db（node:sqlite），由运行时独占：
+旧 Wiki 和任务中心已下线。桌面的「代码索引」是独立入口，[CodeIndexWorkspace](../electron-agent/src/features/codeIndex/CodeIndexWorkspace.tsx) 加载 `CodeRetrievalPanel`，沿用 `agentData_code_*` IPC，经主进程查询 `codegraph-host`。Agent 的 `code_explore` 经最小扩展端点访问同一个宿主。界面使用结构化搜索结果、节点和边定位源码及关系。
 
-- `wikiEngine`：每个知识库为 `<应用数据目录>/wiki/<wikiId>/`（原文 `raw/sources/`、生成页 `wiki/`、库内 `index.db`）；库状态在 `wiki_assets`（`draft` / `pending` / `processing` / `ready` / `failed`）。只有 `processing` 拒绝写入；工作台可 `resetDraft`。抽取在进程内队列完成，不建 `wiki.*` 系统任务。Agent 仅 `wiki_list` / `wiki_search` / `wiki_read`。
-- `jobStore`：任务、配置（version 乐观锁）与审计，支持导出 / 导入 / 诊断。
-- 代码检索通过内置的 CodeGraph SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。SDK 只在 codegraph-host 子进程里加载（由主进程拉起并持有，`CodeGraphHostClient` 门面；宿主退出由 `CodeGraphHostSupervisor` 自动重拉），子进程内一个写线程、N 个读线程（`GREN_CODEGRAPH_READ_WORKERS`；`GREN_CODEGRAPH_THREADS=off` 退回单线程）。实例按工作区共享，空闲 15 分钟关闭。写由子进程主线程的 `SyncScheduler` 排：每个工作区至多一个在跑 + 一个待执行，重复请求合并；增量同步期间同工作区的查询照常应答（上一次提交的索引，写完读线程换连接），只有全量重建期间返回 busy。子进程每 10 秒报 `codegraph-host-sample`，同步失败 / 熔断 / 长时间占锁报 `codegraph-sync-event`。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
-- `CodeGraphJobs` 把 SDK 的真实阶段接入现有任务系统。未知或不一致的进度数量不转换成百分比。只有用户显式建立才创建索引；已有索引由自动同步维护：被查询的已索引工作区（最多 3 个）在写线程里挂 SDK `FileWatcher`，改动合并成增量同步，第一次查询补一次整树比对；自动同步不建任务，失败指数退避、连续 6 次熔断，`GREN_CODEGRAPH_AUTO_SYNC=off` 关闭。同工作区已有同步时手动同步排在它后面；取消先发信号、等 SDK 安全结束再落终态，退出等待任务记录完成后关闭 AgentData。
-- SDK 是固定版本的应用依赖，保留 Rust 内核与 WASM 语法。`asarUnpack` 解出 SDK，`scripts/package-codegraph.cjs` 补齐平台包自带且被 builder 过滤的 `lib/node_modules`；加载器使用物理解包路径保证 worker、WASM 和原生模块可访问。没有平台包时报告安装包问题，不回退到全局 CLI 或在线安装。
+- **建立与手动同步**：用户显式发起，界面通过 `agentData_jobs_create` 提交 `codegraph.sync`。`CodeGraphJobs` 执行同步，进度与结果写入独立的 `IndexTaskStore`，不写旧的共享任务表。界面轮询索引状态，回到空闲后停止；启动时结算遗留的未终态记录。
+- **自动同步**：只维护已有索引。查询会激活工作区的 SDK 文件监听，单独读状态不会。调度器合并同工作区的改动；增量同步期间可查上次提交的索引，全量重建期间返回忙碌。自动同步不创建手动任务，熔断记录写入索引任务库。`GREN_CODEGRAPH_AUTO_SYNC=off` 可关闭自动同步。
+- **进程与打包**：`codegraph-host` 默认用一个写线程和独立的读线程；`GREN_CODEGRAPH_READ_WORKERS` 调整读线程数，`GREN_CODEGRAPH_THREADS=off` 切回单线程。SDK 及平台资源随应用分发，不依赖全局 CLI。退出时主进程停止宿主监督，等待 agent-host 退出，再收尾索引任务和数据运行时，最后关闭索引任务库。
 
-#### 会话 Goal
+### 会话 Goal
 
 Goal 绑在当前 Pi 会话。权威源是会话 JSONL 里 `customType: "goal"` 且带 `kind` 的事件，由 `extensions/goal` 折叠为快照；续跑正文走 `customType: "goal-round"`。完成由本会话工作模型通过 `update_goal(complete|blocked)` 自报，没有独立裁判，也没有 AgentData Goal 表、Coordinator 或 Goal worker。重开默认 `disarmed`；仅当应用设置 `goal.autoContinueOnOpen === "true"` 且阶段为 `active` 时武装。旧 AgentData Goal 不迁移。详见 [Goal 回到 Pi 会话](./superpowers/specs/2026-09-13-goal-on-session-design.md)。
 
 Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话的 live Goal 页面。
 
-运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS / 子代理 env，扩展可反向调用 Wiki、代码索引与工具授权能力。
+## IM 接入（暂缓）
 
-Wiki 抽取走进程内串行队列与 Electron 模型短调用，不创建 `wiki.ingest` / `wiki.sync` 任务。AgentData 不再捕获对话、提炼长期记忆或自动注入记忆上下文；启动迁移清理旧记忆数据，`session-memory` 继续负责会话压缩摘要与当前工作状态。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
-
-部分命令直接读取本地数据。用量报表来自用量账本 `<pi agentDir>/usage/ledger.db`：`extensions/usage-ledger` 在每条带 `usage` 的助手消息 `message_end` 时记一笔（主会话、子代理、命令行 pi 写同一份，WAL），插入触发器同步维护按 日 × 会话 × 模型 的汇总表；`usage_report` / `usage_reconcile` 经 agent-host 子进程的 `usageService` 查询，账本第一次被查时把会话目录里的历史导入一次，之后只在用户点「补录」时扫目录。侧栏会话列表（`WorkspaceService.listAllSessions` / `listSessions`）按字节标记只解码标题、首条用户消息、子代理与旧短调用标记所在的行，并按文件大小和修改时间缓存每份会话的解析结果，文件没变时只做一次 `stat`。
-
-### tauri-agent —— 桌面应用（已封存）
-
-> 已于 2026-09-13 封存并从工作区移除：完整快照见 git 标签 `archive/tauri-agent`（`git checkout archive/tauri-agent -- tauri-agent` 可取回）。以下为历史结构，仅供迁移对照，参见 [`electron-agent/docs/tauri-api-inventory.md`](../electron-agent/docs/tauri-api-inventory.md)。
-
-包名 `grenagent-app`，分前端与 Rust 后端两部分。
-
-**前端（`tauri-agent/src`，历史快照）：**
-
-- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`tencentdb`（记忆连接与资产）。
-- `stores/`：轻量 vanilla store 加 reducer，通过 `requestAnimationFrame` 批量通知组件，避免每帧不可变拷贝。
-- `lib/`：`pi.ts`（封装所有 Tauri command 与事件监听）、会话合并、预热等。
-- `components/`：品牌、标题栏、加载、错误边界等通用组件。
-- `theme/`：主题与配色方案，运行时注入 `--gren-*` CSS 变量。
-
-**Rust 后端（`tauri-agent/src-tauri`，历史快照）：**
-
-- `commands/`：Tauri command 实现，按域拆分——`agent`、`sessions`、`usage`、`git`、`subagent`、`providers`、`checkpoint`、`mcp_policy`、`tencentdb`、`files` 等。
-- `state/`：应用全局状态。
-- `capabilities/`：Tauri 权限声明（如 `opener:default`、`dialog:allow-open`、`shell:allow-spawn` 等）。
-
-（历史行为）部分 command 直接读取本地数据，不经过 sidecar，例如 `usage_report` 扫描会话 jsonl 聚合用量；长期记忆与知识检索统一经 TencentDB SDK / MemoryKnowledge MCP。
-
-## IM 接入（微信）
-
-`im-platforms` 扩展把 Pi Agent 接到微信（官方 ilink / clawbot AI-bot 接口），实现单一主人的远程遥控：在手机微信里给 bot 发消息即可驱动 Agent。
-
-- 扫码登录、长轮询收发，无需公网；启用开关与网络配置均热更新（写盘后运行时重连，无需重启）。
-- 运行状态经 `setStatus("wechat", ...)`、会话镜像经 `setStatus("wechat-messages", ...)` 从主进程扩展状态推送到前端。
-- 前端 `ExtensionUiHost`（`electron-agent/src/features/extensionUi`）接收后写入 `wechatStatusStore` / `imMessagesStore`，由「连接」面板 `ConnectionsPanel` 展示登录二维码、状态与只读会话镜像。
-- 主人自己的交互式会话与微信流量隔离，因此桌面 UI 的「微信会话记录」是唯一能看到微信聊了什么的地方。
-
-## 知识与数据运行时
-
-当前桌面端（Electron）使用自研 **Agent Data Runtime**（见上文 `electron-agent/electron/agentData`）：随应用启动、在主进程内装配，数据在 `<应用数据目录>/agent-data.db` 本地落盘（`node:sqlite`），提供线程持久化、工具授权与插件状态；代码索引任务记录在独立的 `codegraph/index-tasks.sqlite`。扩展经最小端点访问代码检索与工具授权。
-
-> **历史（Tauri 版，已过时）**：桌面端通过 Tauri 生命周期托管随安装包分发的 Node.js、MemoryCore 和 MemoryKnowledge。`local` 模式在应用启动时启动两个回环服务并等待 `/health`，自动初始化固定的单用户身份 `local / personal-local / pi-personal`，退出时由进程守卫回收；`remote` 模式不创建本机子进程，只连接配置的 HTTPS Gateway，并允许使用服务端已有 Team、Agent 和 User 身份。远程 Gateway API Key 与 User Key 分别保存在系统凭据库。Pi sidecar 启动后立即把两项 TencentDB 密钥移入模块私有内存并从工具子进程环境删除；知识工具通过仅获得专用 token 的 MemoryKnowledge MCP 注入。
+微信和 HTTP 网关源码仍保留，当前桌面端不加载，接回说明见 [IM 接入](./im-reintroduction.md)。
 
 ## 数据存储
 
-| 数据 | 位置 |
+| 数据 | 位置与归属 |
 | --- | --- |
-| 会话记录 | `~/.pi/agent/sessions/*.jsonl` |
-| Agent Data（线程 / 权限 / 插件） | `<应用数据目录>/agent-data.db`（主进程内运行时独占） |
-| 代码索引任务 | `codegraph/index-tasks.sqlite` |
-| Wiki 正文与库内索引 | `<应用数据目录>/wiki/<wikiId>/`（`wiki/`、`raw/sources/`、`index.db`），参见 [Wiki 使用说明](./agent-data-wiki.md) |
-| 生成的图片 | `<工作区>/.pi/images/` |
-| 合成的音频 | `<工作区>/.pi/audio/` |
-| TencentDB 本地运行时数据（历史） | `<应用数据目录>/tencentdb-memory/`（MemoryCore、MemoryKnowledge，Tauri 版） |
+| Pi 会话记录 | `<agentDir>/sessions/` 下的 JSONL |
+| AgentData（线程、回合、授权、插件） | `<应用数据目录>/agent-data.db`，由主进程内的运行时持有 |
+| CodeGraph 项目索引 | `<工作区>/.codegraph/codegraph.db`，由 codegraph-host 使用 |
+| 索引任务及熔断记录 | `<应用数据目录>/codegraph/index-tasks.sqlite`，由主进程的 IndexTaskStore 持有 |
+| 用量账本 | `<agentDir>/usage/ledger.db` |
+| 生成的图片、合成的音频 | `<工作区>/.pi/images/`、`<工作区>/.pi/audio/` |
 
 ## 用量统计口径
 
-用量账本（`extensions/usage-ledger/ledger.ts`；历史导入在 `electron-agent/electron/app/usageService.ts`，更早的实现是 `tauri-agent/src-tauri/src/commands/usage.rs` 的 `usage_report`）只记满足以下条件的调用：`message.role` 为 `assistant` 且带 `usage` 字段（导入时另要求条目 `type` 为 `message`），从中累加 input / output / cacheRead / cacheWrite、totalTokens 与 cost，并据此计算 cacheHitRate。每次调用按 provider + responseId 去重，没有 responseId 时按会话 id + 助手消息的 timestamp。账本只增不删：回退截掉的轮次、删掉的会话，用量仍然计入。
-
-由此可知：生图、TTS 等工具调用以 tool result 形式返回、不带 `usage` 字段，因此其调用量与费用不计入用量统计；统计页是纯 Token 报表。
-
-## 独立模块：本地向量服务（embedding）
-
-`embedding/` 是一个独立的本地向量服务，当前尚未集成进桌面应用。它在本地 CPU 上用 `@huggingface/transformers` 运行 `Xenova/all-MiniLM-L6-v2`，通过 `POST /embed` 返回 384 维向量，并可用 Node.js SEA 打成单文件可执行程序。
-
-它面向独立的本地向量实验；桌面端知识检索由自研 Agent Data Runtime 负责。实现细节见 `embedding/README.md`。
+用量页读取本地账本：助手调用与缓存预热分列，费用区分供应商报告、目录估算和来源未知。外部导入历史可以展示，但不计入本机费用；生图、TTS 等工具结果不算助手模型用量。删除或回退会话不删除已记入的账本记录。归属及补录口径见 [请求观测与用量覆盖](./request-observability.md#用量覆盖)。
 
 ## 命令与规则
 
