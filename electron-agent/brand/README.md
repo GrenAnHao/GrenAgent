@@ -16,10 +16,10 @@
 
 界面通过 `src/components/GrenAgentLogo.tsx` 内联可信原稿，不依赖字体，也不使用预览 PNG 替代 SVG。`GrenAgentLogo` 用完整横版原稿，`GrenAgentIcon` 用独立图标。两者按工作台中性前景色适配明暗；重复在项目文字旁出现的装饰图标设为 `aria-hidden`。原稿通过 `<img>` 引用时不会继承外层 `color`，深底可使用固定白色版本。
 
-在 `electron-agent/` 运行：
+从仓库根目录运行：
 
 ```sh
-npm run icons
+pnpm --dir electron-agent icons
 ```
 
 生成器读取原稿，更新启动屏标记块，并生成 `build/icon.svg`、1024px `build/icon.png`、多层 `build/icon.ico`（16/24/32/48/64/128/256）、`build/icon.icns` 和 `public/favicon.ico/png`。系统派生图标采用深色圆角底和白色 G，以适应任意桌面背景；16/24px 只扩大图形占比，保留原稿路径。派生资源入仓，打包不隐式重跑生成器。

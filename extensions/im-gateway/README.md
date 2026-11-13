@@ -4,6 +4,8 @@
 
 在 pi 进程内起一个**轻量 HTTP webhook**,让各 IM 平台(Slack / 飞书 / Telegram / 企业微信…)通过一个薄 adapter 把消息转发进来,agent 的回复再 POST 回去。**零依赖**(Node 内置 `http` + `fetch`),Bearer token 鉴权,默认关闭(开端口需显式启用)。
 
+GrenAgent 桌面端不加载此扩展。下文是独立 Pi 手动加载的接口；桌面接回见 [IM 接入说明](../../docs/im-reintroduction.md)。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
@@ -19,6 +21,7 @@
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `IM_GATEWAY` | `0`(关闭) | 设 `1` 启用(会监听端口) |
+| `IM_GATEWAY_HOST` | `127.0.0.1` | 非回环地址必须设置 token，否则强制监听回环 |
 | `IM_GATEWAY_PORT` | `8765` | 监听端口 |
 | `IM_GATEWAY_TOKEN` | (空) | 设置后 `/message` 需带 `Bearer` |
 

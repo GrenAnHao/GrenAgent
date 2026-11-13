@@ -26,7 +26,7 @@ Electron 主进程
 
 ### cli —— 内嵌 SDK 与 worker 入口
 
-源码仍在 `cli/`（`gren-runtime` / `pi-sdk` / `pi-worker` / `json-event`），由 electron-vite 打进 `out/main/`（`dev` / `start`；打包用的 `build` 写 `out-pkg/main/`，electron-builder 再映射回 asar 里的 `out/main/`），不再产出 `pi.exe`。`pi-worker` 只跑官方 `main()` 的 `--mode json` / print 路径；启动期主进程把 `PI_WORKER_ENTRY` 设为 worker chunk 路径，子代理直读该环境变量。
+源码仍在 `cli/`（`gren-runtime` / `pi-sdk` / `pi-worker` / `json-event`），由 electron-vite 打进 `out/main/`（`dev` / `start`；打包用的 `build` 写 `out-pkg/main/`，electron-builder 再映射回 asar 里的 `out/main/`），不再产出 `pi.exe`。`pi-worker` 的 `--mode subagent` 经 IPC 托管子会话；`--mode json` 和默认 print 路径交给官方 `main()`。启动期主进程把 `PI_WORKER_ENTRY` 设为 worker chunk 路径，子代理直读该环境变量。
 
 进程退出时，worker 在模块加载阶段注册 `EPIPE` 处理：一旦命中即干净退出，避免对死管道反复写入导致 stderr 刷屏。
 

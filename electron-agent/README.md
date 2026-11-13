@@ -1,27 +1,23 @@
 # electron-agent
 
-GrenAgent 桌面应用（当前主线）：React 19 + TypeScript + Vite 渲染层，Electron 主进程（TypeScript 服务层）与自研 Agent Data Runtime。项目整体介绍见仓库根 [`README.md`](../README.md)，架构与开发细节见 [架构文档](../docs/architecture.md) 与 [开发指南](../docs/development.md)。
+GrenAgent 桌面应用：React / Vite 渲染层经 preload 桥访问 Electron 主进程。Pi 会话由 `agent-host` 托管，代码索引由 `codegraph-host` 提供。整体介绍见[仓库 README](../README.md)，进程边界见[架构文档](../docs/architecture.md)。
 
 历史桌面端 `tauri-agent/`（Tauri 2 + Rust）已封存并从工作区移除，完整快照见 git 标签 `archive/tauri-agent`。
 
 ## 快速开始
 
-```bash
-bun install
-bun run dev
-```
+按[开发指南](../docs/development.md#安装)安装依赖。从仓库根目录运行：
 
-`cli/` 与 `extensions/` 变更后执行 `bun run build`，由 electron-vite 打进 `out/main/`。不再编译独立 `pi.exe`。
-
-## 常用命令
-
-| 命令 | 说明 |
+| 用途 | 命令 |
 | --- | --- |
-| `bun run start` | 日常使用：渲染层生产构建后启动，比 dev 快得多；源码没改时 `bun run start -- --skipBuild` 跳过构建 |
-| `bun run dev` | 开发界面：Vite 开发服务器 + HMR（React 开发版，启动和切换明显更慢） |
-| `bun run build` | 类型检查后构建（产物 `out/`，渲染层 `dist/`） |
-| `bun run test` | 运行测试（`vitest run`） |
-| `bun run package` | electron-builder 打包，产物 `release/` |
+| 日常启动 | `pnpm --dir electron-agent start` |
+| Vite 热更新 | `pnpm --dir electron-agent dev` |
+| 复用本机启动产物 | `pnpm --dir electron-agent start --skipBuild` |
+| 测试 | `pnpm --dir electron-agent test` |
+| 生产构建 | `pnpm --dir electron-agent build` |
+| 生成本地安装包 | 构建后运行 `pnpm --dir electron-agent package --publish never` |
+
+开发主进程产物在 `out/`，`start` 从 `dist/` 加载界面。打包读取 `out-pkg/`，安装文件输出到 `release/`。
 
 ## 目录
 
@@ -37,4 +33,4 @@ scripts/      # 构建脚本（package-codegraph.cjs 等）
 - 渲染层只通过 `window.gren` 访问桌面能力，业务代码依赖 `src/platform/runtime.ts` 的 `GrenRuntimeBridge`，不直接引用 Electron；无 bridge 时降级为 `browserPreviewBridge`。
 - IPC 命令与事件通道定义见 `electron/ipc/contracts.ts`，命令注册见 `electron/ipc/register.ts`。
 - 主进程服务按域拆分在 `electron/app/`，每个服务配套同名 `*.test.ts`。
-- 禁止 emoji：源码、注释、UI 文案、文档、commit message 均不得使用（见仓库根 `.cursor/rules/no-emoji.mdc`）。
+- 禁止 emoji：源码、注释、UI 文案、文档、commit message 均不得使用（见[开发指南](../docs/development.md#代码风格)）。

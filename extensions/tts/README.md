@@ -1,51 +1,16 @@
-# pi-tts
+# 文字转语音
 
-为 [Pi coding agent](https://github.com/earendil-works/pi) 写的**文字转语音扩展**。
+`speak` 合成语音，返回项目 `.pi/audio/` 下的文件路径。默认走 OpenAI 兼容的 `/audio/speech`；根据模型名或 Base URL 识别到 MiMo 时改走 `/chat/completions`。文本和可选的朗读指示会发送给所选供应商。
 
-给 agent 加上 `speak` 工具,用任意 OpenAI 兼容的 `/audio/speech` 端点合成语音,保存到 `.pi/audio/` 并返回路径(用系统播放器播放)。和 image-gen 同模式,**零额外依赖**。
+## 配置
 
-## 能力
+在桌面设置里为「语音 TTS」选择供应商和模型。Base URL 和 API Key 从 Pi 模型注册表的供应商配置读取。
 
-| 类型 | 名称 | 说明 |
-|---|---|---|
-| 工具(LLM 可调) | `speak` | 把 `text` 合成音频,存到 `<cwd>/.pi/audio/speech_<ts>.<format>` |
+| 配置 | 用途 |
+| --- | --- |
+| `TTS_PROVIDER` | 必填；选择已有端点和鉴权的供应商 |
+| `TTS_MODEL` | 语音模型，未指定时用 `gpt-4o-mini-tts` |
+| `TTS_VOICE` | 默认 `alloy`，MiMo 默认 `mimo_default`；工具的 `voice` 可覆盖 |
+| `TTS_FORMAT` | 默认 `mp3`；MiMo 支持 `wav` / `pcm16`，默认 `wav` |
 
-## 配置(必需 key)
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `TTS_API_KEY` | (回退 `OPENAI_API_KEY`) | **必需**,没有则报错 |
-| `TTS_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容端点 |
-| `TTS_MODEL` | `gpt-4o-mini-tts` | 也可 `tts-1` / `tts-1-hd` |
-| `TTS_VOICE` | `alloy` | 可被工具参数覆盖(alloy/echo/fable/onyx/nova/shimmer) |
-| `TTS_FORMAT` | `mp3` | mp3/opus/aac/flac/wav |
-
-## 安装 / 用法
-
-```bash
-pi -e ./extensions/tts/index.ts
-# 会话里:
-> 把这段说明读出来
-  (agent 调 speak,返回保存的音频路径)
-```
-
-## 文件结构
-
-```text
-tts/
-├── index.ts       # speak 工具(保存音频 + 返回路径)
-├── tts.ts         # OpenAI 兼容 /audio/speech 调用
-├── package.json
-└── README.md
-```
-
-## 进阶扩展点
-
-1. **自动朗读**:用 `message_end` 钩子检测 assistant 消息,自动 `speak` 并(在桌面端)播放。
-2. **自动播放**:`speak` 后用 `pi.exec` 调系统播放器(macOS `afplay` / Windows `start` / Linux `aplay`)。
-3. **STT 配套**:加 `transcribe` 工具走 `/audio/transcriptions` 形成语音双向。
-
-## 注意
-
-- 包名按官方新名 `@earendil-works/*` + `typebox`;旧包改 `index.ts` 顶部 import。
-- 返回二进制音频(`arrayBuffer`),不走 json;不同端点的 voice/format 取值可能不同。
+已有可用供应商配置时，可从仓库根目录运行 `pi -e ./extensions/tts/index.ts` 单独加载。

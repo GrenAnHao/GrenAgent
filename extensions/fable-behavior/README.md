@@ -54,12 +54,11 @@ The shared seeder lives in `extensions/_shared/seed-agents.ts`.
 | `fable-behavior` | Identity, tone, autonomy, mode, seed |
 | `diagram-hint` | Mermaid / KaTeX rendering |
 | `agent-mode` | Tool whitelist + plan execution checklist |
-| RAG injections | Retrieved facts for this turn |
 
 When rules conflict, **project rules win**.
 
 ## Tests
 
 ```bash
-cd extensions && npx vitest run fable-behavior
+pnpm --dir extensions exec vitest run fable-behavior
 ```

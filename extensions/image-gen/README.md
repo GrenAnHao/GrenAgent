@@ -1,50 +1,15 @@
-# pi-image-gen
+# 图像生成
 
-为 [Pi coding agent](https://github.com/earendil-works/pi) 写的**文生图扩展**。
+`generate_image` 调用兼容的图像 API，返回项目 `.pi/images/` 下的文件路径。传入 `reference_images` 时走 `/images/edits`，否则走 `/images/generations`。一次可请求 1 至 4 张，默认 1 张。参考图会发送给所选供应商。
 
-给 agent 加上 `generate_image` 工具,用任意 OpenAI 兼容的 `/images/generations` 端点生成图片,保存到 `.pi/images/` 并返回路径。和 embedding 一样直接 `fetch`,**零额外依赖**。
+## 配置
 
-## 能力
+在桌面设置里为「图像生成」选择供应商和模型。Base URL 和 API Key 从 Pi 模型注册表的供应商配置读取。
 
-| 类型 | 名称 | 说明 |
-|---|---|---|
-| 工具(LLM 可调) | `generate_image` | 按 `prompt` 生成 PNG,存到 `<cwd>/.pi/images/img_<ts>.png` |
+| 配置 | 用途 |
+| --- | --- |
+| `IMAGE_PROVIDER` | 必填；选择已有端点和鉴权的供应商 |
+| `IMAGE_MODEL` | 图像模型，未指定时用 `gpt-image-1` |
+| `IMAGE_SIZE` | 默认 `1024x1024`；可用工具的 `size` 覆盖 |
 
-## 配置(必需 key)
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `IMAGE_API_KEY` | (回退 `OPENAI_API_KEY`) | **必需**,没有则工具报错 |
-| `IMAGE_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容端点 |
-| `IMAGE_MODEL` | `gpt-image-1` | 也可 `dall-e-3` 等 |
-| `IMAGE_SIZE` | `1024x1024` | 默认尺寸,可被工具参数覆盖 |
-
-## 安装 / 用法
-
-```bash
-pi -e ./extensions/image-gen/index.ts
-# 会话里:
-> 生成一张"赛博朋克风格的猫,霓虹灯背景"的图
-  (agent 调 generate_image,返回保存路径)
-```
-
-## 文件结构
-
-```text
-image-gen/
-├── index.ts       # generate_image 工具(保存 PNG + 返回路径)
-├── image.ts       # OpenAI 兼容 images API 调用(b64_json / url 两种返回)
-├── package.json
-└── README.md
-```
-
-## 进阶扩展点
-
-1. **直接在 TUI 显示**:返回 `content` 里追加 `{ type: "image", source: { type: "base64", mediaType: "image/png", data } }`,配合 `@earendil-works/pi-tui` 的 Image 组件即可在终端预览(需确认你所用 Pi 版本对 tool image part 的支持)。
-2. **图生图 / 编辑**:接 `/images/edits` 端点,加 `image` + `mask` 参数。
-3. **多张 / 批量**:加 `n` 参数,循环保存。
-
-## 注意
-
-- 包名按官方新名 `@earendil-works/*` + `typebox`;旧包改 `index.ts` 顶部 import。
-- 默认请求 `response_format: "b64_json"` 一次拿到图片字节;若端点只回 `url` 也会自动下载。
+已有可用供应商配置时，可从仓库根目录运行 `pi -e ./extensions/image-gen/index.ts` 单独加载。
