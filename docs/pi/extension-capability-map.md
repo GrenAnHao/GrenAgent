@@ -1,5 +1,7 @@
 # Pi 扩展能力矩阵
 
+> 上游历史快照（`9ccfcd7c`）。GrenAgent 当前接入方式见[架构文档](../architecture.md)。
+
 > 目标场景：当前项目是桌面端脚手架，后续需要在桌面端集成并扩展 Pi Agent。  
 > 来源仓库：`https://github.com/earendil-works/pi.git`，本地 `pi/`，基准 `main` / `9ccfcd7c`。
 

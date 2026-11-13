@@ -29,7 +29,7 @@ Status: implemented
 
 采用**同一个 KnowledgeKernel 内的版本化流水线**：完整目录先冻结，目录节点和独立页面有界并发，预算按用途解析。保留两个现有子进程，不接入 Qoder 包、账号、SDK 或代码。
 
-实施任务见 [实施计划](../../../../docs/superpowers/plans/2026-11-02-repo-wiki-qoder-alignment.md)。本篇提供设计契约，计划提供文件、依赖和验证步骤；源码、定向验证和独立复审已完成；真实模型质量与费用验证按用户要求暂不执行。
+实施任务见 [实施计划](https://github.com/GrenAnHao/GrenAgent/blob/7cea05eac673e7046ee92748c2f01bc649764ba4/docs/superpowers/plans/2026-11-02-repo-wiki-qoder-alignment.md)。本篇提供设计契约，计划提供文件、依赖和验证步骤；源码、定向验证和独立复审已完成；真实模型质量与费用验证按用户要求暂不执行。
 
 ### 1. 阶段与完整目录
 

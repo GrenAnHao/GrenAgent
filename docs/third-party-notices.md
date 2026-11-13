@@ -75,7 +75,7 @@
 ### CodeGraph（@colbymchenry/codegraph）
 
 - 包：`@colbymchenry/codegraph@1.6.2`，MIT。
-- 用途：CodeGraph 资产模块通过内置 MCP client 调用其索引服务；工具协议沿用上游 `codegraph_*` 接口。
+- 用途：`codegraph-host` 加载内置 CodeGraph SDK，为桌面「代码索引」和 Agent 的 `code_explore` 提供检索；不启动 CodeGraph MCP 服务。
 - 边界：本项目不复制或修改 CodeGraph 的 Rust 索引器；平台二进制随包提供（`asarUnpack`），许可为 MIT。
 
 ## 仅有设计参考、未分发代码的项目
@@ -85,11 +85,6 @@
 - 项目：https://github.com/nousresearch/hermes-agent
 - 用途：Skill 资产管理参考其 Skill 发现与加载流程。
 - 当前状态：Skill / 自定义 Agent 仅保留扩展接口，未复制其实现。
-
-### LLM Wiki
-
-- 资料：https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
-- 用途：Wiki RAG 将 Markdown 文档视为可持续维护的知识产物，并保留来源路径、标题分块和行号引用。
 
 ## 开发依赖
 

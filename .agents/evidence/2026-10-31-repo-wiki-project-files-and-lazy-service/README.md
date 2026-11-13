@@ -69,7 +69,7 @@
 | 请求取消/Worker/模型 lease | `vendor/repo-wiki/packages/process/src/{client,child,legacy-snapshot}.ts`、`packages/service/src/service.ts`、`packages/contracts/src/index.ts` |
 | 即时宿主 UI | `src/features/repoWiki/RepoWikiWorkspace.tsx`、其 runtime fixture/tests、vendor `App.tsx` / `RepoWikiPanel.tsx` / `workspace/ProjectCollection.tsx` / `api.ts` / `collection.css` |
 | 验收 | core/service/process 对应 tests、宿主 lazy / lifecycle / workflow 集成、`ui-harness/scenarios/repo-wiki.tsx` / `probes/repo-wiki.mjs` |
-| 文档 | 根 `AGENTS.md`、[文件使用说明](../../../docs/repo-wiki.md)、[实现计划](../../../docs/superpowers/plans/2026-10-31-repo-wiki-project-files-and-lazy-service.md)、[决策](../../notes/implemented/architecture/2026-10-31-repo-wiki-project-files-and-lazy-service.md) |
+| 文档 | 根 `AGENTS.md`、[文件使用说明](../../../docs/repo-wiki.md)、[实现计划](https://github.com/GrenAnHao/GrenAgent/blob/7cea05eac673e7046ee92748c2f01bc649764ba4/docs/superpowers/plans/2026-10-31-repo-wiki-project-files-and-lazy-service.md)、[决策](../../notes/implemented/architecture/2026-10-31-repo-wiki-project-files-and-lazy-service.md) |
 
 ## 边界
 

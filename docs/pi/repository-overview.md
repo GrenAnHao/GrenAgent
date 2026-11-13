@@ -1,5 +1,7 @@
 # Pi 仓库概览
 
+> 上游历史快照（`9ccfcd7c`）。GrenAgent 当前接入方式见[架构文档](../architecture.md)。
+
 > 来源仓库：`https://github.com/earendil-works/pi.git`  
 > 本地路径：`pi/`  
 > 整理基准：`main` / `9ccfcd7c`

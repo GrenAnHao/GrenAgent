@@ -7,8 +7,8 @@
 `extensions/_shared/requestObservation.ts` 是唯一请求 DTO：
 
 - identity 在真实调用时冻结 `sessionId`、可用的 `sessionPath`、`runtimeGeneration`、应用 `requestId`；无路径仍有稳定 SDK sessionId。供应商 request-id 仅为 metadata，不能作应用 identity。
-- `sequence` 是生成进程的单调序号，`observedAt` 为采集时刻；`attempt` 只数已收到回调的响应，界面写「已观察响应」，不表示 SDK 全部网络尝试。
-- phase 为 started / response / completed / failed / cancelled。终态拒收迟到片段；新调用重新生成 id。host 重建更换 generation，旧代只读并显示不可用。
+- `sequence` 是生成进程的单调序号，`observedAt` 为采集时刻；`attempt` 只数已收到回调的响应，不表示 SDK 全部网络尝试。
+- phase 为 started / response / completed / failed / cancelled。终态拒收迟到片段；新调用重新生成 id。host 重建更换 generation，旧 generation 的事件不会并入新请求。
 - metadata 只含 httpStatus、providerRequestId、rateLimit。header 白名单为 request-id / x-request-id / openai-request-id / retry-after、OpenAI x-ratelimit-{limit,remaining,reset}-{requests,tokens}、Anthropic anthropic-ratelimit-{requests,tokens}-{limit,remaining,reset}，键小写、值去控制字符并限 256 字符。
 - outcome 仅取最终 SDK message 的 responseModel、usage.cost.total 和来源 boolean。0 不是未知，totalFromProvider 不是金额；true 为供应商报告，false / 新 SDK 缺省为目录估算，旧证据不足为未知。
 - 独立 pi://request-observation 通道承载以上 DTO，不写 turns/items、JSONL、SQLite、localStorage 或通用诊断日志。模型正文仍走原来的消息链，不复制到观测缓存。
@@ -26,14 +26,6 @@
 | 缺回调适配器 / 请求前失败 / Codex WebSocket 无回调 | unavailable，保留模型原结果、错误和耗时 |
 
 安装源码：`pi-ai/dist/api/openai-completions.js:198–203` 在 retryProviderRequest 成功后才调用 onResponse；`api/anthropic-messages.js:668` 同样在成功响应后；`api/openai-codex-responses.js:290` 在检查 response.ok 之前调用。公开限制另见 [官方 issue 5623](https://github.com/earendil-works/pi/issues/5623)。不修改 SDK 重试、认证或 fetch。
-
-## 临时结构查看与导出
-
-默认关闭。对当前明确请求打开「临时收集结构事件」只接收之后到达的事件，启用前无法补采。采集进程只留下明确 envelope 键、允许的类型以及数字 / boolean；正文、思考、工具参数 / 结果、秘密和未知字符串全部隐藏，未知动态键只留数量。不能关闭脱敏。
-
-每请求最多 200 条或 1 MiB，先到即截断并停止。请求终态停止收集并冻结；关闭详情、切离请求、清除、进程退出会清空，重开默认关闭。投影失败只丢诊断，不影响模型。
-
-点击「脱敏预览」冻结版本；点击「导出此预览」再选择文件，只导出该版本，不带随后到达的数据。导出失败保留预览可重试，不保存到备用目录。
 
 ## 用量覆盖
 

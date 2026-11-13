@@ -11,19 +11,15 @@
    `images / streamingBehavior / source:"rpc"` 转发。比对
    `dist/modes/rpc/rpc-mode.js` 的 prompt 分支。
 
-3. **`describeModel()`** —— 返回 `provider/id` 字符串
-   （`agentData/runtime.ts` 的 `expectedModel` 相等比较）。
-   解析链是 settings `defaultProvider` + `defaultModel` → `getModel` +
-   `hasConfiguredAuth` → `getAvailableSnapshot()`。上游新增 fallback 时同步
-   `ModelRuntimeHost.resolveDefaultModel`。
+3. **依赖与模型运行时** —— 同步 CLI、扩展和 Electron 的 Pi 直接依赖及锁文件。核对内置目录、自定义覆盖、鉴权和实际模型请求；按[最近的 SDK 升级记录](../.agents/notes/implemented/architecture/2026-11-10-pi-sdk-1.5.1-upgrade.md)选择定向验证。
 
 4. **`ExtensionUIContext` 接口** —— `SessionUiAdapter` 必须仍是
-   28 项自有可枚举属性；上游新增方法时补上（TUI 专用的给 no-op）。
+   与当前 SDK 类型保持一致；核对上游新增方法和 TUI 专用能力在桌面端的处理。
    `custom` 必须 async。
 
 5. **原生模块与相邻资源** —— 升级后重跑打包冒烟：
    `@ast-grep/napi`、`node:sqlite`、`runner.py` / `prompts/`、
-   `asarUnpack` 仍含 `@colbymchenry/**` 与 `out/main/chunks/**`。
+   核对 `electron-builder.yml` 的生产输入 `out-pkg/` 与安装包内 `out/` 的映射及解包规则。
    扩展打进 `chunks/` 后 `import.meta.url` 指向 chunk，相邻资源须同时在
    `out/main/` 与 `out/main/chunks/`。
 

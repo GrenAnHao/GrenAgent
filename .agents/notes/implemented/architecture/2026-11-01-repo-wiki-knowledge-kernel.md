@@ -12,7 +12,7 @@ Status: implemented
 
 新任务的 readme、完整目录屏障、有界并行、用途预算和发布完成清单见 [Qoder 对齐实现](2026-11-02-repo-wiki-qoder-alignment.md)。本篇的 AgentData 权威、项目文件、权限和自动恢复边界保持；没有 executionPolicy 的 v1 任务继续冻结的旧图和预算。
 
-完整边界与故障协议见 [设计规格](../../../../docs/superpowers/specs/2026-11-01-repo-wiki-knowledge-kernel-design.md)，文件责任和接口见 [实现计划](../../../../docs/superpowers/plans/2026-11-01-repo-wiki-knowledge-kernel.md)。代码已接入生产链路，真实工作流、定向 UI、兼容回归、严格类型、构建与独立复审已经完成；实际覆盖面见 [验收记录](../../../evidence/2026-11-01-repo-wiki-knowledge-kernel/ACCEPTANCE.md)。
+完整边界与故障协议见 [设计规格](https://github.com/GrenAnHao/GrenAgent/blob/7cea05eac673e7046ee92748c2f01bc649764ba4/docs/superpowers/specs/2026-11-01-repo-wiki-knowledge-kernel-design.md)，文件责任和接口见 [实现计划](https://github.com/GrenAnHao/GrenAgent/blob/7cea05eac673e7046ee92748c2f01bc649764ba4/docs/superpowers/plans/2026-11-01-repo-wiki-knowledge-kernel.md)。代码已接入生产链路，真实工作流、定向 UI、兼容回归、严格类型、构建与独立复审已经完成；实际覆盖面见 [验收记录](../../../evidence/2026-11-01-repo-wiki-knowledge-kernel/ACCEPTANCE.md)。
 
 由 AgentData 托管自有 KnowledgeKernel。agent_jobs 继续提供唯一任务身份、全局状态和用户任务视图，内核扩展同库的条目成果、输入 manifest、预算 reservation 与租约，不另建重复保存全局 run state 的任务表，不再让 workspace-runs.json 成为生产运行权威。独立 worker 执行扫描和构建工作，已发布正文、计划、基线与人工编辑仍保存于项目 docs/repo-wiki，经既有文件 token / journal 协议发布。
 

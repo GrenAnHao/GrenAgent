@@ -13,7 +13,7 @@
 | `extensions/index.ts` | `allExtensions` / `namedExtensions` 不再导出 `im-gateway`、`im-platforms` |
 | `cli/src/extension-profile.ts` | `CORE_ALWAYS_ON` 去掉这两项（Electron 白名单也不会常驻加载） |
 | `extensions/package.json` | `pi.extensions` 去掉 `./im-gateway/index.ts` |
-| `electron-agent` / `tauri-agent` 的 `ModuleRail.tsx` | 去掉「连接」入口 |
+| `electron-agent` 的 `ModuleRail.tsx` | 去掉「连接」入口 |
 
 **没有删**实现与测试。`runtime-settings.json` 里若还留着 `WECHAT_OC_*` / `IM_GATEWAY*`，现在只是没人读，接回后会重新生效。
 
@@ -37,8 +37,8 @@
 
 | 路径 | 职责 |
 |---|---|
-| `src/features/connections/ConnectionsPanel.tsx` | 「连接」页：微信开关、扫码、会话镜像、网关字段（electron / tauri 各一份） |
-| `src/features/layout/ModuleRail.tsx` | 侧栏「连接」入口（已注释掉） |
+| `src/features/connections/ConnectionsPanel.tsx` | 「连接」页：微信开关、扫码、会话镜像、网关字段 |
+| `src/features/layout/ModuleRail.tsx` | 侧栏不注册「连接」入口 |
 | `src/features/workspace/ModuleContainer.tsx` | `module === 'connections'` 仍会渲染面板，只是 rail 到不了 |
 | `src/stores/wechatStatusStore.ts` | `setStatus("wechat")` |
 | `src/stores/imMessagesStore.ts` | `setStatus("wechat-messages")` 只读镜像 |
@@ -81,7 +81,7 @@
    - `cli/src/extension-profile.ts`：加回 `CORE_ALWAYS_ON`（无 manifest，不加就不会进 Electron 白名单）。
    - 可选：`extensions/package.json` 的 `pi.extensions` 加回 `./im-gateway/index.ts`（微信工厂只走 branded `allExtensions`）。
 2. **重新露出 UI**
-   - 两边 `ModuleRail.tsx` 加回 `{ id: 'connections', label: '连接', Icon: Webhook }`。
+   - Electron 的 `ModuleRail.tsx` 加回 `{ id: 'connections', label: '连接', Icon: Webhook }`。
    - 更新 `ModuleRail.test.tsx`（现在断言入口不存在）。
 3. **删掉防回归测试**
    - `cli/src/agent-data-plugins.test.ts` 里 `parked IM extensions are not loaded…` 这条要删或改成「已加载」。
@@ -113,15 +113,13 @@
 
 ```bash
 # 扩展包
-npx vitest run im-gateway im-platforms _shared/im-binding.test.ts _shared/workspace-isolation.test.ts
+pnpm --dir extensions exec vitest run im-gateway im-platforms _shared/im-binding.test.ts _shared/workspace-isolation.test.ts
 
 # 产品不再加载 IM
-node --import tsx --test src/agent-data-plugins.test.ts src/extension-profile.test.ts
-# 在 cli/ 下跑
+pnpm --dir cli exec node --import tsx --test src/agent-data-plugins.test.ts src/extension-profile.test.ts
 
 # 侧栏没有「连接」
-npx vitest run src/features/layout/ModuleRail.test.tsx
-# 在 electron-agent/ 与 tauri-agent/ 下各跑一次
+pnpm --dir electron-agent exec vitest run src/features/layout/ModuleRail.test.tsx
 ```
 
 接回后还应跑 `ConnectionsPanel.test.tsx`、`ExtensionUiHost` 里 `wechat-messages` 路由用例。
