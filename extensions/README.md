@@ -1,51 +1,49 @@
-# Pi Extensions Pack
+# Pi 扩展
 
-一组受 [LobeHub](https://github.com/lobehub/lobe-chat) 启发、为 [Pi coding agent](https://github.com/earendil-works/pi) 补齐能力的扩展。每个都**自包含**(可单独用),也可作为**一个 Pi Package** 一次性安装全部。
+GrenAgent 通过 Pi SDK 加载本目录的内置扩展。桌面会话的加载清单与独立 Pi Package 的入口不同。
 
-## 包含的 extension
+## 桌面端加载哪些扩展
 
-| 目录 | 工具 / 命令 | 需要 key? | 说明 |
-|---|---|---|---|
-| [`wiki-rag`](./wiki-rag) | `wiki_list` `wiki_search` `wiki_read` | Agent Data Runtime | 本地知识库只读检索 |
-| [`code-retrieval`](./code-retrieval) | `code_explore` | Agent Data Runtime | CodeGraph 代码检索 |
-| [`web-fetch`](./web-fetch) | `fetch_url` | 否 | 网页抓取(SSRF 防护，`format` 选 markdown / text / html / json / llms) |
-| [`image-gen`](./image-gen) | `generate_image` | 是 | 文生图(OpenAI 兼容) |
-| [`multi-agent`](./multi-agent) | `spawn_agent` | 子 agent 需 | 委派隔离 pi 子进程(单个/并行) |
-| [`fable-behavior`](./fable-behavior) | — | 否 | Fable 5 + coding-agent 行为层(Tier 注入 + 子 agent 种子) |
-| [`tts`](./tts) | `speak` | 是 | 文字转语音(OpenAI 兼容) |
-| [`im-gateway`](./im-gateway) / [`im-platforms`](./im-platforms) | — | — | **暂缓**：源码保留，未打进产品加载清单。接回见仓库根目录 `docs/im-reintroduction.md` |
+`agent-host` 创建会话时，从 [扩展工厂清单](./index.ts) 取候选，再按[会话 profile 和插件白名单](../cli/src/extension-profile.ts)过滤。下表是当前桌面端的内置扩展：
 
-合计 **当前桌面端打进主进程 / worker 的全部扩展**，知识库与代码检索由本地 `wiki-rag` 与 `code-retrieval` 提供。
+| 能力 | 常驻扩展 |
+| --- | --- |
+| 安全与权限 | `safety`、`approval`、`sandbox`、`mcp-policy` |
+| 模型与上下文 | `header-placeholders`、`fast-mode`、`compaction-policy`、`image-limits`、`usage-ledger`、`session-memory` |
+| 会话与提示词 | `loop-guard`、`rulebook`、`prompt-commands`、`context-rules`、`auto-title`、`todo`、`present`、`agent-mode`、`diagram-hint`、`fable-behavior` |
+| 工作区与任务 | `jobs`、`multi-agent`、`working-directory`、`github`、`batch-tools` |
+| 网络、资源与媒体 | `web-fetch`、`resource-manager`、`image-gen`、`tts`、`visual-companion` |
 
-## 一键加载全部
+- **受插件状态控制**：[桌面端登记](../electron-agent/electron/app/plugin/builtinPlugins.ts)的 `goal`、`web-search`、`mcp`、`code-retrieval` 只有在状态为 `ready` 时才进入白名单。普通交互会话还由[运行时工厂](../cli/src/gren-runtime.ts)接入 SDK 的 Code Mode 与工具发现。
+- **桌面端不加载的候选**：`lsp`、`dap`、`ast-tools`、`hashline`、`code-exec`、`debug-tools`、`diagnostics`、`after-tool-feedback` 仍在工厂清单，但不在当前桌面常驻集合，也未登记为桌面托管插件。
+- **暂缓接入**：`im-gateway`、`im-platforms` 保留源码，不在产品加载清单。见 [IM 接回说明](../docs/im-reintroduction.md)。
 
-```bash
-# 方式 1:逐个 -e(开发调试)
-pi -e ./extensions/web-fetch/index.ts \
-   -e ./extensions/image-gen/index.ts \
-   -e ./extensions/multi-agent/index.ts
+### 代码检索与会话状态
 
-# 方式 2:作为一个 Pi Package 安装(本目录已带聚合 package.json)
-pi install git:github.com/<you>/<repo>     # 指向包含本 extensions/ 的仓库
+`code-retrieval` 只注册 `code_explore`。工具经主进程的本地扩展端点查询 `codegraph-host`，与桌面「代码索引」使用同一份工作区索引。缺少索引时先在桌面端建立；查询不会自动创建索引。进程边界见[架构文档](../docs/architecture.md#代码索引)。
 
-# 方式 3:复制到自动发现目录
-cp -r extensions/* ~/.pi/agent/extensions/
+`session-memory` 保存会话压缩摘要与短期工作状态，作用域是当前会话。
+
+## 在独立 Pi 中使用
+
+[package.json](./package.json) 的 `pi.extensions` 只声明以下四个入口：
+
+| 扩展 | 工具 | 配置 |
+| --- | --- | --- |
+| [网页抓取](./web-fetch/) | `fetch_url` | 无需模型或 API Key；支持 Markdown、纯文本、HTML、JSON 和 LLMS 输出 |
+| [生图](./image-gen/) | `generate_image` | 配置 OpenAI 兼容的生图供应商 |
+| [子代理](./multi-agent/) | `spawn_agent` 等 | 子会话使用可用的模型；支持单任务、并行和链式委派 |
+| [语音合成](./tts/) | `speak` | 配置 OpenAI 兼容的语音供应商 |
+
+单独调试可从仓库根目录运行 `pi -e ./extensions/web-fetch/index.ts`。其他扩展可能依赖 GrenAgent 的宿主能力；不要把整个目录复制到 Pi 的自动发现路径来模拟桌面加载。
+
+## 开发与测试
+
+从仓库根目录运行：
+
+```sh
+pnpm --dir extensions exec vitest run index.test.ts prompt-metadata.test.ts
+pnpm --dir extensions exec vitest run code-retrieval/index.test.ts
 ```
 
-## 统一配置
-
-桌面端由 Electron 托管本地 Agent Data Runtime；扩展通过受保护的命名管道 endpoint 访问数据。其他需要外部服务的扩展仍按各自 README 配置。
-
-## 技术共性
-
-- TypeScript extension,`typebox` schema,`registerTool` / `registerCommand` / 生命周期钩子。
-- `session-memory` 只管理会话短期工作状态，不承担长期知识存储。
-
-## 测试
-
-每个 extension 都有 jiti smoke 验证(累计 100+ 断言全过)。涉及真实 LLM 的回路(`spawn_agent` 实跑、真实 pi 端到端)需配 provider key 后体验。
-
-## 注意
-
-- 包名:按官方新名 `@earendil-works/*` + `typebox`(实测该 Pi 版本 bundle 的是 `typebox`,不是 `@sinclair/typebox`)。
-- Agent Data Runtime 使用应用数据目录保存 Wiki 元数据、任务与审计；扩展不直接管理 SQLite 文件。
+扩展用 TypeScript 和 `typebox` 定义工具参数，通过 Pi 的 `registerTool`、`registerCommand` 或生命周期钩子接入。工具提示词字段与验收要求见 [AGENTS.md](../AGENTS.md#注册工具必须带官方提示词字段)。
