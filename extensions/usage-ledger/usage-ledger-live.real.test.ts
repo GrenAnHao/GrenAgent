@@ -25,6 +25,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import usageLedger from "./index.js";
+import {attachUsageEntryTracking} from "./liveUsage.js";
+import {UsageOriginRegistry,sharedOriginRegistry} from "./originRegistry.js";
 import { callFromMessage, callKey, defaultLedgerPath, sharedLedger } from "./ledger.js";
 
 function echoTool(pi: { registerTool: (tool: unknown) => void }): void {
@@ -59,6 +61,7 @@ describe("usage-ledger (real SDK, faux model)", () => {
 
   afterAll(() => {
     sharedLedger(defaultLedgerPath(home)).close();
+    sharedOriginRegistry(home).close();
     rmSync(ws, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   });
@@ -77,12 +80,17 @@ describe("usage-ledger (real SDK, faux model)", () => {
     });
     const model = resolveCliModel({ cliModel: "faux/faux-1", modelRuntime: services.modelRuntime }).model;
     const { session } = await createAgentSessionFromServices({ services, sessionManager: SessionManager.create(ws), model });
+    const registry=new UsageOriginRegistry(join(home,"usage","test-origins.db"));
+    attachUsageEntryTracking(session,home,{registry});
     await session.bindExtensions({ uiContext: { notify: () => {}, setStatus: () => {} } as never });
     try {
       await session.prompt("hello", { source: "rpc" } as never);
       await session.waitForIdle();
     } finally {
       session.dispose();
+      const records=session.sessionManager.getEntries().filter((e:any)=>e.type==="message"&&e.message.role==="assistant");
+      for(const e of records){expect(registry.resolveUsageOrigin({sessionId:session.sessionManager.getSessionId(),entryId:e.id})).toMatchObject({kind:"local-origin"});expect(registry.ledgerKey({sessionId:session.sessionManager.getSessionId(),entryId:e.id})).toBeTruthy();}
+      registry.close();
     }
 
     const report = sharedLedger(defaultLedgerPath(home)).report();

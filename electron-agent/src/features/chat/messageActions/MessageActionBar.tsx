@@ -132,6 +132,8 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
   const isBusy = store.useStore((s) => s.isStreaming || Boolean(s.awaitingResponse));
   const messages = store.useStore((s) => s.messages);
   const excludedSet = store.useStore((s) => s.excluded);
+  const contextReplaced = store.useStore(s => Boolean(ctx.entryId && s.contextEdits?.has(ctx.entryId)));
+
 
   const lastIdx = findLastInContextUserIndex(messages, excludedSet);
   const isLastInContext =
@@ -223,7 +225,7 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
     visibleMenu = filterSlots(visibleMenu, hideRegen);
   }
 
-  return renderActions(enriched, visibleBar, visibleMenu, notify, ask);
+  return <>{contextReplaced && <span data-testid="context-replaced-badge" style={{fontSize:12,opacity:0.7}}>上下文已替换 · 原始历史保留</span>}{renderActions(enriched, visibleBar, visibleMenu, notify, ask)}</>;
 }
 
 /** 无 store 上下文（如子代理对话）或缺定位键：仅渲染基础动作（copy 等）。 */

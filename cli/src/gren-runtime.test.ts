@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { makeGrenRuntimeFactory } from "./gren-runtime.js";
 
 function fakeDeps(captured: Record<string, unknown>) {
   return {
     createAgentSessionServices: async (opts: Record<string, unknown>) => {
       captured.servicesOptions = opts;
-      return { diagnostics: [], modelRuntime: opts.modelRuntime };
+      return { diagnostics: [], modelRuntime: opts.modelRuntime ?? {} };
     },
-    createAgentSessionFromServices: async () => ({ session: {} }),
+    createAgentSessionFromServices: async () => ({ session: { settingsManager: SettingsManager.inMemory(), setCacheWarmingMode() {}, dispose() {} } }),
+    prepareObservation:(runtime:unknown)=>runtime,
+    trackUsage:()=>()=>{},
     manifestExtensions: [
       { name: "safety", factory: () => ({}) },
       { name: "code-exec", manifest: { id: "code-exec" }, factory: () => ({}) },
@@ -84,7 +87,7 @@ function fakeDepsWithSession(captured: Record<string, unknown>, entries: unknown
   };
   deps.createAgentSessionFromServices = async (opts: Record<string, unknown>) => {
     captured.sessionOptions = opts;
-    return { session: {} };
+    return { session: { settingsManager: SettingsManager.inMemory(), setCacheWarmingMode() {}, dispose() {} } };
   };
   return { deps, sessionManager: { getEntries: () => entries } };
 }

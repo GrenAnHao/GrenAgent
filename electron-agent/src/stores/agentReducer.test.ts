@@ -1461,3 +1461,8 @@ describe('excludedFromAgent', () => {
     expect(set.size).toBe(0);
   });
 });
+it('keeps request/response models and SDK total/source through live completion and history',()=>{
+ const message:any={role:'assistant',model:'alias',responseModel:'actual',content:[{type:'text',text:'answer'}],usage:{cost:{total:0.12,input:0.1,totalFromProvider:true}}};
+ const live=applyEvent(initialAgentState(),{type:'message_end',message});expect(live.messages[0]).toMatchObject({model:'alias',responseModel:'actual',costTotal:0.12,costSource:'provider'});
+ expect(messagesFromAgent([message])[0]).toMatchObject({model:'alias',responseModel:'actual',costTotal:0.12,costSource:'provider'});
+});

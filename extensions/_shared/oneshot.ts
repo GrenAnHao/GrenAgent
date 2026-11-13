@@ -4,6 +4,7 @@
 // 与既有 probe-mcp（逻辑在 extensions/mcp/probe.ts、cli 转发）同构。鉴权范式对齐 _shared/summarize.ts。
 
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { guardModelInputLimits, type ModelInputLimitsOptions } from '../../cli/src/model-input-limits.js';
 
 export interface OneshotRequest {
   provider: string;
@@ -69,7 +70,9 @@ export async function runOneshotWithRuntime(
   runtime: OneshotRuntime,
   req: OneshotRequest,
   emit: (obj: unknown) => void,
+  options?: ModelInputLimitsOptions,
 ): Promise<void> {
+  runtime = guardModelInputLimits(runtime, options);
   const model = runtime.getModel(req.provider, req.modelId);
   if (!model) {
     emit({ ok: false, error: `model not found: ${req.provider}/${req.modelId}` });

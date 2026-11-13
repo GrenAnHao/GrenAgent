@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const monitor = vi.hoisted(() => ({ jobs: [], error: undefined, track: vi.fn(), refresh: vi.fn(), watchedTaskVersion: 0 }));
 const options = vi.hoisted(() => ({ value: [{ cwd: 'D:/a', name: 'A' }, { cwd: 'D:/b', name: 'B' }] }));
-vi.mock('./AgentDataTaskProvider', () => ({ useAgentDataTaskMonitor: () => monitor }));
 vi.mock('./useProjectOptions', () => ({ useProjectOptions: () => options.value }));
 vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { projects: vi.fn(), status: vi.fn(), search: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
 vi.mock('../../lib/files', () => ({ files: { read: vi.fn() } }));
 vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
+vi.mock('./CodeSourceLines', async () => await import('./codeSourceLinesStub'));
 import { agentDataApi, type CodeGraphStatus } from '../../lib/agentData';
 import { files } from '../../lib/files';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
+import { scrollToLineSpy } from './codeSourceLinesStub';
 import { expectSelectDisplay, openSelect, pickSelectOption } from './antdSelectTestUtils';
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -31,7 +31,6 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     expect(screen.queryByText('src/a.ts')).toBeNull();
     expect(screen.queryByLabelText('搜索代码')).toBeNull();
     expect(screen.queryByRole('button', { name: '同步索引' })).toBeNull();
-    monitor.watchedTaskVersion++;
     rerender(<CodeRetrievalPanel initialProject="D:/a" />);
     expect(agentDataApi.code.call).toHaveBeenCalledTimes(calls);
     expect(agentDataApi.jobs.create).not.toHaveBeenCalled();
@@ -46,7 +45,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
   });
 
   beforeEach(() => {
-    vi.resetAllMocks(); monitor.watchedTaskVersion = 0;
+    vi.resetAllMocks();
     options.value = [{ cwd: 'D:/a', name: 'A' }, { cwd: 'D:/b', name: 'B' }];
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([]);
     vi.mocked(agentDataApi.code.status).mockImplementation(async (workspace) => ({ workspace, connected: true, indexed: true }));
@@ -250,8 +249,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
       await screen.findByText('src/file-0.ts');
       fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
       await screen.findByText('src/file-199.ts');
-      monitor.watchedTaskVersion++;
-      rerender(<CodeRetrievalPanel initialProject="D:/a" />);
+      rerender(<CodeRetrievalPanel initialProject="D:/a" refreshToken={1} />);
       await waitFor(() => expect(screen.queryByText('src/file-199.ts')).toBeNull());
       expect(listed()).toBe(100);
     });
@@ -314,8 +312,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     const oldQuery = deferred<unknown>();
     vi.mocked(agentDataApi.code.status).mockReturnValueOnce(oldStatus.promise).mockResolvedValue({ workspace: 'D:/b', connected: true, indexed: true });
     vi.mocked(agentDataApi.code.call).mockReturnValueOnce(oldQuery.promise).mockResolvedValue(rows('beta.ts'));
-    monitor.watchedTaskVersion++;
-    rerender(<CodeRetrievalPanel />);
+    rerender(<CodeRetrievalPanel refreshToken={1} />);
     await pickSelectOption('项目', /^B ·/);
     await screen.findByText('beta.ts');
     await act(async () => { oldStatus.resolve({ workspace: 'D:/a', connected: true, indexed: true, files: 99 }); oldQuery.resolve(rows('stale.ts')); });
@@ -342,7 +339,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     render(<CodeRetrievalPanel initialProject="D:/a" />);
     fireEvent.click(await screen.findByRole('button', { name: /src\/file.ts/ }));
     await screen.findByText('source target');
-    expect(screen.getByText('未提供符号，无法查询调用关系。')).toBeTruthy();
+    expect(screen.queryByText('未提供符号，无法查询调用关系。')).toBeNull();
     expect(agentDataApi.code.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'codegraph_node' }));
     expect(agentDataApi.code.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'codegraph_callers' }));
     expect(document.querySelector('[aria-current="location"]')).toBeNull();
@@ -384,7 +381,6 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     const oldProjects = deferred<{ workspace: string; indexed: boolean }[]>();
     vi.mocked(agentDataApi.code.status).mockReturnValueOnce(oldStatus.promise);
     vi.mocked(agentDataApi.code.projects).mockReturnValueOnce(oldProjects.promise);
-    monitor.watchedTaskVersion++;
     rerender(<CodeRetrievalPanel />);
     rerender(<CodeRetrievalPanel visible={false} />);
     await act(async () => {
@@ -404,36 +400,31 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     vi.mocked(agentDataApi.code.projects).mockRejectedValue(new Error('projects unavailable'));
     vi.mocked(agentDataApi.code.status).mockRejectedValue(new Error('status unavailable'));
     vi.mocked(agentDataApi.code.call).mockRejectedValue(new Error('query unavailable'));
-    monitor.watchedTaskVersion++;
-    rerender(<CodeRetrievalPanel />);
+    rerender(<CodeRetrievalPanel refreshToken={1} />);
     await waitFor(() => expect(screen.getAllByRole('alert').some((node) => node.textContent?.includes('query unavailable'))).toBe(true));
     expect(screen.getByText('src/a.ts')).toBeTruthy();
     expect(screen.queryByText('没有匹配结果')).toBeNull();
   });
 
   it('preserves selection and scroll across terminal refresh with indexed still true and hidden return', async () => {
-    const scroll = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll });
     const { rerender } = render(<CodeRetrievalPanel initialProject="D:/a" />);
     fireEvent.change(await screen.findByLabelText('搜索代码'), { target: { value: 'parse' } });
     fireEvent.click(await screen.findByRole('button', { name: /parse.*src\/a.ts/ }));
     await screen.findByText('source target');
     const searches = () => vi.mocked(agentDataApi.code.call).mock.calls.filter(([request]) => request.tool === 'codegraph_search').length;
     expect(searches()).toBe(1);
-    monitor.watchedTaskVersion++;
-    rerender(<CodeRetrievalPanel />);
+    rerender(<CodeRetrievalPanel refreshToken={1} />);
     await waitFor(() => expect(searches()).toBe(2));
     expect(screen.getByText('source target')).toBeTruthy();
-    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scrollToLineSpy).toHaveBeenCalledTimes(1);
     rerender(<CodeRetrievalPanel visible={false} />);
     const callsBefore = vi.mocked(agentDataApi.code.call).mock.calls.length;
-    monitor.watchedTaskVersion++;
     rerender(<CodeRetrievalPanel visible={false} />);
     expect(agentDataApi.code.call).toHaveBeenCalledTimes(callsBefore);
     rerender(<CodeRetrievalPanel />);
     await waitFor(() => expect(searches()).toBe(3));
     expect(screen.getByText('source target')).toBeTruthy();
-    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scrollToLineSpy).toHaveBeenCalledTimes(1);
   });
 
   it('rejects in-flight hidden responses and refreshes once after an initially hidden mount', async () => {

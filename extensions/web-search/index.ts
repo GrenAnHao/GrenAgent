@@ -23,12 +23,6 @@ import {
   type ParsedSearch,
 } from "./provider.js";
 import { getConfig, getAllConfig } from "../_shared/runtime-config.js";
-import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
-import { currentCwd } from "../_shared/workspace-context.js";
-
-function toolCwd(ctx: { cwd?: unknown } | undefined): string {
-  return typeof ctx?.cwd === "string" && ctx.cwd ? ctx.cwd : currentCwd();
-}
 
 const TIMEOUT_MS = Number(process.env.WEB_SEARCH_TIMEOUT_MS ?? "15000") || 15000;
 
@@ -127,7 +121,7 @@ function searchDetails(query: string, provider: string, parsed: ParsedSearch, en
   };
 }
 
-export default function (pi: ExtensionAPI, control: DesktopControlPort = desktopControl()) {
+export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
@@ -138,9 +132,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       query: Type.String({ description: "Search query" }),
       maxResults: Type.Optional(Type.Number({ description: "Max sources (default 8, hard cap 8)" })),
     }),
-    async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await requireNetwork(control, 'web_search', toolCwd(ctx));
-      if (denied) return denied;
+    async execute(_toolCallId, params, signal, _update, _ctx): Promise<AgentToolResult<Record<string, unknown>>> {
       const choice = resolveProvider(getAllConfig());
       if (!choice.ok) {
         return {
@@ -176,22 +168,5 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     },
   });
 
-  registerAnySearchTools(pi, (toolName, ctx) => requireNetwork(control, toolName, toolCwd(ctx)));
-}
-
-async function requireNetwork(
-  control: DesktopControlPort,
-  toolName: string,
-  cwd: string,
-): Promise<AgentToolResult<Record<string, unknown>> | undefined> {
-  const authorization = await authorizeDesktopOperation(control, {
-    kind: 'network.request',
-    workspace: cwd,
-    toolName,
-  });
-  if (authorization.status === 'allowed') return undefined;
-  return {
-    content: [{ type: 'text', text: `网络访问已被 Electron 权限策略${authorization.status === 'blocked' ? '暂停，等待批准' : '拒绝'}` }],
-    details: { error: `network_${authorization.status}` },
-  };
+  registerAnySearchTools(pi);
 }

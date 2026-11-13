@@ -5,12 +5,15 @@
  * 是带 private 成员的类，跨副本传递会触发 TS 名义类型不兼容。electron/ 一律从本文件
  * 取值与类型，使其解析到 cli 副本，与 cli 代码共用同一份声明。
  *
- * 对应上游版本：pi-coding-agent@1.4.0
+ * 对应上游版本：pi-coding-agent@1.5.1
  */
+import "./pi-node-providers.js";
+
 export {
   DefaultPackageManager,
   ModelRuntime,
   SessionManager,
+  sessionEntryToContextMessages,
   SettingsManager,
   ModelRegistry,
   createAgentSessionRuntime,

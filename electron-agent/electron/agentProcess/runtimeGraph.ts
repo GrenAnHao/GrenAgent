@@ -1,3 +1,5 @@
+import {requestObservations} from '../../../extensions/_shared/requestObservation.js';
+import {RequestObservationService,warmingSnapshot} from '../app/requestObservationService';
 import { join } from 'node:path';
 import { ModelRuntime } from '../../../cli/src/pi-sdk.js';
 import { subscribeSessionTitleWritten } from '../../../extensions/auto-title/notify.js';
@@ -44,6 +46,7 @@ export interface RuntimeGraph {
 export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
   const { host, broadcast, agentDir } = options;
   const modelRuntimeHost = new ModelRuntimeHost({
+    modelsPath: join(agentDir, 'models.json'),
     create: async () => {
       const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') });
       // 嵌入式子代理、冷恢复的子会话复用这一份，不再各自重建
@@ -54,7 +57,9 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
   let piRuntime: PiRuntimeService | undefined;
 
   const agentHost: AgentHost = new AgentHost({
-    createHandle: async (workspace, cwd) => createWorkspaceHandle({
+    createHandle: async (workspace, cwd, candidatePath) => createWorkspaceHandle({
+      candidatePath,
+      stageFork: (handle, entryId, forkOptions) => piRuntime!.stagedFork(workspace, handle, entryId, forkOptions),
       workspace,
       cwd,
       modelRuntime: await modelRuntimeHost.ensure(),
@@ -140,6 +145,12 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
   });
   const subagents = new SubagentService(new SandboxManager({}));
   const usage = new UsageService(agentDir);
+  const observations=new RequestObservationService({warming:(p)=>{
+    const handles=typeof p.workspace==='string'?agentHost.list(p.workspace):agentHost.workspaces().flatMap(w=>agentHost.list(w));
+    const handle=handles.find(h=>typeof p.sessionId==='string'?h.session.sessionId===p.sessionId:typeof p.sessionPath==='string'?h.session.sessionFile===p.sessionPath:false);
+    return warmingSnapshot(handle?.session);
+  }});
+  const stopObservations=requestObservations.subscribe(event=>broadcast('pi://request-observation',event));
   // 会话已被替换时，auto-title 把标题写进原 jsonl，不会再走当前 pi 的 session_info_changed。
   // 补一次同名事件，侧栏会重读会话列表。workspace 留空，避免被当成当前画面上的会话事件。
   const stopAutoTitleNotice = subscribeSessionTitleWritten(() => {
@@ -157,8 +168,10 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
     'pi.closeWorkspace': (p) => pi.closeWorkspace(str(p, 'workspace')),
     'pi.respondUi': (p) => pi.respondUi(str(p, 'workspace'), record(p, 'response')),
     'pi.send': (p) => pi.send(str(p, 'workspace'), str(p, 'command'), record(p, 'args')),
+    'pi.sessionWorkflow': (p) => pi.sessionWorkflow(str(p, 'workspace'), record(p, 'request') as unknown as import('../app/sessionWorkflowContracts').SessionWorkflowRequest),
     'pi.permissionProfile': (p) => pi.permissionProfile(str(p, 'workspace'), optionalStr(p, 'sessionId')) ?? null,
     'pi.refreshModelRegistry': () => pi.refreshModelRegistry(),
+    'pi.syncModelCompactionBudgets': () => pi.syncModelCompactionBudgets(),
     'pi.enqueueTurn': (p) => pi.enqueueTurn(
       str(p, 'workspace'),
       typeof p.input === 'string' ? p.input : '',
@@ -206,6 +219,7 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
       name: entry.name,
       ...(entry.manifest ? { manifest: { id: entry.manifest.id } } : {}),
     })),
+    'observations.command':(p)=>observations.command(p),
     'usage.report': () => usage.report(),
     'usage.reconcile': () => usage.reconcile(),
   };
@@ -214,6 +228,7 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
     methods,
     async shutdown() {
       stopAutoTitleNotice();
+      stopObservations();observations.clear();
       jobsBridge.stop();
       await agentHost.closeAll();
       killAllSubagents();
@@ -255,3 +270,4 @@ function num(params: Record<string, unknown>, key: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${key} must be a finite number`);
   return value;
 }
+

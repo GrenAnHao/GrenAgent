@@ -1,58 +1,70 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentDataService } from './agentDataService';
 import { AgentDataClient } from '../agentData/client';
+import { AgentDataRuntime } from '../agentData/runtime';
+
+/**
+ * 门面现在只接受装配好的运行时：agentdata-host 与 child 模式已下线，
+ * 凭证轮换、崩溃重拉这类跨进程行为不再存在，相关断言随之移除，
+ * 保留「启动/状态/关停」「等执行器收尾」「长超时请求」三组仍然成立的行为。
+ */
+const cleanups: Array<() => Promise<unknown> | unknown> = [];
+afterEach(async () => { for (const stop of cleanups.splice(0).reverse()) await stop(); });
+
+const service = (options: Partial<ConstructorParameters<typeof AgentDataRuntime>[0]> = {}) => {
+  const runtime = new AgentDataRuntime({ dataPath: ':memory:', ...options } as ConstructorParameters<typeof AgentDataRuntime>[0]);
+  const instance = new AgentDataService({ runtime });
+  cleanups.push(() => instance.stop());
+  return instance;
+};
 
 describe('AgentDataService', () => {
-
-  it('does not finish stopping until an existing Wiki executor has actually settled', async () => {
+  it('does not finish stopping until an existing executor has actually settled', async () => {
     let release!: (value: string) => void;
     const execute = vi.fn(() => new Promise<string>((resolve) => { release = resolve; }));
-    const service = new AgentDataService({ dataPath: ':memory:', executeServiceTask: execute });
-    await service.start();
-    const work = service.runServiceTask({ id: 'drain-task', kind: 'wiki_page_generate', input: { source: 'A' } });
+    const instance = service({ executeServiceTask: execute });
+    await instance.start();
+    const work = instance.runServiceTask({ id: 'drain-task', kind: 'wiki_page_generate', input: { source: 'A' } });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
-    let stopped = false; const stop = service.stop().then(() => { stopped = true; });
+    let stopped = false;
+    const stop = instance.stop().then(() => { stopped = true; });
     try {
-      await vi.waitFor(() => expect(service.endpoint()).toBeUndefined());
+      await vi.waitFor(() => expect(instance.endpoint()).toBeUndefined());
       expect(stopped).toBe(false);
     } finally { release('# done'); await work; await stop; }
     expect(stopped).toBe(true);
   });
 
-  it('rotates project credentials across a service restart and preserves the admin entry', async () => {
-    const service = new AgentDataService({ dataPath: ':memory:' });
-    await service.start(); let oldClient: AgentDataClient | undefined; let nextClient: AgentDataClient | undefined;
-    try {
-      expect(service).toHaveProperty('agentEndpoint', expect.any(Function));
-      const previous = await service.agentEndpoint('D:/a');
-      await service.stop(); await service.start();
-      const next = await service.agentEndpoint('D:/a');
-      expect(next.token === previous.token).toBe(false);
-      oldClient = new AgentDataClient({ ...next, token: previous.token }); nextClient = new AgentDataClient(next);
-      await expect(oldClient.request('wiki.list')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-      await expect(nextClient.request('wiki.list')).resolves.toEqual([]);
-      await expect(service.requestAdmin('wiki.create', { name: '无关联' })).resolves.toMatchObject({ name: '无关联' });
-    } finally { await oldClient?.close(); await nextClient?.close(); await service.stop(); }
-  });
-
   it('starts, reports status and shuts down', async () => {
-    const service = new AgentDataService({ dataPath: ':memory:' });
-    await expect(service.start()).resolves.toMatchObject({ version: 1 });
-    await expect(service.status()).resolves.toMatchObject({ state: 'ready' });
-    await service.stop();
+    const instance = service();
+    await expect(instance.start()).resolves.toMatchObject({ version: 1 });
+    await expect(instance.status()).resolves.toMatchObject({ state: 'ready' });
+    await instance.stop();
+    expect(instance.endpoint()).toBeUndefined();
   });
 
   it('allows CodeGraph requests to exceed the short standalone client timeout', async () => {
-    const service = new AgentDataService({ dataPath: ':memory:', methods: {
-      'codeRetrieval.call': () => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 6_000)),
-    } });
-    await service.start();
-    try {
-      const request = service.request('codeRetrieval.call', { workspace: '/repo', tool: 'codegraph_search', args: {} });
-      await expect(request).resolves.toEqual({ ok: true });
-    } finally {
-      await service.stop();
-    }
+    const instance = service({
+      methods: { 'codeRetrieval.call': () => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 6_000)) },
+    });
+    await instance.start();
+    const request = instance.request('codeRetrieval.call', { workspace: '/repo', tool: 'codegraph_search', args: {} });
+    await expect(request).resolves.toEqual({ ok: true });
   }, 15_000);
 
+  it('keeps serving threads and admin calls from the same in-process runtime', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-data-service-'));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const instance = service({ dataPath: join(dir, 'agent-data.db') });
+    await instance.start();
+    const thread = await instance.createThread({ id: 't1', projectId: 'p', workspace: dir });
+    expect(thread).toMatchObject({ id: 't1', status: 'active' });
+    expect(await instance.listThreads()).toHaveLength(1);
+    // 扩展方法转发仍按 owner 判定，未授权的名字返回 undefined。
+    expect(instance.extensionMethod('permission.tool.evaluate', dir)).toBeTypeOf('function');
+    expect(instance.extensionMethod('wiki.list', dir)).toBeUndefined();
+  });
 });

@@ -53,6 +53,8 @@ installBridge({
   },
   invoke: async (command: string, args: Record<string, unknown>) => {
     switch (command) {
+      case 'request_observation':return args.action==='list'?[]:{availability:'unavailable'}
+      case 'get_model_compaction_budgets':return {revision:0,models:[]}
       case 'get_provider_config': return { modelsJson: MODELS_JSON, authJson: '{}', agentDir: '/agent' }
       case 'get_settings': return {}
       case 'list_models_global': return { ok: true, models: CATALOG }

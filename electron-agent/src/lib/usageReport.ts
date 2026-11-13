@@ -47,6 +47,8 @@ export interface SessionUsage {
 
 /** 单次模型调用(一条 assistant 消息)的用量明细。 */
 export interface CallUsage {
+  responseModel?: string | null;
+  costSource?: "provider" | "catalog" | "unknown";
   timestamp: string | null;
   model: string;
   provider: string;
@@ -59,6 +61,9 @@ export interface CallUsage {
 }
 
 export interface UsageReport {
+  warmingTotals?: {cost:number;messages:number;totalTokens:number};
+  warmingCalls?: Array<{sessionId:string;entryId:string;timestamp:string;kind:"cache_warm";provider:string;attributedModel:string;input:number;output:number;cacheRead:number;cacheWrite:number;totalTokens:number;cost:number;costSource:"provider"|"catalog"|"unknown"}>;
+  recordedCost?: {assistantCost:number;warmingCost:number;totalCost:number;sourceBreakdown:Record<"provider"|"catalog"|"unknown",number>};
   totals: UsageTotals;
   byDay: DayUsage[];
   byModel: ModelUsage[];
@@ -66,3 +71,5 @@ export interface UsageReport {
   recentSessions: SessionUsage[];
   calls: CallUsage[];
 }
+
+export const costSourceLabel=(source:string|undefined)=>source==='provider'?'供应商报告':source==='catalog'?'目录估算':'来源未知';

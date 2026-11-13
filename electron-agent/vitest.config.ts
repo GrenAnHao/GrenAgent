@@ -14,8 +14,7 @@ export default defineConfig({
         test: {
           name: 'main',
           include: ['electron/**/*.test.ts'],
-          // This OS-child flow needs the temporary build supplied by test:repo-wiki-flow.
-          exclude: [...configDefaults.exclude, 'electron/app/repoWikiFlow.integration.test.ts'],
+          exclude: [...configDefaults.exclude],
           environment: 'node',
         },
       },

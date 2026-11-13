@@ -1,0 +1,288 @@
+{
+  "entry": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\electron\\agentProcess\\hostEntry.ts",
+  "executable": "D:\\nvm4w\\nodejs\\node.exe",
+  "facts": [
+    "actual host resolved local registered fixture model",
+    "actual IPC preserves distinct A/B session identities",
+    "background warm has independent request identity",
+    "HTTP whitelist and final source fields reach actual IPC",
+    "temporary structure is safe across actual IPC",
+    "real temporary ledger keeps assistant and warm separate",
+    "no raw diagnostic is persisted after process exit"
+  ],
+  "report": {
+    "totals": {
+      "input": 1000000,
+      "output": 2,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 1000002,
+      "cost": 0.24,
+      "sessions": 2,
+      "messages": 2,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 1000002,
+        "cost": 0.24
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "observe-fixture",
+        "model": "offline",
+        "tokens": 1000002,
+        "cost": 0.24,
+        "messages": 2
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\B",
+        "name": null,
+        "tokens": 500001,
+        "cost": 0.12,
+        "sessions": 1
+      },
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\A",
+        "name": null,
+        "tokens": 500001,
+        "cost": 0.12,
+        "sessions": 1
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "01a1c39e-d072-70e4-b78f-b72617d427c2",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\B",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-rWrRir-B--\\2026-11-10T04-02-07-602Z_01a1c39e-d072-70e4-b78f-b72617d427c2.jsonl",
+        "timestamp": "2026-11-10T04:02:07.602Z",
+        "tokens": 500001,
+        "cost": 0.12
+      },
+      {
+        "id": "01a1c39e-cec8-70e4-b78f-b72452ffb1f2",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\A",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-rWrRir-A--\\2026-11-10T04-02-07-177Z_01a1c39e-cec8-70e4-b78f-b72452ffb1f2.jsonl",
+        "timestamp": "2026-11-10T04:02:07.177Z",
+        "tokens": 500001,
+        "cost": 0.12
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": "physical-offline",
+        "costSource": "provider",
+        "timestamp": "2026-11-10T04:02:09.605Z",
+        "provider": "observe-fixture",
+        "model": "offline",
+        "input": 500000,
+        "output": 1,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 500001,
+        "cost": 0.12
+      },
+      {
+        "responseModel": "physical-offline",
+        "costSource": "provider",
+        "timestamp": "2026-11-10T04:02:07.943Z",
+        "provider": "observe-fixture",
+        "model": "offline",
+        "input": 500000,
+        "output": 1,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 500001,
+        "cost": 0.12
+      }
+    ],
+    "warmingCalls": [
+      {
+        "sessionId": "01a1c39e-cec8-70e4-b78f-b72452ffb1f2",
+        "entryId": "6eb8c6a2",
+        "timestamp": "2026-11-10T04:02:08.953Z",
+        "kind": "cache_warm",
+        "provider": "observe-fixture",
+        "attributedModel": "physical-offline",
+        "input": 500000,
+        "output": 1,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 500001,
+        "cost": 0.03,
+        "costSource": "catalog"
+      }
+    ],
+    "warmingTotals": {
+      "cost": 0.03,
+      "messages": 1,
+      "totalTokens": 500001
+    },
+    "recordedCost": {
+      "assistantCost": 0.24,
+      "warmingCost": 0.03,
+      "totalCost": 0.27,
+      "sourceBreakdown": {
+        "provider": 0.24,
+        "catalog": 0.03,
+        "unknown": 0
+      }
+    }
+  },
+  "safeObservations": [
+    {
+      "identity": {
+        "sessionId": "01a1c39e-cec8-70e4-b78f-b72452ffb1f2",
+        "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-rWrRir-A--\\2026-11-10T04-02-07-177Z_01a1c39e-cec8-70e4-b78f-b72452ffb1f2.jsonl",
+        "runtimeGeneration": "04160617-5fb4-48be-9e17-c50a86647dce",
+        "requestId": "712991bf-558f-48e1-9551-5c19ff95e8cb"
+      },
+      "sequence": 7,
+      "observedAt": 1794283327942,
+      "phase": "completed",
+      "attempt": 1,
+      "provider": "observe-fixture",
+      "api": "observe-native",
+      "requestedModel": "offline",
+      "category": "session",
+      "startedAt": 1794283327787,
+      "availability": "supported",
+      "responses": [
+        {
+          "attempt": 1,
+          "metadata": {
+            "rateLimit": {},
+            "httpStatus": 200,
+            "providerRequestId": "assistant-safe"
+          }
+        }
+      ],
+      "collecting": false,
+      "events": [
+        {
+          "type": "text_delta",
+          "text": "[redacted]",
+          "unknownFields": {
+            "count": 1
+          }
+        }
+      ],
+      "previewVersion": 0,
+      "metadata": {
+        "rateLimit": {},
+        "httpStatus": 200,
+        "providerRequestId": "assistant-safe"
+      },
+      "outcome": {
+        "responseModel": "physical-offline",
+        "costTotal": 0.12,
+        "costSource": "provider"
+      }
+    },
+    {
+      "identity": {
+        "sessionId": "01a1c39e-d072-70e4-b78f-b72617d427c2",
+        "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-rWrRir-B--\\2026-11-10T04-02-07-602Z_01a1c39e-d072-70e4-b78f-b72617d427c2.jsonl",
+        "runtimeGeneration": "04160617-5fb4-48be-9e17-c50a86647dce",
+        "requestId": "9df0fb4c-5097-4a4b-b5a2-688b04f9b26d"
+      },
+      "sequence": 15,
+      "observedAt": 1794283329604,
+      "phase": "completed",
+      "attempt": 1,
+      "provider": "observe-fixture",
+      "api": "observe-native",
+      "requestedModel": "offline",
+      "category": "session",
+      "startedAt": 1794283327794,
+      "availability": "supported",
+      "responses": [
+        {
+          "attempt": 1,
+          "metadata": {
+            "rateLimit": {},
+            "httpStatus": 200,
+            "providerRequestId": "assistant-safe"
+          }
+        }
+      ],
+      "collecting": false,
+      "events": [
+        {
+          "type": "text_delta",
+          "text": "[redacted]",
+          "unknownFields": {
+            "count": 1
+          }
+        }
+      ],
+      "previewVersion": 0,
+      "metadata": {
+        "rateLimit": {},
+        "httpStatus": 200,
+        "providerRequestId": "assistant-safe"
+      },
+      "outcome": {
+        "responseModel": "physical-offline",
+        "costTotal": 0.12,
+        "costSource": "provider"
+      }
+    },
+    {
+      "identity": {
+        "sessionId": "01a1c39e-cec8-70e4-b78f-b72452ffb1f2",
+        "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-rWrRir\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-rWrRir-A--\\2026-11-10T04-02-07-177Z_01a1c39e-cec8-70e4-b78f-b72452ffb1f2.jsonl",
+        "runtimeGeneration": "04160617-5fb4-48be-9e17-c50a86647dce",
+        "requestId": "4f92975d-7ba4-4fdd-b94e-705c397be012"
+      },
+      "sequence": 12,
+      "observedAt": 1794283328953,
+      "phase": "completed",
+      "attempt": 1,
+      "provider": "observe-fixture",
+      "api": "observe-native",
+      "requestedModel": "offline",
+      "category": "cache-warm",
+      "startedAt": 1794283328797,
+      "availability": "supported",
+      "responses": [
+        {
+          "attempt": 1,
+          "metadata": {
+            "rateLimit": {},
+            "httpStatus": 200,
+            "providerRequestId": "warm-safe"
+          }
+        }
+      ],
+      "collecting": false,
+      "events": [
+        {
+          "type": "text_delta",
+          "text": "[redacted]",
+          "unknownFields": {
+            "count": 1
+          }
+        }
+      ],
+      "previewVersion": 0,
+      "metadata": {
+        "rateLimit": {},
+        "httpStatus": 200,
+        "providerRequestId": "warm-safe"
+      },
+      "outcome": {
+        "responseModel": "physical-offline",
+        "costTotal": 0.03,
+        "costSource": "catalog"
+      }
+    }
+  ],
+  "stderr": "(node:79372) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n"
+}

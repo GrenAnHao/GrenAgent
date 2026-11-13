@@ -1,4 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
+import { isModelHidden, useModelVisibilityStore } from '../../stores/modelVisibilityStore';
 import { Select } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { suggestModels, type Capability } from './capabilityModelPresets';
@@ -30,6 +31,7 @@ interface Props {
  */
 export function CapabilityModelField({ field, values, setValue }: Props) {
   const { providerOptions, nameOf, modelsFor } = useProviderModelData();
+  const hidden = useModelVisibilityStore((state) => state.hidden);
 
   const provider = values[field.key] ?? '';
   const model = values[field.modelKey ?? ''] ?? '';
@@ -44,9 +46,10 @@ export function CapabilityModelField({ field, values, setValue }: Props) {
   // 该供应商可用模型 + 能力预设（embedding/tts/image），去重；再保留当前值。
   const modelOpts = modelsFor(provider);
   for (const m of suggestModels(provider, cap)) {
-    if (!modelOpts.some((o) => o.value === m)) modelOpts.push({ label: m, value: m });
+    if (!isModelHidden(hidden, provider, m) && !modelOpts.some((o) => o.value === m)) modelOpts.push({ label: m, value: m });
   }
-  if (model && !modelOpts.some((o) => o.value === model)) {
+  const currentHidden = isModelHidden(hidden, provider, model);
+  if (model && !currentHidden && !modelOpts.some((o) => o.value === model)) {
     modelOpts.unshift({ label: model, value: model });
   }
 
@@ -76,6 +79,7 @@ export function CapabilityModelField({ field, values, setValue }: Props) {
           placeholder="模型"
           style={{ flex: 1, minWidth: 160 }}
           options={modelOpts}
+          labelRender={({ label, value }) => currentHidden ? `${model}（已隐藏）` : label ?? value}
           disabled={!provider}
           allowClear
           showSearch

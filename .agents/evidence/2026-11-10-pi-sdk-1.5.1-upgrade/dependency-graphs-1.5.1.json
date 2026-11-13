@@ -1,0 +1,266 @@
+{
+  "cli": {
+    "packages": [
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-ai@1.5.1_146f734bb5a2869891b46f8da8389f5c\\node_modules\\@earendil-works\\pi-ai\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_46363ec98625f1d639749413625da3f6\\node_modules\\@earendil-works\\pi-coding-agent\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-schema",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-schema@1.5.1\\node_modules\\@earendil-works\\pi-schema\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-telemetry@1.5.1\\node_modules\\@earendil-works\\pi-telemetry\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-agent-co_5a792928428be6437b31f3db2304d94e\\node_modules\\@earendil-works\\pi-agent-core\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-codemode@1.5.1\\node_modules\\@earendil-works\\pi-codemode\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-mcp@1.5.1\\node_modules\\@earendil-works\\pi-mcp\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.5.1",
+        "path": "cli\\node_modules\\.pnpm\\@earendil-works+pi-tui@1.5.1\\node_modules\\@earendil-works\\pi-tui\\package.json"
+      }
+    ],
+    "npmPackages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-schema",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.5.1"
+      }
+    ],
+    "pnpmPackages": [
+      "@earendil-works/pi-agent-core@1.5.1",
+      "@earendil-works/pi-ai@1.5.1",
+      "@earendil-works/pi-codemode@1.5.1",
+      "@earendil-works/pi-coding-agent@1.5.1",
+      "@earendil-works/pi-mcp@1.5.1",
+      "@earendil-works/pi-schema@1.5.1",
+      "@earendil-works/pi-telemetry@1.5.1",
+      "@earendil-works/pi-tui@1.5.1"
+    ]
+  },
+  "extensions": {
+    "packages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-agent-co_d3534a8167ec36d0502b07f5d7b7f07b\\node_modules\\@earendil-works\\pi-agent-core\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-ai@1.5.1_ade8340df1fecd33c7fee48af7cbf108\\node_modules\\@earendil-works\\pi-ai\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_3aac47665bc449927166a74714318d14\\node_modules\\@earendil-works\\pi-coding-agent\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-schema",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-schema@1.5.1\\node_modules\\@earendil-works\\pi-schema\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-telemetry@1.5.1\\node_modules\\@earendil-works\\pi-telemetry\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-codemode@1.5.1\\node_modules\\@earendil-works\\pi-codemode\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-mcp@1.5.1\\node_modules\\@earendil-works\\pi-mcp\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.5.1",
+        "path": "extensions\\node_modules\\.pnpm\\@earendil-works+pi-tui@1.5.1\\node_modules\\@earendil-works\\pi-tui\\package.json"
+      }
+    ],
+    "npmPackages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-schema",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.5.1"
+      }
+    ],
+    "pnpmPackages": [
+      "@earendil-works/pi-agent-core@1.5.1",
+      "@earendil-works/pi-ai@1.5.1",
+      "@earendil-works/pi-codemode@1.5.1",
+      "@earendil-works/pi-coding-agent@1.5.1",
+      "@earendil-works/pi-mcp@1.5.1",
+      "@earendil-works/pi-schema@1.5.1",
+      "@earendil-works/pi-telemetry@1.5.1",
+      "@earendil-works/pi-tui@1.5.1"
+    ]
+  },
+  "electron-agent": {
+    "packages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-agent-co_f52ce6bcb4ef42977468125ea7bf1633\\node_modules\\@earendil-works\\pi-agent-core\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-ai@1.5.1_85bb101464745b6fcc81d571dd8d6ec0\\node_modules\\@earendil-works\\pi-ai\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_aaa0854c1a65a32aafaa5d1d855555e5\\node_modules\\@earendil-works\\pi-coding-agent\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-schema",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-schema@1.5.1\\node_modules\\@earendil-works\\pi-schema\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-telemetry@1.5.1\\node_modules\\@earendil-works\\pi-telemetry\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-codemode@1.5.1\\node_modules\\@earendil-works\\pi-codemode\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-mcp@1.5.1\\node_modules\\@earendil-works\\pi-mcp\\package.json"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.5.1",
+        "path": "electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-tui@1.5.1\\node_modules\\@earendil-works\\pi-tui\\package.json"
+      }
+    ],
+    "npmPackages": [
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-codemode",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-mcp",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-schema",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.5.1"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "1.5.1"
+      }
+    ],
+    "pnpmPackages": [
+      "@earendil-works/pi-agent-core@1.5.1",
+      "@earendil-works/pi-ai@1.5.1",
+      "@earendil-works/pi-codemode@1.5.1",
+      "@earendil-works/pi-coding-agent@1.5.1",
+      "@earendil-works/pi-mcp@1.5.1",
+      "@earendil-works/pi-schema@1.5.1",
+      "@earendil-works/pi-telemetry@1.5.1",
+      "@earendil-works/pi-tui@1.5.1"
+    ]
+  }
+}

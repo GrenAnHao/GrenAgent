@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import {
   AgentSession,
   ModelRuntime,
@@ -100,6 +101,37 @@ async function fixture(extraFactories: ExtensionFactory[] = []) {
 }
 
 describe("Gren compatibility with the installed Pi SDK", () => {
+  it("validates TypeBox and plain MCP schemas without mutating transcript arguments", () => {
+    const schemas = [
+      Type.Object({
+        topic: Type.String({ enum: ["search", "copyright"] }),
+        limit: Type.Optional(Type.Number()),
+        paths: Type.Array(Type.String()),
+      }),
+      {
+        type: "object", required: ["topic", "paths"],
+        properties: {
+          topic: { type: "string", enum: ["search", "copyright"] },
+          limit: { type: "number" },
+          paths: { type: "array", items: { $ref: "#/$defs/path" } },
+        },
+        $defs: { path: { type: "string" } },
+      },
+    ];
+    for (const parameters of schemas) {
+      const tool = { name: "compat_schema", description: "Validate local fixture arguments.", parameters };
+      const call = {
+        type: "toolCall" as const, id: "fixture-call", name: tool.name,
+        arguments: { topic: "search", limit: "42", paths: "src/main.ts" },
+      };
+      expect(validateToolArguments(tool, call)).toEqual({ topic: "search", limit: 42, paths: ["src/main.ts"] });
+      expect(call.arguments).toEqual({ topic: "search", limit: "42", paths: "src/main.ts" });
+      expect(() => validateToolArguments(tool, { ...call, arguments: { topic: "unknown", paths: [] } })).toThrow(/topic/);
+      expect(() => validateToolArguments(tool, { ...call, arguments: { topic: "search" } })).toThrow(/paths/);
+      expect(() => validateToolArguments(tool, { ...call, arguments: { topic: "search", paths: [], limit: "bad" } })).toThrow(/limit/);
+    }
+  });
+
   it("batches real dynamic tool registration and exposes every registered tool", async () => {
     const prototype = AgentSession.prototype as unknown as { _refreshToolRegistry(options?: unknown): unknown };
     const refresh = vi.spyOn(prototype, "_refreshToolRegistry");

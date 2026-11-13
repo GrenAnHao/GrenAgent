@@ -2,9 +2,9 @@ import { createStaticStyles, cssVar } from 'antd-style';
 
 export const workbenchStyles = createStaticStyles(({ css }) => ({
   header: css`
-    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-    min-height: 40px; margin-block-end: 12px;
-    h2 { margin: 0; font-size: 16px; font-weight: 600; }
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    min-height: 40px; margin-block-end: 16px;
+    h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
   `,
   subtitle: css`color: ${cssVar.colorTextTertiary}; font-size: 13px;`,
   actions: css`display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-inline-start: auto;`,
@@ -17,6 +17,7 @@ export const workbenchStyles = createStaticStyles(({ css }) => ({
   panelToolbar: css`
     display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
     min-height: 46px; padding: 8px 12px; border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+    background: ${cssVar.colorFillQuaternary};
   `,
   split: css`
     container: workbench-split / inline-size;
@@ -31,12 +32,14 @@ export const workbenchStyles = createStaticStyles(({ css }) => ({
   `,
   empty: css`
     display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center;
-    gap: 10px; min-height: 260px; color: ${cssVar.colorTextQuaternary}; text-align: center;
+    gap: 6px; min-height: 260px; text-align: center;
   `,
-  detailHeader: css`
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 12px;
-    h3 { margin: 0; font-size: 16px; }
+  emptyIcon: css`
+    display: grid; place-items: center; width: 44px; height: 44px; margin-block-end: 6px;
+    border-radius: 50%; background: ${cssVar.colorFillTertiary}; color: ${cssVar.colorTextTertiary};
   `,
+  emptyTitle: css`color: ${cssVar.colorTextSecondary}; font-size: 13px; font-weight: 500;`,
+  emptyText: css`max-width: 320px; color: ${cssVar.colorTextTertiary}; font-size: 12px; line-height: 1.6;`,
   meta: css`display: flex; flex-wrap: wrap; gap: 6px 14px; margin-block-end: 14px; color: ${cssVar.colorTextTertiary}; font-size: 12px;`,
   spacer: css`margin-inline-start: auto;`,
 }));

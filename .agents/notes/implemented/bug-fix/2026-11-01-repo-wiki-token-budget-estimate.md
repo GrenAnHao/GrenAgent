@@ -27,7 +27,17 @@ Status: implemented
 
 - `stageRuntime` 在系统提示里写明本阶段最多几轮、几次工具调用，要求一轮批量请求多个工具并留一轮给最终 JSON。
 - 用 Agent 的 `prepareNextTurnWithContext`：剩余 3 轮起每轮追加剩余预算提醒；最后一轮（或工具次数用完）去掉工具并要求立即用已有证据返回完整 JSON、说明缺口。
-- 默认单项 `maxModelRequests` 12 → 20、`maxToolCalls` 40 → 60，其余不变。
+- 默认单项 `maxModelRequests` 12 → 20（后续又按用途分层，见下）、`maxToolCalls` 40 → 60，其余不变。
+
+### 第三次受阻：按用途分层，并把剩余额度写进对话
+
+20 轮仍然是所有阶段共用一个值，且模型看不到它。真实运行显示每张卡片都会跑满 23–28 轮。事实已变：
+
+- 轮次上限不再全局统一，改由 `executionPolicy.profiles` 按 stage 类型给出（`page` 24、`module-card` 28、`repository-card` 24），`DEFAULT_KNOWLEDGE_BUDGETS` 只是未冻结时的回落值。
+- 剩余读取额度不再只出现在系统提示里，而是每轮工具返回后作为一条消息告知模型（剩余几次、分布几轮、这轮建议几个）。
+- 收尾提示改为命令式：剩 2 轮时直接说"下一次回复必须是完整 JSON"。
+
+详见 [轮次预算与诊断](../../implemented/architecture/2026-11-04-stage-turn-budgets-and-diagnostics.md)。本节的 20 / 60 与 token 折算公式仍然成立，只是轮次那一项已由分层取代。
 
 ## Alternatives considered
 

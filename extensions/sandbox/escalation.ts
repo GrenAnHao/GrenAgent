@@ -6,11 +6,11 @@ import { ESCALATION_TARGETS, type EscalationTarget } from "../_shared/sandbox/fa
 import type { FileSandboxMode } from "../_shared/sandbox/types.js";
 
 export const SANDBOX_PERMISSIONS_DESCRIPTION =
-  "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.";
+  "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. For ordinary commands, omit sandbox_permissions and justification, or set both to null if all fields are required. Do not select workspace-write as a default or placeholder.";
 export const JUSTIFICATION_DESCRIPTION =
-  "Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access. Use the language of the user's current request.";
+  "Required only for a non-null sandbox_permissions request: a non-empty sentence for the user explaining why this exact command needs the wider access. Use the language of the user's current request. For ordinary commands, omit both escalation fields or set both to null; do not use an empty string.";
 export const ESCALATION_GUIDELINE =
-  "Use bash with sandbox_permissions + justification only to retry the exact command the sandbox just denied, choosing the narrowest wider mode; the user approves every retry, and a rejection means stop and explain.";
+  "Use bash with sandbox_permissions + justification only to retry the exact command the sandbox just denied, choosing the narrowest wider mode; the user approves every retry, and a rejection means stop and explain. For ordinary bash calls, omit both escalation fields or set both to null when all fields are required; never invent an escalation target to fill optional fields.";
 
 export const ESCALATION_ALLOW = "允许本次";
 export const ESCALATION_REJECT = "拒绝";

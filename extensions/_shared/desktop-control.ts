@@ -1,4 +1,3 @@
-import { getConfig } from './runtime-config.js';
 import { currentWorkspaceContext } from './workspace-context.js';
 import { AgentDataClient } from './agent-data-client.js';
 
@@ -8,20 +7,6 @@ export interface DesktopControlPort {
 
 export function desktopControl(): DesktopControlPort {
   return new AgentDataClient();
-}
-
-export async function authorizeDesktopOperation(
-  client: DesktopControlPort,
-  operation: Record<string, unknown>,
-): Promise<{ status: 'allowed' | 'denied' | 'blocked' }> {
-  try {
-    return await client.request('permission.authorize', {
-      operation,
-      profile: getConfig('PI_PERMISSION_PROFILE') ?? 'workspace',
-    });
-  } catch {
-    return { status: 'denied' };
-  }
 }
 
 export type ToolOrigin = 'main' | 'subagent' | 'goal';

@@ -1,3 +1,6 @@
+// Runtime I/O is covered by real SDK usage-ledger tests, not these state-machine stubs.
+vi.mock('../usage-ledger/liveUsage.js',()=>({attachUsageEntryTracking:vi.fn(()=>()=>{})}));
+vi.mock('../usage-ledger/legacyRoster.js',()=>({ensureLegacyRoster:vi.fn()}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const appendMessage = vi.fn();
@@ -8,9 +11,15 @@ const createAgentSessionFromServices = vi.fn();
 const createAgentSessionServicesMock = vi.fn(async () => ({ modelRuntime: { id: "runtime" } }));
 const resolveCliModel = vi.fn();
 
+const originalBudgetSessionMethods = new WeakMap<object, { prompt: unknown; dispose: unknown }>();
+
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSessionServices: (...args: unknown[]) => createAgentSessionServicesMock(...args),
-  createAgentSessionFromServices: (...args: unknown[]) => createAgentSessionFromServices(...args),
+  createAgentSessionFromServices: async (...args: unknown[]) => {
+    const created = await createAgentSessionFromServices(...args);
+    if (created?.session) originalBudgetSessionMethods.set(created.session, { prompt: created.session.prompt, dispose: created.session.dispose });
+    return created;
+  },
   resolveCliModel: (...args: unknown[]) => resolveCliModel(...args),
   SessionManager: {
     create: (...args: unknown[]) => (sessionCreate(...args), {
@@ -31,6 +40,7 @@ vi.mock("../_shared/workspace-context.js", () => ({
 vi.mock("../_shared/runtime-config.js", () => ({
   getConfig: (key: string) => (key === "PI_SYSTEM_WORKER" ? "1" : undefined),
   withoutSensitiveProcessConfig: (x: Record<string, string>) => x,
+  watchConfig: () => () => {},
 }));
 
 vi.mock("./runner.js", async (importOriginal) => {
@@ -121,7 +131,7 @@ describe("runEmbeddedSubagent", () => {
     expect(excludeTools).toEqual(expect.arrayContaining(["explore_context", "bash"]));
     expect(excludeTools).not.toContain("spawn_agent");
     expect(excludeTools).not.toContain("send_message");
-    expect(session.dispose).toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalled();
   });
 
   it("parent moved into a worktree: child header stays on the original directory, tools use the current one, the move is recorded", async () => {
@@ -342,7 +352,7 @@ describe("runEmbeddedSubagent", () => {
     });
     const r = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-init" });
     expect(r).toMatchObject({ ok: false, stopReason: "error", error: "uncaught error: init boom" });
-    expect(session.prompt).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).not.toHaveBeenCalled();
     expect(reportLeakedError(new Error("late"), "sa-init")).toEqual({ childId: "sa-init", handled: false });
   });
 
@@ -471,7 +481,7 @@ describe("createEmbeddedChildSession", () => {
     expect(child.sessionPath).toBe("/ws/.pi/sessions/sa-child.jsonl");
     expect(child.workspace).toBe("/ws");
     expect(typeof child.unsub).toBe("function");
-    expect(session.dispose).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).not.toHaveBeenCalled();
     expect(appendCustomEntry).toHaveBeenCalledWith(
       "subagent_meta",
       expect.objectContaining({
@@ -551,7 +561,7 @@ describe("startContinuableEmbedded", () => {
 
     expect(getActivation("sa-child")).toBeUndefined();
     expect(send).not.toHaveBeenCalled();
-    expect(session.dispose).toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalled();
   });
 
   it("installs Activation and markAnnounced after prompt preflight ok", async () => {
@@ -583,7 +593,7 @@ describe("startContinuableEmbedded", () => {
     expect(announce).toHaveBeenCalledWith("sa-child");
     expect(getActivation("sa-child")).toBeDefined();
     expect(send).not.toHaveBeenCalled();
-    expect(session.prompt).toHaveBeenCalledWith(
+    expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalledWith(
       `do work\n\n${continuableReturnGuidance("p1")}`,
       expect.objectContaining({ source: "rpc" }),
     );

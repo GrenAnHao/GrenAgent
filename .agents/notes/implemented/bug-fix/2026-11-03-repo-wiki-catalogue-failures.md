@@ -46,17 +46,53 @@ Status: implemented
 - `dependent_file: "src/a.ts"` 这类写法现在能过。这是真实模型行为且信息无损；若将来要强制数组，应加严格模式而不是回退本次修复。
 - `CATALOGUE_OUTPUT_*` 是新码，UI 暂无中文文案映射，只原样展示。比裸码可诊断，但不算友好。
 
+## 第二轮：真实用户复跑暴露的三个新故障
+
+第一轮修复上线后用户复跑，失败点从 `catalogue-root` 后移到 `catalogue-child`，错误码 `CATALOGUE_CHILD_OUTPUT_INVALID`。取任务 `74b0342e-1b90-4f4b-89db-2cbc59e2efe9` 的 8 次 child 响应逐条验：2 次成功、1 次**单个对象而非数组**、1 次**JSON 内未转义引号**、4 次**模型返回空**（`out=1` token，`stopReason=done`）。
+
+对应修了三处：
+
+1. **单个 section 对象**。`sectionsFrom()` 现在把裸对象当作单元素目录（其自带 `items` 优先），`normalizeSections()` 不再要求顶层必须是数组。
+2. **未转义的内层引号**。`repairUnescapedQuotes()` 只在“引号后面不是 `,` `}` `]` `:`”时补转义，且必须整体 `JSON.parse` 通过才算成功；它挂在 `taggedJson()` 的 `invalid` 分支、`repairJson()` 之后，所以截断与真正损坏仍然失败（有反例用例）。
+3. **provider 错误从不重试**。`stopReason === 'error'` 原来直接 `return undefined`，把一次瞬时故障变成整段失败。现在区分瞬时（408/409/425/429/5xx、rate limit、timeout、ECONNRESET…）与永久（401/400），只对瞬时错误消耗下一次 attempt。永久错误仍只试一次，既有 Beta 夹具的“2 次调用”断言因此保持成立。
+4. **空响应没有纠偏**。原来重试会收到“修复 JSON 语法”的指令，对空输出无效。现在按失败原因分流：空响应给“你的上一条回复为空，请完整返回 `<documentation_structure>`”，格式错误才走候选修复。
+
+`WikiModelTurn` 新增可选 `errorMessage`（`nativeWikiModel.ts` 从 `AssistantMessage.errorMessage` 截断填入，仅用于重试判定，不落库）。
+
+## 第三轮：修复代码曾只存在于 git stash，现已按文件恢复
+
+第二轮的三处修复（`repairUnescapedQuotes`、`sectionsFrom`、`isRetriableProviderError` 与空回复指令、`WikiModelTurn.errorMessage`）当时**从未进入工作区或任何提交**：`git log --all -- electron/wikiService/referenceParsers.ts` 只有两个提交，都不含这些函数，而函数体与注释完整地留在 `stash@{0}`（`On master: tmp-verify-baseline`）。取证依据是拿该 stash 的解析器单独喂 4 条真实 child 响应：工作区版本 2/4，stash 版本 4/4。
+
+恢复方式是按文件取 hunk（`git show 'stash@{0}:<path>'`），**不是** `git stash pop`——该 stash 同时包含 `agentDataProcess/**`、`agentData/wikiEngine/**`、`AgentDataCenter` 等已被退役流程删除的文件，pop 会让它们复活并大面积冲突。恢复的 6 个文件：
+
+- `electron/wikiService/referenceParsers.ts`
+- `electron/wikiService/referenceParsers.test.ts`
+- `electron/wikiService/fullGeneration.ts`
+- `electron/wikiService/fullGeneration.test.ts`
+- `electron/wikiService/sessionRuntime.ts`
+- `electron/app/nativeWikiModel.ts`
+
+一处对 stash 版本的修正：`sectionsFrom()` 原本把单对象的 `children` 也铺平进同一层（`return [v, ...v.children]`），这会与 `node()` 自身的递归重复，同一个子树既成为兄弟又成为子节点。恢复后的版本只返回 `[v]`，由 `node()` 递归，新增用例断言「单对象 + 声明了 children」只产生一个根节点。
+
+stash 本身保留未动，便于回溯。
+
 ## 验证
 
 | 项 | 命令 | 结果 |
 | --- | --- | --- |
-| 解析：真实两份响应、YAML 围栏、等价标量、截断仍失败、缺 `prompt` 仍失败 | `npx vitest run --project main electron/wikiService/referenceParsers.test.ts` | 9 项通过 |
+| 解析：4 份真实响应（root YAML / root 标量外形 / child 单对象 / child 未转义引号）、截断仍失败、缺 `prompt` 仍失败 | `npx vitest run --project main electron/wikiService/referenceParsers.test.ts` | 11 项通过 |
 | 渲染：10 个 purpose/分支与 golden 逐字相等 | `npx vitest run --project main electron/wikiService/referencePrompts.test.ts` | 3 项通过（修复前该文件 1 项红） |
-| 失败分类 | `npx vitest run --project main electron/wikiService/fullGeneration.test.ts` | 8 项通过 |
-| wiki 链路单测 | `npx vitest run --project main --maxWorkers=2 electron/wikiService electron/knowledgeProcess electron/agentData/knowledgeKernel` | 36 文件 / 283 项通过 |
-| 应用层 Wiki 单测 | `npx vitest run --project main --maxWorkers=2 electron/app/nativeWikiController.test.ts … electron/agentData/nativeWikiProjection.test.ts` | 10 文件 / 66 项通过 |
-| 真实 child 端到端 | `node --import tsx scripts/test-repo-wiki-flow.mjs` | 9 文件 / 50 项通过（新增 YAML 出力与"坏输出→repair"两条） |
-| 一条命令复验 | `node --import tsx scripts/verify-repo-wiki-catalogue.mjs` | 解析 2/2；端到端 1 通过 |
-| 类型检查 | `npx tsc -p tsconfig.repo-wiki.json --noEmit` | 通过 |
+| 失败分类 + 重试策略 + 空响应指令 | `npx vitest run --project main electron/wikiService/fullGeneration.test.ts` | 13 项通过 |
+| 真实 child 端到端 | `node --import tsx scripts/test-repo-wiki-flow.mjs` | 9 文件 / 50 项通过 |
+| 一条命令复验 | `node --import tsx scripts/verify-repo-wiki-catalogue.mjs` | 4/4 份真实响应解析；端到端 50 项通过 |
+| wiki 链路单测 | `npx vitest run --project main --maxWorkers=2 electron/wikiService electron/knowledgeProcess` | 21 文件中 19 通过；2 个 git 夹具文件因默认 5s 超时失败，`--testTimeout=60000` 后 11/11 通过（OneDrive 目录下 git 子进程慢，非逻辑问题）|
+| 知识内核 | `npx vitest run --project main --maxWorkers=2 electron/agentData/knowledgeKernel` | 194 项中 193 通过；`incremental.test.ts` 同样为超时，放大后 9/9 |
+| 类型检查 | `npx tsc -p tsconfig.repo-wiki.json --noEmit` / `-p tsconfig.json` | 均通过 |
 
-未验收：真实模型、真实供应商、桌面应用内实际点击、`CATALOGUE_OUTPUT_*` 的中文文案。渲染层 `RepoWikiWorkspace.knowledge.test.tsx` 目前 9 项红，原因是 `nativePrimary` 下内核概览本就不渲染（`App.tsx:240`），与本链路无关且早于本轮修改。
+未验收：真实模型、真实供应商、桌面应用内实际点击、`CATALOGUE_OUTPUT_*` 的中文文案。渲染层 `RepoWikiWorkspace.knowledge.test.tsx` 9 项红是 `nativePrimary` 下内核概览本就不渲染（`App.tsx:240`），与本链路无关且早于本轮修改。
+
+## 第二轮仍然存在的风险
+
+- 空响应（`out=1`）的根因在供应商侧，我只能在重试与指令上提高成功率，不能保证模型不再返回空。若某个 child 两次都空，该节点仍会失败并触发 `CATALOGUE_CHILD_OUTPUT_INVALID`。
+- 未转义引号修复基于“引号后不是结构化字符”的启发式。若模型写出更离谱的损坏，仍会被判失败——这是有意的：宁可重试，也不发布一棵可能错的目录树。
+

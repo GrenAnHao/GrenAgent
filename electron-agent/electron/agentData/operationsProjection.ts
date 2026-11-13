@@ -23,9 +23,8 @@ export function operationText(value: unknown, type: OperationText): string | und
 
 export function operationResource(value: unknown): ResourceRef | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const { type, id, language } = value as Record<string, unknown>;
-  if (type !== 'wiki' && type !== 'project' && type !== 'repoWiki') return undefined;
-  const safeId = operationText(id, type === 'project' || type === 'repoWiki' ? 'project' : 'identifier');
-  return safeId ? { type, id: safeId,
-    ...(type === 'repoWiki' && typeof language === 'string' && /^[A-Za-z][A-Za-z0-9-]{0,19}$/.test(language) ? { language } : {}) } : undefined;
+  const { type, id } = value as Record<string, unknown>;
+  if (type !== 'wiki' && type !== 'project') return undefined;
+  const safeId = operationText(id, type === 'project' ? 'project' : 'identifier');
+  return safeId ? { type, id: safeId } : undefined;
 }

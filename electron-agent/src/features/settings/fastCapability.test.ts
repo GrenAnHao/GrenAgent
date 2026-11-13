@@ -17,7 +17,7 @@ describe('Fast capability configuration', () => {
       expect(rows[0].compat.supportsFastMode).toBe(true);
       expect(rows[1].compat?.supportsFastMode === true).toBe(false);
       expect(rows[2].compat?.supportsFastMode === true).toBe(false);
-      expect(loadState(saved.modelsJson, saved.authJson, [])[0].models.map((m) => (m as { fast?: boolean }).fast === true)).toEqual([true, false, false]);
+      expect(loadState(saved.modelsJson, null, [])[0].models.map((m) => (m as { fast?: boolean }).fast === true)).toEqual([true, false, false]);
     });
   }
 });

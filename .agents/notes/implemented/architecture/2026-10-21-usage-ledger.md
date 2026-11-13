@@ -10,6 +10,8 @@ Status: implemented
 
 ## Decision
 
+来源登记、预热独立表和加法迁移的现行契约见 [请求观测与可信来源](./2026-11-10-request-observability-and-usage-origin.md)；本篇保留原 assistant 写入 / 汇总口径及其取舍。
+
 ### 写入：扩展在 `message_end` 记账
 
 新增扩展 `extensions/usage-ledger/`。每条助手消息的 `message_end` 里，如果 `role` 是 `assistant` 且带 `usage`（与旧扫描同一口径），就往 `<agentDir>/usage/ledger.db` 写一行，同一个事务里 upsert 会话信息（id、`getSessionFile()`、cwd、会话头时间、`getSessionName()`）。记账失败只打一行 stderr，不影响对话。

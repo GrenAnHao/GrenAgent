@@ -9,6 +9,8 @@ import { probeProjects, type ProjectIndexState } from './indexProbe';
 /** 主进程只用到子进程客户端的这几样（AgentProcessClient 满足）。 */
 export interface CodeGraphHostProcess {
   request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
+  /** 主动拉起子进程并等就绪；已运行则复用。 */
+  start(): Promise<void>;
   shutdown(): Promise<void>;
   readonly isRunning: boolean;
 }
@@ -74,6 +76,21 @@ export class CodeGraphHostClient {
     // 子进程不在：没有在跑的同步可取消（它退出时在途 runSync 已经以 CODEGRAPH_HOST_EXITED 失败）。
     if (!this.process.isRunning) return;
     await this.request('codegraph.cancelSync', { jobId });
+  }
+
+  /** 宿主是否在运行。只读，不触发拉起。 */
+  get isRunning(): boolean {
+    return !this.closed && this.process.isRunning;
+  }
+
+  /**
+   * 主动确保宿主在跑。只供监督者使用：普通调用仍按需拉起，
+   * 这里只是把“宿主退出后没人唤醒”这个缺口补上，不重建索引、不改数据。
+   */
+  async ensureRunning(): Promise<void> {
+    if (this.closed) throw new Error('CodeGraph engine is closed');
+    if (this.process.isRunning) return;
+    await this.process.start();
   }
 
   /** 子进程收尾时会先取消在跑的同步并等它结束，再关库退出。 */

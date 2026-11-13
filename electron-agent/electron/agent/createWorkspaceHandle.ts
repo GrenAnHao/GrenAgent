@@ -1,3 +1,4 @@
+import { blockCandidateRequests } from './candidateRequests.js';
 import { createAgentSessionRuntime, getAgentDir, SessionManager, type ModelRuntime } from '../../../cli/src/pi-sdk.js';
 import { makeGrenRuntimeFactory } from '../../../cli/src/gren-runtime.js';
 import { releaseImBinding } from '../../../extensions/_shared/im-binding.js';
@@ -9,6 +10,8 @@ import { releaseWorkspaceLease, retainWorkspaceLease } from './workspaceLease.js
 
 export interface CreateWorkspaceHandleInput {
   workspace: string;
+  candidatePath?: string;
+  stageFork?: WorkspaceHandleOptions['stageFork'];
   cwd: string;
   modelRuntime: ModelRuntime;
   allowedExtensionsJson: string;
@@ -27,14 +30,19 @@ export async function createWorkspaceHandle(input: CreateWorkspaceHandleInput): 
     const runtime = await runInWorkspace(
       { origin: 'main', workspace: input.workspace, cwd: input.cwd, config },
       () => createAgentSessionRuntime(
-        makeGrenRuntimeFactory({ modelRuntime: input.modelRuntime, allowedExtensionsJson: input.allowedExtensionsJson }),
-        { cwd: input.cwd, agentDir: getAgentDir(), sessionManager: SessionManager.create(input.cwd) },
+                async (options) => {
+          const created = await makeGrenRuntimeFactory({ modelRuntime: input.modelRuntime, allowedExtensionsJson: input.allowedExtensionsJson })(options);
+          if (input.candidatePath) blockCandidateRequests(created.session);
+          return created;
+        },
+        { cwd: input.cwd, agentDir: getAgentDir(), sessionManager: input.candidatePath ? SessionManager.open(input.candidatePath, undefined, input.cwd) : SessionManager.create(input.cwd) },
       ),
     );
     const handle = new WorkspaceHandle({
       workspace: input.workspace,
       cwd: input.cwd,
       runtime,
+      stageFork: input.stageFork,
       resolveConfig: input.resolveConfig,
       emitUiRequest: input.emitUiRequest,
       onEvent: input.onEvent,
@@ -66,3 +74,4 @@ export async function createWorkspaceHandle(input: CreateWorkspaceHandleInput): 
     throw error;
   }
 }
+

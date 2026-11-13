@@ -1,3 +1,5 @@
+import {join} from "node:path";
+import {guardModelInputLimits} from "./model-input-limits.js";
 import {
   type CreateAgentSessionRuntimeFactory,
   type ExtensionFactory,
@@ -13,6 +15,11 @@ import { readRequestedPreferences, readSessionPreferences, type SessionPreferenc
 import { installToolRefreshBatching } from "../../extensions/_shared/tool-refresh-batch.js";
 import { attachSessionCwd } from "../../extensions/_shared/session-cwd.js";
 import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
+import { observeModelRuntime } from "./observed-model-runtime.js";
+import {ensureLegacyRoster} from "../../extensions/usage-ledger/legacyRoster.js";
+import {attachUsageEntryTracking} from "../../extensions/usage-ledger/liveUsage.js";
+import { attachCacheWarmingControl } from "./cache-warming-control.js";
+import { attachModelCompactionControl } from "./model-compaction-control.js";
 
 function bareSkillName(name: string): string {
   return name.startsWith("skill:") ? name.slice(6) : name;
@@ -33,6 +40,8 @@ export interface GrenRuntimeDeps {
   createAgentSessionFromServices: typeof createAgentSessionFromServices;
   manifestExtensions: typeof manifestExtensions;
   getConfig: (key: string) => string | undefined;
+  prepareObservation?: (runtime:ModelRuntime,agentDir:string,manager:any)=>ModelRuntime;
+  trackUsage?: typeof attachUsageEntryTracking;
 }
 
 const realDeps: GrenRuntimeDeps = {
@@ -40,6 +49,11 @@ const realDeps: GrenRuntimeDeps = {
   createAgentSessionFromServices,
   manifestExtensions,
   getConfig,
+  prepareObservation:(runtime,agentDir,manager)=>{
+    try{ensureLegacyRoster(agentDir);}catch{console.error('[usage-ledger] legacy provenance unavailable; reconciliation requires repair');}
+    return observeModelRuntime(runtime,{identity:()=>({sessionId:manager.getSessionId(),sessionPath:manager.getSessionFile()})});
+  },
+  trackUsage:attachUsageEntryTracking,
 };
 
 /**
@@ -126,12 +140,16 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
         },
       },
     });
+    services.modelRuntime=guardModelInputLimits((deps.prepareObservation??realDeps.prepareObservation!)(services.modelRuntime,agentDir,sessionManager),{modelsPath:join(agentDir,"models.json")});
     const created = await deps.createAgentSessionFromServices({
       services,
       sessionManager,
       sessionStartEvent,
       ...restoredSessionOptions(services.modelRuntime, sessionManager),
     });
+    (deps.trackUsage??realDeps.trackUsage!)(created.session,agentDir);
+    attachCacheWarmingControl(created.session, cwd, agentDir);
+    attachModelCompactionControl(created.session, cwd, agentDir);
     // 绑定扩展（session_start 里 MCP 首次投影一批工具）之前装上，批量注册时工具表只刷新一次。
     installToolRefreshBatching(created.session);
     // 服务仍按原始目录建：runtime.cwd 决定之后 newSession / fork 的会话头，必须是原始目录。

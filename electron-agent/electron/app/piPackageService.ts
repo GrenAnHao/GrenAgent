@@ -1,5 +1,7 @@
 import { DefaultPackageManager, SettingsManager, type PackageSource } from '../../../cli/src/pi-sdk.js';
 import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from '../../../cli/src/extension-profile.js';
+import { join } from 'node:path';
+import { parseManagedSource, readPackageSnapshot, type PackageSnapshot } from './piPackageMetadata';
 import {
   findRawEntry,
   isPackageEnabled,
@@ -23,7 +25,7 @@ export interface SettingsPort {
 }
 
 export interface PackageManagerPort {
-  listConfiguredPackages(): Array<{ source: string; scope: 'user' | 'project'; filtered: boolean }>;
+  listConfiguredPackages(): Array<{ source: string; scope: 'user' | 'project'; filtered: boolean; installedPath?: string }>;
   installAndPersist(source: string, options?: { local?: boolean }): Promise<void>;
   removeAndPersist(source: string, options?: { local?: boolean }): Promise<boolean>;
 }
@@ -134,6 +136,30 @@ export class PiPackageService {
       settings.setProjectPackages(replacePackageEntry(current, source, withAutoload(matched, enabled)));
     }
     await this.requestReload();
+  }
+
+  /** Disk/configuration facts only: never resolves resources or invokes their code. */
+  async snapshots(workspace: string): Promise<PackageSnapshot[]> {
+    const { cwd, settings, packages } = this.open(workspace);
+    const result: PackageSnapshot[] = [];
+    for (const item of packages.listConfiguredPackages()) {
+      if (item.scope === 'project' && !workspace.trim()) continue;
+      const entries = item.scope === 'user' ? settings.getGlobalSettings().packages : settings.getProjectSettings().packages;
+      const entry = findRawEntry(entries, item.source) ?? item.source;
+      const parsed = parseManagedSource(item.source);
+      const base = item.scope === 'user' ? this.agentDir : join(cwd, '.pi');
+      result.push(await readPackageSnapshot({
+        scope: item.scope, workspace: item.scope === 'project' ? cwd : undefined, entry,
+        installedPath: item.installedPath, managedRoot: join(base, parsed.kind === 'git' ? 'git' : 'npm'),
+      }));
+    }
+    for (const project of result.filter((row) => row.scope === 'project')) {
+      const user = result.find((row) => row.scope === 'user' && row.identity === project.identity);
+      if (!user) continue;
+      if (!project.enabled) project.resourceBaseKey = user.key;
+      else user.overriddenBy = project.key;
+    }
+    return result;
   }
 
   async install(workspace: string, name: string, version: string, scope: 'user' | 'project'): Promise<void> {

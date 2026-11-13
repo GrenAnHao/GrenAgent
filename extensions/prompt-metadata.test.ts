@@ -38,7 +38,8 @@ describe("official tool prompt metadata", () => {
     const names = collectTools().map((tool) => tool.name);
     expect(names).not.toContain("memory_search");
     expect(names).not.toContain("conversation_search");
-    expect(names).toEqual(expect.arrayContaining(["code_explore", "wiki_search"]));
+    expect(names).toEqual(expect.arrayContaining(["code_explore"]));
+    expect(names).not.toContain("wiki_search");
   });
 
   it("gives every statically registered tool a promptSnippet", () => {
@@ -49,8 +50,9 @@ describe("official tool prompt metadata", () => {
 
   it("gives each AgentData family one primary tool with named promptGuidelines", () => {
     const tools = collectTools();
-    const primaries = tools.filter((tool) => tool.name === "code_explore" || tool.name === "wiki_search");
-    expect(primaries).toHaveLength(2);
+    const primaries = tools.filter((tool) => tool.name === "code_explore");
+    // 资料 Wiki 下线后只剩代码检索这一类主工具；原先按“两类各一个”计数。
+    expect(primaries.length).toBeGreaterThan(0);
     for (const tool of primaries) {
       expect(tool.promptGuidelines?.length).toBeGreaterThan(0);
       for (const guideline of tool.promptGuidelines ?? []) {

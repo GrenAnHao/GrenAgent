@@ -1,3 +1,9 @@
+import {join} from "node:path";
+import {guardModelInputLimits} from "../../cli/src/model-input-limits.js";
+import { attachModelCompactionControl } from '../../cli/src/model-compaction-control.js';
+import {observeModelRuntime} from '../../cli/src/observed-model-runtime.js';
+import {attachUsageEntryTracking} from '../usage-ledger/liveUsage.js';
+import {ensureLegacyRoster} from '../usage-ledger/legacyRoster.js';
 // Child sub-agent sessions: a real SessionManager + JSONL. The same runner drives both backends —
 // in this process (openEmbeddedChildSession) or in a worker process over RPC (worker-session.ts).
 
@@ -333,6 +339,7 @@ export type ChildSessionOpener = (opts: EmbeddedSubagentOpts, prepared: Prepared
 
 /** 在本进程里建子会话；worker 进程里的 worker-host.ts 也用它。 */
 export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded): Promise<OpenedEmbedded> {
+  try{ensureLegacyRoster(getAgentDir());}catch{console.error("[usage-ledger] legacy provenance unavailable");}
   const sessionManager = SessionManager.create(opts.projectCwd ?? opts.cwd, undefined, {
     id: opts.agentId,
     ...(prepared.parentPath ? { parentSession: prepared.parentPath } : {}),
@@ -373,9 +380,10 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
   const systemPrompt = structured ? withStructuredInstruction(opts.systemPrompt) : opts.systemPrompt?.trim();
 
   const modelRuntime = sharedModelRuntime();
+  const budgetAgentDir = getAgentDir();
   const services = await createAgentSessionServices({
     cwd: opts.cwd,
-    agentDir: getAgentDir(),
+    agentDir: budgetAgentDir,
     // 复用宿主的 ModelRuntime：每个子会话各建一份是并行冷启动的大头之一
     ...(modelRuntime ? { modelRuntime } : {}),
     resourceLoaderOptions: {
@@ -385,6 +393,7 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
     },
   });
 
+  services.modelRuntime=guardModelInputLimits(observeModelRuntime(services.modelRuntime,{identity:()=>({sessionId:sessionManager.getSessionId(),sessionPath:sessionManager.getSessionFile()})}),{modelsPath:join(getAgentDir(),"models.json")});
   const excludeTools = buildExcludeTools(prepared.childConfig, opts.depth);
   const allow = childToolAllowlist(opts.tools, Boolean(opts.outputSchema));
   let model = undefined;
@@ -408,6 +417,8 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
     excludeTools,
     sessionStartEvent: { type: "session_start", reason: "startup" },
   });
+  attachModelCompactionControl(session, opts.cwd, budgetAgentDir);
+  attachUsageEntryTracking(session,getAgentDir());
   // 子会话也加载 MCP 扩展；绑定扩展前装上，首次投影的一批工具只刷新一次工具表。
   installToolRefreshBatching(session);
   // 子代理自己也能 working_directory / create_worktree，只换它自己的目录。

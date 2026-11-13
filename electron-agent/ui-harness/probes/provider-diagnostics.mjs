@@ -86,6 +86,7 @@ export default async function (t) {
   t.ok('完成后标题栏显示成功与总耗时', await t.waitForText(HEADER, '成功 · 1.83 s'))
   t.ok('指标含思考 tokens', ((await t.text('[data-testid="prov-diag-metrics"]')) ?? '').includes('思考 tokens30'))
   t.check('正文换成最终结果', await t.text('[data-testid="prov-diag-output"]'), 'I am Claude.')
+  t.check('测活结果不显示请求元数据面板', await t.count('[data-testid="request-observation-details"]'), 0)
   t.check(
     '完成后模型与档位解锁',
     await t.js(`['prov-diag-model', 'prov-diag-level'].map((id) => document.querySelector('[data-testid="' + id + '"]').closest('.ant-select').classList.contains('ant-select-disabled'))`),

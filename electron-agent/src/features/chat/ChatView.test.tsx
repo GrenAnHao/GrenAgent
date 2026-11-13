@@ -196,6 +196,7 @@ vi.mock('../../stores/AgentStoreContext', () => {
 state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => fn());
 
 import { ChatView, laneKey } from './ChatView';
+import { handleRunningEvent, isSessionRunning, resetRunningSessionsForTest } from '../../stores/runningSessions';
 import { useCommandInputStore } from '../../stores/commandInputStore';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { useUiPromptStore } from '../../stores/uiPromptStore';
@@ -284,6 +285,7 @@ describe('prompt overlay clearance', () => {
 
 afterEach(() => {
   cleanup();
+  resetRunningSessionsForTest();
   useCommandInputStore.setState({ bySession: {} });
   vi.useRealTimers();
   vi.clearAllMocks();
@@ -458,6 +460,135 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.piPrompt).toHaveBeenCalledTimes(1);
     expect(state.storeState.lastError).toBeUndefined();
     expect(state.storeState.retrying).toBeUndefined();
+  });
+
+  it('点停止立刻收掉本地运行态，并把侧栏那一行熄灭（不等后端终态事件）', async () => {
+    state.workspaceReady = true;
+    state.storeState = {
+      ...state.storeState,
+      messages: [{ kind: 'user', id: 'u1', text: 'hello' }],
+      isStreaming: true,
+      runActive: true,
+    };
+    state.sessionState.activeSessionPath = '/home/.pi/agent/works/u1/s.jsonl';
+    state.piAbort.mockResolvedValue({ stopped: true, aborted: true });
+    state.piTakeSteering.mockResolvedValue({ steering: [] });
+    // 先按 agent_start 点亮这一行，才能验证停止把它熄灭。
+    handleRunningEvent({
+      workspace: state.workspace,
+      sessionPath: '/home/.pi/agent/works/u1/s.jsonl',
+      event: { type: 'agent_start' },
+    } as never);
+    expect(isSessionRunning('/home/.pi/agent/works/u1/s.jsonl')).toBe(true);
+
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-abort'));
+    });
+
+    expect(state.piAbort).toHaveBeenCalledWith(state.workspace, '/home/.pi/agent/works/u1/s.jsonl');
+    // 侧栏不再转圈：熄灭在点下去的那一刻，不等 agent_end / agent_settled。
+    expect(isSessionRunning('/home/.pi/agent/works/u1/s.jsonl')).toBe(false);
+    expect(state.storeState.isStreaming).toBe(false);
+    expect(state.storeState.aborting).toBe(false);
+    expect(state.storeState.lastError).toBeUndefined();
+  });
+
+  it('后端说这一轮在窗口内没闲下来：仍收掉运行态，并如实提示', async () => {
+    state.workspaceReady = true;
+    state.storeState = {
+      ...state.storeState,
+      messages: [{ kind: 'user', id: 'u1', text: 'hello' }],
+      isStreaming: true,
+      runActive: true,
+    };
+    state.piAbort.mockResolvedValue({ stopped: true, aborted: true, reason: 'timeout', isStreaming: true });
+    state.piTakeSteering.mockResolvedValue({ steering: [] });
+
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-abort'));
+    });
+
+    expect(state.storeState.isStreaming).toBe(false);
+    expect(state.storeState.runActive).toBe(false);
+    expect(state.storeState.aborting).toBe(false);
+    expect(state.storeState.lastError).toContain('还没有结束');
+  });
+
+  it('停止超时不会丢掉已取出的引导：放回跟进队列', async () => {
+    state.workspaceReady = true;
+    state.storeState = {
+      ...state.storeState,
+      messages: [{ kind: 'user', id: 'u1', text: 'hello' }],
+      isStreaming: true,
+      runActive: true,
+      composerQueue: [],
+    };
+    state.piAbort.mockResolvedValue({ stopped: true, aborted: true, reason: 'timeout', isStreaming: true });
+    state.piTakeSteering.mockResolvedValue({ steering: ['排队的一句'] });
+
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-abort'));
+    });
+
+    const queue = (state.storeState as { composerQueue?: Array<{ text: string }> }).composerQueue ?? [];
+    expect(queue.map((item) => item.text)).toEqual(['排队的一句']);
+  });
+
+  it('连点停止只发一次 abort，收尾也只算一次', async () => {
+    state.workspaceReady = true;
+    state.storeState = {
+      ...state.storeState,
+      messages: [{ kind: 'user', id: 'u1', text: 'hello' }],
+      isStreaming: true,
+      runActive: true,
+    };
+    state.sessionState.activeSessionPath = '/home/.pi/agent/works/u1/s.jsonl';
+    let releaseAbort: (value: unknown) => void = () => {};
+    state.piAbort.mockImplementation(() => new Promise((resolve) => { releaseAbort = resolve; }));
+    state.piTakeSteering.mockResolvedValue({ steering: [] });
+
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-abort'));
+      fireEvent.click(screen.getByTestId('chat-abort'));
+      fireEvent.click(screen.getByTestId('chat-abort'));
+    });
+    expect(state.piAbort).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      releaseAbort({ stopped: true, aborted: true });
+    });
+    expect(state.piAbort).toHaveBeenCalledTimes(1);
+    expect(state.piTakeSteering).toHaveBeenCalledTimes(1);
+    expect(state.storeState.isStreaming).toBe(false);
+    expect(state.storeState.aborting).toBe(false);
+  });
+
+  it('执行已结束时再点停止：不发 abort，也不把会话标成在跑', async () => {
+    state.workspaceReady = true;
+    state.storeState = {
+      ...state.storeState,
+      messages: [{ kind: 'user', id: 'u1', text: 'hello' }, { kind: 'assistant', id: 'a1', text: 'done' }],
+      isStreaming: false,
+      runActive: false,
+    };
+    state.sessionState.activeSessionPath = '/home/.pi/agent/works/u1/s.jsonl';
+    // 空闲时的停止后端是幂等的（SDK 没有在跑的回合就立即返回）。
+    state.piAbort.mockResolvedValue({ stopped: true, aborted: true });
+    state.piTakeSteering.mockResolvedValue({ steering: [] });
+
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-abort'));
+    });
+
+    expect(state.storeState.isStreaming).toBe(false);
+    expect(state.storeState.runActive).toBe(false);
+    expect(state.storeState.aborting).toBe(false);
+    expect(state.storeState.lastError).toBeUndefined();
+    expect(isSessionRunning('/home/.pi/agent/works/u1/s.jsonl')).toBe(false);
   });
 
   it('用户点停止后空轮（无 error 事件）按中断处理，不报「本轮没有返回」', async () => {

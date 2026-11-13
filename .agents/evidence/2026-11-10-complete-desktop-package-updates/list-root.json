@@ -1,0 +1,78 @@
+{
+  "changes": [
+    {
+      "name": "observe-desktop-model-requests",
+      "completedTasks": 24,
+      "totalTasks": 24,
+      "lastModified": "2026-11-10T04:41:20.631Z",
+      "status": "complete"
+    },
+    {
+      "name": "complete-desktop-model-settings",
+      "completedTasks": 20,
+      "totalTasks": 20,
+      "lastModified": "2026-11-10T04:36:15.412Z",
+      "status": "complete"
+    },
+    {
+      "name": "complete-desktop-package-updates",
+      "completedTasks": 3,
+      "totalTasks": 28,
+      "lastModified": "2026-11-10T03:36:11.680Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "complete-desktop-session-workflows",
+      "completedTasks": 1,
+      "totalTasks": 35,
+      "lastModified": "2026-11-10T03:19:59.105Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "sync-wiki-and-cards-generation",
+      "completedTasks": 18,
+      "totalTasks": 18,
+      "lastModified": "2026-11-05T09:52:10.832Z",
+      "status": "complete"
+    },
+    {
+      "name": "retire-agentdata-and-split-wiki-codegraph",
+      "completedTasks": 34,
+      "totalTasks": 35,
+      "lastModified": "2026-11-05T02:06:38.674Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "harden-knowledge-card-json",
+      "completedTasks": 14,
+      "totalTasks": 14,
+      "lastModified": "2026-11-05T02:06:28.523Z",
+      "status": "complete"
+    },
+    {
+      "name": "fix-repo-wiki-and-codegraph-sync",
+      "completedTasks": 24,
+      "totalTasks": 24,
+      "lastModified": "2026-11-04T08:53:51.976Z",
+      "status": "complete"
+    },
+    {
+      "name": "retire-agentdata-task-surface",
+      "completedTasks": 27,
+      "totalTasks": 27,
+      "lastModified": "2026-11-03T18:46:20.596Z",
+      "status": "complete"
+    },
+    {
+      "name": "replicate-qoder-repowiki",
+      "completedTasks": 39,
+      "totalTasks": 41,
+      "lastModified": "2026-11-03T06:39:54.810Z",
+      "status": "in-progress"
+    }
+  ],
+  "root": {
+    "path": "D:\\OneDrive\\Project Files\\Pi",
+    "source": "nearest"
+  }
+}

@@ -184,21 +184,18 @@ describe("project", () => {
     expect(pi.registered).toEqual([]);
   });
 
-  it("authorizes MCP calls through Electron before invoking a server", async () => {
+  it("invokes the server directly; approval lives in the safety tool_call hook", async () => {
     const pi = fakeProjectPi();
     const manager = { callTool: vi.fn(async () => ({ text: 'x' })) };
-    const control = { request: vi.fn(async () => ({ status: 'denied' })) };
     const definitions: Array<{ name: string; execute: (...args: any[]) => Promise<any> }> = [];
     pi.registerTool = (tool: any) => definitions.push(tool);
-    project(pi as never, snap({ a: { status: 'connected', tools: ['x'] } }), manager as never, control as never);
+    project(pi as never, snap({ a: { status: 'connected', tools: ['x'] } }), manager as never);
 
-    const result = await definitions[0].execute('call', {}, undefined);
+    const result = await definitions[0].execute('call', { q: 1 }, undefined);
 
-    expect(control.request).toHaveBeenCalledWith('permission.authorize', expect.objectContaining({ operation: expect.objectContaining({ kind: 'mcp.call', server: 'a', toolName: 'x' }) }));
-    expect(manager.callTool).not.toHaveBeenCalled();
-    expect(result.details.error).toBe('denied');
-    expect(result.isError).toBe(true);
-    expect(result.content).toEqual([{ type: 'text', text: 'MCP 调用已被 Electron 权限策略拒绝' }]);
+    expect(manager.callTool).toHaveBeenCalledWith('a', 'x', { q: 1 });
+    expect(result.details).toEqual({ server: 'a', tool: 'x' });
+    expect(result.isError).toBe(false);
   });
 
   it("forwards isError from the manager result", async () => {
@@ -221,20 +218,18 @@ describe("project", () => {
     expect(result.content[0].text).toContain("bad");
   });
 
-  it("authorize 上报 ctx.cwd 而不是 process.cwd()", async () => {
+  it("does not fire a desktop preflight the host no longer serves", async () => {
     const pi = fakeProjectPi();
     const manager = { callTool: vi.fn(async () => ({ text: "x" })) };
-    const control = { request: vi.fn(async () => ({ status: "allowed" })) };
     const definitions: Array<{ name: string; execute: (...args: any[]) => Promise<any> }> = [];
     pi.registerTool = (tool: any) => definitions.push(tool);
-    project(pi as never, snap({ a: { status: "connected", tools: ["x"] } }), manager as never, control as never);
+    project(pi as never, snap({ a: { status: "connected", tools: ["x"] } }), manager as never);
 
-    await definitions[0].execute("call", {}, undefined, undefined, { cwd: "D:/proj-a" });
+    const result = await definitions[0].execute("call", {}, undefined, undefined, { cwd: "D:/proj-a" });
 
-    expect(control.request).toHaveBeenCalledWith(
-      "permission.authorize",
-      expect.objectContaining({ operation: expect.objectContaining({ workspace: "D:/proj-a" }) }),
-    );
+    expect(manager.callTool).toHaveBeenCalledWith("a", "x", {});
+    expect(result.isError).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("权限策略");
   });
 
   it("registers resource tools at the widest exposure when any resource server is direct", () => {
@@ -315,7 +310,6 @@ describe("project", () => {
       pi as never,
       snap({ a: { status: "connected", tools: ["x"] } }),
       fakeMgr(),
-      undefined,
       ["mcp__b__search"],
     );
 
@@ -332,7 +326,6 @@ describe("project", () => {
         b: { status: "connected", tools: ["search"], exposure: "deferred" },
       }),
       fakeMgr(),
-      undefined,
       kept,
     );
 
@@ -358,7 +351,6 @@ describe("project", () => {
         d: { status: "connecting", tools: [] },
       }),
       fakeMgr(),
-      undefined,
       ["mcp__b__search", "mcp__c__gone", "mcp__d__find"],
     );
 
@@ -394,9 +386,9 @@ describe("project 增量注册", () => {
     const pi = fakeProjectPi();
     const cache = new Map<string, string>();
     const s = snap({ a: { status: "connected", tools: ["x", "y"] }, r: { status: "connected", tools: [], resources: true } });
-    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    project(pi as never, s, fakeMgr(), [], cache);
     const first = pi.registered.length;
-    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    project(pi as never, s, fakeMgr(), [], cache);
     expect(first).toBe(2 + RESOURCE_TOOLS.length);
     expect(pi.registered).toHaveLength(first);
   });
@@ -404,24 +396,24 @@ describe("project 增量注册", () => {
   it("只有定义变了的工具重新注册", () => {
     const pi = fakeProjectPi();
     const cache = new Map<string, string>();
-    project(pi as never, snap({ a: { status: "connected", tools: ["x", "y"] } }), fakeMgr(), undefined, [], cache);
-    project(pi as never, snap({ a: { status: "connected", tools: ["x", "y"], toolExposure: { y: "direct" } } }), fakeMgr(), undefined, [], cache);
+    project(pi as never, snap({ a: { status: "connected", tools: ["x", "y"] } }), fakeMgr(), [], cache);
+    project(pi as never, snap({ a: { status: "connected", tools: ["x", "y"], toolExposure: { y: "direct" } } }), fakeMgr(), [], cache);
     expect(pi.registered).toEqual(["mcp__a__x", "mcp__a__y", "mcp__a__y"]);
   });
 
   it("服务器连接中 / 断开再连回同样的工具，都不重新注册", () => {
     const pi = fakeProjectPi();
     const cache = new Map<string, string>();
-    project(pi as never, snap({ a: { status: "connected", tools: many(50) } }), fakeMgr(), undefined, [], cache);
-    project(pi as never, snap({ a: { status: "connecting", tools: [] } }), fakeMgr(), undefined, [], cache);
-    project(pi as never, snap({}), fakeMgr(), undefined, [], cache);
-    project(pi as never, snap({ a: { status: "connected", tools: many(50) } }), fakeMgr(), undefined, [], cache);
+    project(pi as never, snap({ a: { status: "connected", tools: many(50) } }), fakeMgr(), [], cache);
+    project(pi as never, snap({ a: { status: "connecting", tools: [] } }), fakeMgr(), [], cache);
+    project(pi as never, snap({}), fakeMgr(), [], cache);
+    project(pi as never, snap({ a: { status: "connected", tools: many(50) } }), fakeMgr(), [], cache);
     expect(pi.registered).toHaveLength(50);
   });
 
   it("一次投影里注册再多工具，工具表也只刷新一次", () => {
     const pi = piWithRefreshCount();
-    project(pi as never, snap({ a: { status: "connected", tools: many(300) }, b: { status: "connected", tools: many(20) } }), fakeMgr(), undefined, [], new Map());
+    project(pi as never, snap({ a: { status: "connected", tools: many(300) }, b: { status: "connected", tools: many(20) } }), fakeMgr(), [], new Map());
     expect(pi.registered).toHaveLength(320);
     expect(pi.session.refreshes).toBe(1);
   });
@@ -430,9 +422,9 @@ describe("project 增量注册", () => {
     const pi = piWithRefreshCount();
     const cache = new Map<string, string>();
     const s = snap({ a: { status: "connected", tools: ["x"] } });
-    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    project(pi as never, s, fakeMgr(), [], cache);
     const afterFirst = pi.setCalls;
-    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    project(pi as never, s, fakeMgr(), [], cache);
     expect(afterFirst).toBe(1);
     expect(pi.setCalls).toBe(1);
     expect(pi.active).toEqual(["codemode"]);

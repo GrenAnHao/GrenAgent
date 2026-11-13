@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Empty, Listy, Segmented, Typography } from 'antd';
+import { Box, Braces, ListTree, Shapes, Variable } from 'lucide-react';
 import { agentDataApi, type CodeTool } from '../../lib/agentData';
+import FileIcon from '../../components/FileIcon';
 import { CODE_PAGE_SIZE, decodeCodeResult, retainedCodeResult, type CodeResultRow, type CodeResultView } from './codeResult';
 import { codeStyles as styles } from './codeStyles';
 import { listRowStyles as rows } from './listRowStyles';
@@ -12,8 +14,8 @@ const relationTabs = [
   { tool: 'codegraph_impact', label: '影响' },
 ] as const;
 type RelationTool = typeof relationTabs[number]['tool'];
-// Listy 自带的条目内边距交给行本身，否则可点区域会比条目小一圈。
-const listyItemFlush = { item: { padding: 0 } };
+// Listy 自带的条目内边距和分隔线交给行本身：圆角 hover/选中态不需要条目间的硬分隔。
+const listyItemFlush = { item: { padding: 0, borderBottom: 'none' } };
 /** 原始结果展开后最多显示的字符数，超出部分截断并注明。 */
 const RAW_PREVIEW_LIMIT = 200_000;
 
@@ -40,7 +42,7 @@ export function CodeRelations({ workspace, symbol, nodeId, file, visible, reload
     return () => { epoch.current++; };
   }, [workspace, symbol, nodeId, file, tab, key, visible, reloadVersion]);
 
-  return <section aria-label="代码关系">
+  return <section aria-label="代码关系" className={styles.relations}>
     <Segmented id="code-relations" size="small" value={tab} onChange={(next) => { if (next !== tab) { epoch.current++; setTab(next as RelationTool); } }} options={relationTabs.map((item) => ({ value: item.tool, label: item.label }))} />
     <Typography.Text type="secondary">当前符号：{symbol}{file ? ` · ${file}` : ' · 未提供文件位置'}</Typography.Text>
     {current?.loading ? <Typography.Text type="secondary" role="status">正在查询关系…</Typography.Text> : null}
@@ -92,14 +94,25 @@ function ResultRows({ items, onSelect, selected, tool, more }: ResultRowsProps) 
       styles={listyItemFlush}
       itemRender={(row: CodeResultRow & { rowKey: string }) => {
         // 不能包成 Fragment：antd Button 会把 Fragment 整体包进一个 span，行内元素就不再纵向堆叠。
+        // 文件浏览行（codegraph_files）没有行号是正常的，不必显示「未提供行号」；符号/关系行缺少行号才提示。
+        const lineText = row.line !== undefined ? `第 ${row.line} 行` : tool === 'codegraph_files' ? null : '未提供行号';
+        const fileName = row.file ? row.file.replace(/\\/g, '/').split('/').pop() || row.file : undefined;
         const content = [
-          <Typography.Text key="name" strong>{row.symbol ?? row.file}</Typography.Text>,
-          row.symbol ? <Typography.Text key="file" type="secondary" style={{ fontSize: 12 }}>{row.file ?? '未提供文件位置'}</Typography.Text> : null,
-          <Typography.Text key="line" type="secondary" style={{ fontSize: 12 }}>{row.line === undefined ? '未提供行号' : `第 ${row.line} 行`}</Typography.Text>,
-          row.snippet ? <Typography.Text key="snippet">{row.snippet}</Typography.Text> : null,
+          <span key="icon" className={rows.icon}>
+            {row.symbol ? <SymbolIcon kind={row.kind} /> : row.file ? <FileIcon fileName={fileName ?? row.file} size={18} /> : null}
+          </span>,
+          <span key="body" className={rows.body}>
+            <Typography.Text strong className={rows.title}>{row.symbol ?? fileName ?? row.file}</Typography.Text>
+            {row.symbol ? <span className={rows.path} title={row.file}>{row.file ?? '未提供文件位置'}</span> : row.file !== fileName ? <span className={rows.path} title={row.file}>{row.file}</span> : null}
+            {lineText || (row.symbol && row.kind) || row.snippet ? <span className={rows.meta}>
+              {lineText ? <span className={rows.metaItem}>{lineText}</span> : null}
+              {row.symbol && row.kind ? <span className={rows.kind}>{row.kind}</span> : null}
+              {row.snippet ? <span className={rows.snippet} title={row.snippet}>{row.snippet}</span> : null}
+            </span> : null}
+          </span>,
         ];
         return onSelect
-          ? <Button block type="text" className={`${rows.row} ${rows.flush}`} aria-pressed={selected?.file === row.file && selected?.symbol === row.symbol && selected?.line === row.line} onClick={(event) => onSelect(row as CodeResultRow, event.currentTarget)}>{content}</Button>
+          ? <Button block type="text" className={rows.row} aria-pressed={selected?.file === row.file && selected?.symbol === row.symbol && selected?.line === row.line} onClick={(event) => onSelect(row as CodeResultRow, event.currentTarget)}>{content}</Button>
           : <div className={rows.row}>{content}</div>;
       }}
     />
@@ -108,6 +121,11 @@ function ResultRows({ items, onSelect, selected, tool, more }: ResultRowsProps) 
       <Button block type="text" aria-disabled={loading || undefined} style={loading ? { cursor: 'progress', opacity: 0.6 } : undefined} onClick={loading ? undefined : showMore}>{loading ? '正在加载…' : `显示更多（还有 ${remaining} 项）`}</Button>
     </div> : null}
   </div>;
+}
+
+function SymbolIcon({ kind }: { kind?: string }) {
+  const Icon = kind === 'class' ? Box : kind === 'interface' ? Shapes : kind === 'enum' ? ListTree : kind === 'variable' || kind === 'const' ? Variable : Braces;
+  return <Icon size={15} />;
 }
 
 /** 展开才序列化：折叠着的 details 内容照样在 DOM 里，几万行的结果每次渲染都 stringify 一遍代价不小。 */

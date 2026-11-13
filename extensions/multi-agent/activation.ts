@@ -1,3 +1,8 @@
+import {join} from "node:path";
+import {guardModelInputLimits} from "../../cli/src/model-input-limits.js";
+import { attachModelCompactionControl } from '../../cli/src/model-compaction-control.js';
+import {observeModelRuntime} from '../../cli/src/observed-model-runtime.js';
+import {attachUsageEntryTracking} from '../usage-ledger/liveUsage.js';
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -888,13 +893,15 @@ export async function openResumedChildSession(
     cwd,
   });
   const modelRuntime = sharedModelRuntime();
+  const budgetAgentDir = getAgentDir();
   const services = await runInWorkspace(domain, () =>
     createAgentSessionServices({
       cwd,
-      agentDir: getAgentDir(),
+      agentDir: budgetAgentDir,
       ...(modelRuntime ? { modelRuntime } : {}),
     }),
   );
+  services.modelRuntime=guardModelInputLimits(observeModelRuntime(services.modelRuntime,{identity:()=>({sessionId:sessionManager.getSessionId(),sessionPath:sessionManager.getSessionFile()})}),{modelsPath:join(getAgentDir(),"models.json")});
   // Ultra 续聊沿用会话记录里的模型（不自动换模）；普通旧恢复保持原行为，不显式传模型。
   // 档位不在这里传：SDK 按会话里的记录恢复，已被选模钳制过一次的不会被重新放大。
   const resumedModel =
@@ -919,6 +926,8 @@ export async function openResumedChildSession(
       ...(resumedModel ? { model: resumedModel } : {}),
     }),
   );
+  attachModelCompactionControl(session, cwd, budgetAgentDir);
+  attachUsageEntryTracking(session,getAgentDir());
   installToolRefreshBatching(session);
   // 子会话切过工作目录的，按会话里的 working_directory 记录原地切回去。
   attachSessionCwd(session);

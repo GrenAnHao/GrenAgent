@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Input, Typography } from 'antd';
+import { Alert, Button, Input, Tooltip, Typography } from 'antd';
+import { Copy, ExternalLink } from 'lucide-react';
 import { files } from '../../lib/files';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { openPath } from '../../platform/runtime';
@@ -84,29 +85,23 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, reload
     catch (cause) { setActionError({ key, message: `复制路径失败：${errorText(cause)}` }); }
   }
 
-  return <section className={styles.card} aria-label="源码预览">
-    <div className={styles.heading}><Typography.Title level={5} style={{ margin: 0 }}>{currentSource?.relative ?? file}</Typography.Title>{onClose ? <Button onClick={onClose}>关闭源码</Button> : null}</div>
-    <Typography.Text type="secondary" style={{ fontSize: 12 }}>项目根目录：{workspace}</Typography.Text>
-    <div className={styles.toolbar}>
+  return <section className={styles.sourceCard} aria-label="源码预览">
+    <div className={styles.sourceToolbar}>
+      <span className={styles.sourceStats}>{currentSource ? `${lines.length} 行 · 只读` : '只读'}</span>
+      <Input size="small" style={{ width: 72 }} aria-label="行号" inputMode="numeric" placeholder="行号" value={jumpInput} onChange={(event) => setJumpInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') jumpToLine(); }} disabled={!currentSource} />
+      <Button size="small" onClick={jumpToLine} disabled={!currentSource}>跳转到行</Button>
+      <span className={styles.toolbarSpacer} />
       {validatedSource ? <>
-        <Button onClick={() => void copyPath()}>复制相对路径</Button>
-        <Button onClick={() => void openFile()}>使用系统打开文件</Button>
+        <Tooltip title="复制相对路径"><Button type="text" size="small" aria-label="复制相对路径" icon={<Copy size={14} />} onClick={() => void copyPath()} /></Tooltip>
+        <Tooltip title="使用系统打开文件（不保证定位行号）"><Button type="text" size="small" aria-label="使用系统打开文件" icon={<ExternalLink size={14} />} onClick={() => void openFile()} /></Tooltip>
       </> : null}
+      {onClose ? <Button size="small" onClick={onClose}>关闭源码</Button> : null}
     </div>
-    <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>行号定位在本预览中完成；系统打开文件不保证定位行号。</Typography.Paragraph>
     {state?.error ? <Alert type="error" showIcon title={`${state.error}${currentSource ? ' 当前显示上次成功读取的内容。' : ''}`} /> : null}
     {actionError?.key === key ? <Alert type="error" showIcon title={actionError.message} /> : null}
     {state?.loading ? <Typography.Text type="secondary" role="status">{currentSource ? '正在重新读取源码…' : '正在读取源码…'}</Typography.Text> : null}
-    {!hasLine ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>未提供行号</Typography.Text> : null}
     {hasLine && currentSource && !target ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>索引行号已超出文件范围</Typography.Text> : null}
-    {currentSource ? <>
-      <div className={styles.toolbar}>
-        <Input style={{ flex: '0 1 120px' }} aria-label="行号" inputMode="numeric" value={jumpInput} onChange={(event) => setJumpInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') jumpToLine(); }} />
-        <Button onClick={jumpToLine}>跳转到行</Button>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{lines.length} 行 · 只读</Typography.Text>
-      </div>
-      <CodeSourceLines ref={sourceLines} lines={lines} target={target} />
-    </> : null}
+    {currentSource ? <CodeSourceLines ref={sourceLines} lines={lines} target={target} path={file} /> : null}
   </section>;
 }
 

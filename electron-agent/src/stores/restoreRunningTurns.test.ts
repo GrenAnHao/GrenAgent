@@ -72,6 +72,15 @@ describe('restoreRunningTurns', () => {
     expect(useAgentRegistryStore.getState().runningSessionPaths).toEqual(['/proj/s1.jsonl']);
   });
 
+  it('快照里没有它、等待期间它自己也没动：熄灭（同项目别的会话在跑也算）', async () => {
+    handleRunningEvent({ workspace: '/proj', sessionPath: '/proj/stale.jsonl', event: { type: 'agent_start' } } as never);
+    // 同一项目里另一份会话开始了：项目级纪元变了，但不能因此保住 stale.jsonl 的陈旧条目。
+    handleRunningEvent({ workspace: '/proj', sessionPath: live.sessionPath, event: { type: 'agent_start' } } as never);
+    listRunningTurns.mockResolvedValue([live]);
+    await restoreRunningTurns();
+    expect(useAgentRegistryStore.getState().runningSessionPaths).toEqual(['/proj/s1.jsonl']);
+  });
+
   it('等快照期间后台会话 agent_settled，过期快照不能把它重新点亮', async () => {
     let resolve!: (turns: RunningTurn[]) => void;
     listRunningTurns.mockReturnValue(new Promise<RunningTurn[]>((r) => { resolve = r; }));

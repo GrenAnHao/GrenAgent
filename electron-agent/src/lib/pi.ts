@@ -1,3 +1,5 @@
+import type { SessionWorkflowRequest, SessionWorkflowAck } from '../../electron/app/sessionWorkflowContracts';
+import type { ModelBudgetState, ModelCompactionPatch, BudgetSyncResult } from '../../../extensions/_shared/model-compaction-budgets';
 import { Channel, invoke, listen, type UnlistenFn } from '../platform/runtime';
 import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
@@ -14,6 +16,8 @@ import {
 } from '../../electron/app/attentionContract';
 export type { AttentionKind, AttentionNotifyInput, AttentionNotifyResult } from '../../electron/app/attentionContract';
 export type PackageInstallScope = 'user' | 'project';
+import type { BuiltinModelInfo } from '../../../cli/src/builtin-models';
+export type { BuiltinModelInfo } from '../../../cli/src/builtin-models';
 
 export interface PiEventEnvelope {
   workspace: string;
@@ -104,6 +108,13 @@ export interface ProviderConfigPayload {
   authJson: string | null;
   agentDir: string;
 }
+
+/** 凭据状态、OAuth 能力与登录事件的类型与主进程服务共用同一份定义。 */
+export type {
+  ProviderCredentialStatus,
+  ProviderOAuthCapability,
+  ProviderLoginUiEvent,
+} from '../../electron/app/providerService';
 
 export type McpConfigScope = 'settings' | 'global' | 'project';
 
@@ -258,6 +269,7 @@ function target(sessionPath?: string | null): { targetSessionPath?: string } {
 }
 
 export const pi = {
+  sessionWorkflow: (workspace: string, request: SessionWorkflowRequest) => invoke<SessionWorkflowAck>('agent_session_workflow', {workspace,...request}),
   openWorkspace:(workspace: string) =>
     invoke<OpenWorkspaceResult>('open_workspace', { workspace }),
   closeWorkspace: (workspace: string) => invoke<void>('close_workspace', { workspace }),
@@ -276,8 +288,15 @@ export const pi = {
       streamingBehavior,
       ...target(targetSessionPath),
     }),
+  /**
+   * 停止这一轮。回执带 `stopped`：即使会话已不在任何 handle 上（没有可停的回合）也返回 true；
+   * `reason: 'timeout'` 表示中止请求已发出、但这一轮在窗口内仍没闲下来。
+   */
   abort: (workspace: string, targetSessionPath?: string | null) =>
-    invoke<unknown>('agent_abort', { workspace, ...target(targetSessionPath) }),
+    invoke<{ stopped?: boolean; aborted?: boolean; reason?: 'timeout'; isStreaming?: boolean } | undefined>(
+      'agent_abort',
+      { workspace, ...target(targetSessionPath) },
+    ),
   /** 暂停后取走尚未注入的引导，跟进队列原样放回。 */
   takeSteering: (workspace: string, targetSessionPath?: string | null) =>
     invoke<{ steering: string[] }>('agent_take_steering', { workspace, ...target(targetSessionPath) }),
@@ -392,6 +411,8 @@ export const pi = {
     invoke<void>('ask_user_draft_delete', { workspace }),
   completeAskUser: (workspace: string, toolCallId: string, value?: string, cancelled?: boolean) =>
     invoke<'ok' | 'duplicate'>('agent_complete_ask_user', { workspace, toolCallId, value, cancelled }),
+  requestObservation: <T=unknown>(params:Record<string,unknown>)=>invoke<T>('request_observation',params),
+  exportRequestObservation:(previewId:string)=>invoke<{saved:boolean}>('export_request_observation',{previewId}),
   getUsageReport: () => invoke<UsageReport>('usage_report'),
   /** 把会话目录里账本没有的调用补进用量账本（命令行 pi、记账上线前的会话）。 */
   reconcileUsage: () => invoke<{ files: number; added: number }>('usage_reconcile'),
@@ -400,6 +421,12 @@ export const pi = {
   createImage: (workspace: string, name: string) =>
     invoke<string>('create_image', { workspace, name }),
   getSettings: () => invoke<Record<string, string>>('get_settings'),
+  getModelCompactionBudgets: () => invoke<ModelBudgetState>('get_model_compaction_budgets'),
+  patchModelCompactionBudget: (provider: string, modelId: string, patch: ModelCompactionPatch) => invoke<ModelBudgetState>('patch_model_compaction_budget', { provider, modelId, patch }),
+  clearModelCompactionBudget: (key: string) => invoke<ModelBudgetState>('clear_model_compaction_budget', { key }),
+  syncModelCompactionBudgets: () => invoke<BudgetSyncResult>('sync_model_compaction_budgets'),
+  getCacheWarming: () => invoke<string>('get_cache_warming'),
+  setCacheWarming: (mode: string) => invoke<void>('set_cache_warming', { mode }),
   setSettings: (settings: Record<string, string>) =>
     invoke<void>('set_settings', { settings }),
   listMcpConfigs: (workspace: string) =>
@@ -429,13 +456,26 @@ export const pi = {
   getModelFastPreferences: () => invoke<Record<string, boolean>>('get_model_fast_preferences'),
   setModelFastPreference: (provider: string, modelId: string, enabled: boolean) =>
     invoke<Record<string, boolean>>('set_model_fast_preference', { provider, modelId, enabled }),
-  setProviderConfig: (modelsJson: string, authJson: string) =>
-    invoke<RefreshResult>('set_provider_config', { modelsJson, authJson }),
+  setProviderConfig: (modelsJson: string) =>
+    invoke<RefreshResult>('set_provider_config', { modelsJson }),
+  setProviderApiKey: (provider: string, apiKey: string | null) =>
+    invoke<void>('set_provider_api_key', { provider, apiKey }),
+  getProviderCredentials: () => invoke<ProviderCredentialStatus[]>('get_provider_credentials'),
+  getProviderOAuthCapabilities: () => invoke<ProviderOAuthCapability[]>('get_provider_oauth_capabilities'),
+  /** 登录是长 Promise：过程事件走 onEvent，取消用 cancelProviderLogin。 */
+  startProviderLogin: (provider: string, onEvent: Channel<ProviderLoginUiEvent>) =>
+    invoke<void>('provider_login', { provider, onEvent }),
+  respondProviderLoginPrompt: (promptId: string, value: string) =>
+    invoke<void>('provider_login_prompt', { promptId, value }),
+  cancelProviderLogin: (loginId: string) => invoke<void>('provider_login_cancel', { loginId }),
+  logoutProvider: (provider: string) => invoke<void>('provider_logout', { provider }),
   refreshModelRegistry: () => invoke<RefreshResult>('refresh_model_registry'),
   fetchProviderModels: (baseUrl: string, apiKey: string, api: string, headers?: Record<string, string>) =>
     invoke<string[]>('fetch_provider_models', { baseUrl, apiKey, api, headers }),
   /** 项目无关地列出运行时解析后的模型（probe-models 子命令）：未打开项目 / 冷启动 / 真对话模式可用。 */
   listModelsGlobal: () => invoke<unknown>('list_models_global'),
+  /** SDK 内置聊天默认值（非账号权限目录）；不含用户覆盖、连接地址或凭据。 */
+  listBuiltinModels: (provider: string) => invoke<BuiltinModelInfo[]>('list_builtin_models', { provider }),
   /** Mermaid 渲染失败时的非流式一次性修复：用当前会话模型生成修正后的 mermaid 代码（不进对话历史）。 */
   fixMermaid: (workspace: string, code: string, error: string) =>
     invoke<string>('fix_mermaid_diagram', { workspace, code, error }),

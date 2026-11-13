@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 vi.mock('@lobehub/ui', () => ({
@@ -108,6 +108,7 @@ vi.mock('antd', async (importOriginal) => {
 
 import { useSessionPreferencesStore, resetSessionPreferencesForTests } from '../../../../stores/sessionPreferencesStore';
 import { useFastModeStore } from '../../../../stores/fastModeStore';
+import { useModelVisibilityStore, MODEL_VISIBILITY_STORAGE_KEY } from '../../../../stores/modelVisibilityStore';
 import ModelThinkingAction, {
   peekComposerLevel,
   peekComposerModel,
@@ -125,6 +126,8 @@ const prefs = (patch: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.removeItem(MODEL_VISIBILITY_STORAGE_KEY);
+  useModelVisibilityStore.setState({ hidden: [] });
   resetSessionPreferencesForTests();
   resetModelThinkingCacheForTests();
   sessionState.draftConversationCwd = null;
@@ -141,6 +144,42 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+describe('ModelThinkingAction manual visibility', () => {
+  it('hides all candidates reactively without changing current model abilities, Fast or saved preferences', async () => {
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    piMock.getState.mockResolvedValue({ sessionFile: '/ws/a.jsonl', preferences: prefs({ fastMode: true }) });
+    const { container } = render(<ModelThinkingAction />);
+    await waitFor(() => expect(screen.getByTestId('model-trigger').textContent).toContain('My Model'));
+    act(() => {
+      for (const m of DEFAULT_MODELS) useModelVisibilityStore.getState().setHidden(String(m.provider), String(m.id), true);
+    });
+    expect(container.querySelectorAll('button[data-model-id]')).toHaveLength(0);
+    expect(screen.getByText('无匹配模型')).toBeTruthy();
+    expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    expect(screen.getByTestId('model-trigger').textContent).toContain('· 中');
+    expect(screen.getByTestId('model-fast-toggle')).toBeTruthy();
+    expect(screen.getByTestId('model-trigger-fast').textContent).toContain('快速');
+    expect(piMock.setModel).not.toHaveBeenCalled();
+    expect(piMock.setThinkingLevel).not.toHaveBeenCalled();
+    expect(modelsState.list).toHaveLength(3);
+    act(() => useModelVisibilityStore.getState().setHidden('openai', 'g', false));
+    expect(container.querySelectorAll('button[data-model-id]')).toHaveLength(1);
+  });
+
+  it('uses a hidden explicit default to initialise a draft from the raw catalog', async () => {
+    sessionState.draftConversationCwd = '/ws';
+    sessionState.draftConversationId = 'draft:hidden';
+    useModelVisibilityStore.getState().setHidden('openai', 'plain', true);
+    piMock.getSessionDefaults.mockResolvedValue({ revision: 0 });
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'openai/plain' });
+    const { container } = render(<ModelThinkingAction />);
+    await waitFor(() => expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'plain' }));
+    expect(container.querySelector('button[data-model-id="plain"]')).toBeNull();
+    expect(screen.getByTestId('model-trigger').textContent).toContain('Plain');
+    expect(piMock.setModel).not.toHaveBeenCalled();
+  });
+});
 
 describe('ModelThinkingAction reads the session snapshot', () => {
   it('shows the saved model and level for the current session without writing them back', async () => {

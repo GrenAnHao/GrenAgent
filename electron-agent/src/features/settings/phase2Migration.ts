@@ -15,7 +15,8 @@ const CAPS: CapKeys[] = [
 export interface Phase2MigrationResult {
   nextSettings: Record<string, string>;
   modelsJson: string;
-  authJson: string;
+  /** 内置供应商要写入官方凭据存储的 API Key；由调用方逐个调 setProviderApiKey。 */
+  apiKeys: Record<string, string>;
   changed: boolean;
 }
 
@@ -32,6 +33,7 @@ export function migratePhase2(
 ): Phase2MigrationResult {
   let providers = loadState(modelsJson, authJson, PROVIDER_PRESETS);
   const next = { ...settings };
+  const apiKeys: Record<string, string> = {};
   let changed = false;
 
   for (const cap of CAPS) {
@@ -66,9 +68,7 @@ export function migratePhase2(
     }
 
     const target = providers.find((p) => p.id === providerId);
-    if (target && target.builtIn && !target.apiKey) {
-      providers = providers.map((p) => (p.id === providerId ? { ...p, apiKey: oldKey } : p));
-    }
+    if (target && target.builtIn && !target.apiKey) apiKeys[providerId] = oldKey;
 
     next[cap.provider] = providerId;
     if (oldModel) next[cap.model] = oldModel;
@@ -78,5 +78,5 @@ export function migratePhase2(
   }
 
   const ser = serializeState(providers);
-  return { nextSettings: next, modelsJson: ser.modelsJson, authJson: ser.authJson, changed };
+  return { nextSettings: next, modelsJson: ser.modelsJson, apiKeys, changed };
 }

@@ -111,6 +111,7 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
         await whenRunning('pi.closeWorkspace', { workspace }, null);
         tracker.close(workspace);
       },
+      sessionWorkflow: (workspace: string, requestInput: import('../app/sessionWorkflowContracts').SessionWorkflowRequest) => touching(workspace, request<import('../app/sessionWorkflowContracts').SessionWorkflowAck>('pi.sessionWorkflow', {workspace,request:requestInput})),
       respondUi: (workspace: string, response: Record<string, unknown>) => request('pi.respondUi', { workspace, response }),
       send: (workspace: string, command: string, args: Record<string, unknown>) =>
         touching(workspace, request('pi.send', { workspace, command, args })),
@@ -118,6 +119,9 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
         (await whenRunning<string | null>('pi.permissionProfile', { workspace, ...(sessionId ? { sessionId } : {}) }, null)) ?? undefined,
       refreshModelRegistry: () => whenRunning<{ refreshed: string[]; failed: Array<{ workspace: string; error: string }> }>(
         'pi.refreshModelRegistry', {}, { refreshed: [], failed: [] },
+      ),
+      syncModelCompactionBudgets: () => whenRunning<import('../../../extensions/_shared/model-compaction-budgets.js').BudgetSyncResult>(
+        'pi.syncModelCompactionBudgets', {}, { sessions: [] },
       ),
       enqueueTurn: (workspace: string, input: string, permissionProfile: string, session?: SessionContext) =>
         touching(workspace, request('pi.enqueueTurn', { workspace, input, permissionProfile, ...(session ? { session } : {}) })),
@@ -163,6 +167,7 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
     extensions: {
       catalog: () => request<ExtensionCatalogEntry[]>('extensions.catalog'),
     },
+    observations:{command:(params:Record<string,unknown>)=>request<any>('observations.command',params)},
     // 用量账本在 agent-host 里查：同步 sqlite 和历史导入都不占主进程。
     usage: {
       report: () => request<UsageReport>('usage.report'),
@@ -184,3 +189,4 @@ function record(params: Record<string, unknown>, key: string): Record<string, un
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${key} must be an object`);
   return value as Record<string, unknown>;
 }
+

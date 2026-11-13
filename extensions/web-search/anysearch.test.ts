@@ -169,10 +169,10 @@ describe("formatAnySearch", () => {
 });
 
 describe("AnySearch tools", () => {
-  function tools(guard = vi.fn(async () => undefined), fetchImpl = vi.fn(async () => ok({ results: [] }))) {
+  function tools(fetchImpl = vi.fn(async () => ok({ results: [] }))) {
     const map = new Map<string, { parameters: { properties: Record<string, unknown> }; execute: (...a: any[]) => Promise<any> }>();
-    registerAnySearchTools({ registerTool: (t: never) => map.set((t as { name: string }).name, t) } as never, guard as never, fetchImpl as never);
-    return { map, guard, fetchImpl };
+    registerAnySearchTools({ registerTool: (t: never) => map.set((t as { name: string }).name, t) } as never, fetchImpl as never);
+    return { map, fetchImpl };
   }
 
   it("registers the two tools with the documented parameter names", () => {
@@ -188,17 +188,17 @@ describe("AnySearch tools", () => {
     expect(Object.keys(map.get("anysearch_sub_domains")!.parameters.properties)).toEqual(["domains"]);
   });
 
-  it("does not call the network when the desktop guard denies", async () => {
-    const denied = { content: [{ type: "text", text: "denied" }], details: { error: "network_denied" } };
-    const { map, fetchImpl } = tools(vi.fn(async () => denied) as never);
+  it("calls the network when no desktop preflight exists", async () => {
+    const fetchImpl = vi.fn(async () => ok({ results: [{ title: "T", url: "https://u.example", snippet: "s" }] }));
+    const { map } = tools(fetchImpl);
     const result = await map.get("anysearch_search")!.execute("c1", { query: "x" }, undefined, undefined, { cwd: "D:/repo" });
-    expect(result).toBe(denied);
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(result.details.count).toBe(1);
   });
 
   it("returns provider / count / results details that the search card reads", async () => {
     const fetchImpl = vi.fn(async () => ok({ results: [{ title: "T", url: "https://u.example", snippet: "s" }] }));
-    const { map } = tools(vi.fn(async () => undefined), fetchImpl);
+    const { map } = tools(fetchImpl);
     const result = await map.get("anysearch_search")!.execute("c2", { query: "hello" }, undefined, undefined, { cwd: "D:/repo" });
     expect(result.details).toMatchObject({
       query: "hello",
@@ -210,7 +210,7 @@ describe("AnySearch tools", () => {
 
   it("turns API errors into a result with details.error instead of throwing", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(429, { code: -1, message: "slow down", request_id: "r" }));
-    const { map } = tools(vi.fn(async () => undefined), fetchImpl);
+    const { map } = tools(fetchImpl);
     const result = await map.get("anysearch_search")!.execute("c3", { query: "x" }, undefined, undefined, { cwd: "D:/repo" });
     expect(result.details.error).toContain("限流");
     expect(result.details.status).toBe(429);

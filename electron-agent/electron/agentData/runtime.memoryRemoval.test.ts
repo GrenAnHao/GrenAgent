@@ -16,18 +16,19 @@ describe('retired Memory RPCs', () => {
       for (const method of ['memory.list', 'memory.create', 'memory.update', 'memory.conversations.list']) {
         await expect(runtime.requestAdmin(method, params)).rejects.toThrow('METHOD_NOT_FOUND');
       }
-      await expect(host.request('admin.config.update', { module: 'memory', value: { enabled: true }, version: 0 })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
-      await expect(host.request('admin.jobs.create', { kind: 'memory_extract', workspace: '/repo' })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
-      await host.request('admin.import', { data: { configs: { memory: { version: 1, value: { enabled: true } }, codeRetrieval: { version: 1, value: { enabled: true } } } } });
-      const exported = await host.request<{ jobs: unknown[]; configs: Record<string, unknown> }>('admin.export');
-      expect(exported.jobs).toEqual([]);
-      expect(exported.configs).toHaveProperty('codeRetrieval');
-      expect(exported.configs).not.toHaveProperty('memory');
-      await expect(runtime.requestAdmin('wiki.create', { name: 'Keep Wiki' })).resolves.toMatchObject({ name: 'Keep Wiki' });
-      await expect(project.request('wiki.list')).resolves.toEqual([expect.objectContaining({ name: 'Keep Wiki' })]);
+      // config/import/export 与资料 Wiki RPC 已随任务面下线：整个入口返回 METHOD_NOT_FOUND，
+      // 记忆不可能经它们回流。
+      for (const [method, args] of [
+        ['admin.config.update', { module: 'memory', value: { enabled: true }, version: 0 }],
+        ['admin.jobs.create', { kind: 'memory_extract', workspace: '/repo' }],
+        ['admin.import', { data: {} }],
+        ['admin.export', {}],
+        ['wiki.create', { name: 'Keep Wiki' }],
+      ] as const) {
+        // wiki.* 在项目连接上是 FORBIDDEN（管理受限），其余是 METHOD_NOT_FOUND；两者都意味着能力不可达。
+        await expect(host.request(method, args as never)).rejects.toMatchObject({ code: expect.stringMatching(/METHOD_NOT_FOUND|FORBIDDEN/) });
+      }
       await expect(host.request('thread.list')).resolves.toEqual([]);
-      const overview = await runtime.requestAdmin('admin.overview');
-      expect(overview).not.toHaveProperty('recentMemories');
     } finally {
       await host.close();
       await project.close();

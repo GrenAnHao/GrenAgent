@@ -30,8 +30,6 @@ function workspaceBasename(path: string): string {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 }
 export function resourceNavigation(resource: ResourceRef): ResourceNavigation {
-  if (resource.type === 'repoWiki') return { view: 'repoWiki', workspace: resource.id, ...(resource.language ? { language: resource.language } : {}) };
-  if (resource.type === 'wiki') return { view: 'wiki', kbId: resource.id };
   return { view: 'code', workspace: resource.id };
 }
 

@@ -126,18 +126,6 @@ function buildInventory() {
   const installed = readInstalledProductionPackages()
     .filter((entry) => !isExcluded(entry.name, exclusions))
     .map((entry) => ({ ...entry, files: licenseFilesOf(entry.packageDir) }));
-  const vendorDir = join(appDir, 'vendor', 'repo-wiki');
-  const vendor = JSON.parse(readFileSync(join(vendorDir, 'package.json'), 'utf8'));
-  installed.push({
-    name: 'repo-wiki', version: vendor.version, license: vendor.license,
-    packageDir: vendorDir, files: ['LICENSE', 'THIRD_PARTY_NOTICES.md'],
-  });
-  // Vendored source is bundled into the Wiki host, even though it is not an npm dependency.
-  installed.push({
-    name: 'jsonrepair-vendored', version: '3.15.0', license: 'ISC',
-    packageDir: join(appDir, 'electron', 'wikiService', 'reference', 'qoder-0.5.1', 'jsonrepair-3.15.0'),
-    files: ['LICENSE.md'],
-  });
   // Preserve the established path for single versions. Multiple versions need
   // their own directories so one license cannot silently overwrite another.
   const counts = new Map();
@@ -158,7 +146,7 @@ function renderReport(inventory, generatedBy) {
   const lines = [
     '# 第三方依赖清单',
     '',
-    `本文件由 \`${generatedBy}\` 从 pnpm 安装的生产依赖图（\`electron-agent/pnpm-lock.yaml\`）及仓库内 vendored 代码生成，不要手改。`,
+    `本文件由 \`${generatedBy}\` 从 pnpm 安装的生产依赖图（\`electron-agent/pnpm-lock.yaml\`）生成，不要手改。`,
     '只列随安装包分发的生产依赖；开发依赖（vitest、electron-builder、sharp、lightningcss 等）不进包，不在此列。',
     '每个包的许可原文随安装包放在 `resources/licenses/<包名>/`，多版本包放在 `<包名>/<版本>/`，索引在 `resources/licenses/INDEX.md`。',
     '',

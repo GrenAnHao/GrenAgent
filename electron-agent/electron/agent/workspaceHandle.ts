@@ -1,3 +1,4 @@
+import { activateCandidateRequests } from './candidateRequests.js';
 import { supportsFastMode } from '../../../extensions/_shared/fast-mode.js';
 import { guardListener } from '../../../extensions/_shared/guard-listener.js';
 import { promptWasAccepted } from '../../../extensions/_shared/promptDisposition.js';
@@ -26,6 +27,7 @@ export type ImageContent = NonNullable<PromptOptions['images']>[number];
 export interface HandleEventMeta { sessionId?: string; sessionPath?: string; source: 'interactive' | 'goal' | 'subagent' }
 
 export interface WorkspaceHandleOptions {
+  stageFork?: (handle: WorkspaceHandle, entryId: string, options?: {position?:'before'|'at'}) => Promise<{cancelled:boolean;selectedText?:string;sessionPath?:string}>;
   workspace: string;
   cwd: string;
   runtime: AgentSessionRuntime;
@@ -200,8 +202,20 @@ export class WorkspaceHandle {
   }
 
   async fork(entryId: string, options?: Parameters<AgentSessionRuntime['fork']>[1]): Promise<{ cancelled: boolean; selectedText?: string }> {
+    if (this.options.stageFork) return this.options.stageFork(this, entryId, options);
     return this.replace(() => this.options.runtime.fork(entryId, options));
   }
+
+  /** Publish rebind changes only this candidate; never replaces or tears down its source. */
+  async publishCandidate(sessionPath: string): Promise<void> {
+    const oldPath = this.parentSessionPath;
+    this.session.sessionManager.setSessionFile(sessionPath);
+    this.session.refreshContext();
+    await this.detachParentHost(oldPath);
+    this.registerCurrentParentHost();
+  }
+
+  activateCandidate(): void { activateCandidateRequests(this.session); }
 
   async reload(): Promise<void> {
     await this.runMain(async () => {
@@ -386,3 +400,4 @@ export class WorkspaceHandle {
     });
   }
 }
+

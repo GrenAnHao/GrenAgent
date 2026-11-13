@@ -1,0 +1,46 @@
+只读 SDK 内置聊天目录验证（本子任务）
+
+SDK 公开入口：@earendil-works/pi-ai/providers/all（CLI 的 1.5.1 副本）。
+已核对 README Static Catalog Reads 与 dist/providers/all.d.ts：
+getBuiltinModels<TProvider extends BuiltinProvider>(provider: TProvider): Model<CatalogApi<...>>[]
+getBuiltinProviders(): BuiltinProvider[]
+getBuiltinModels 仅聊天；getAllBuiltinModels 混合聊天/图片/分类，本实现不使用后者。
+SDK 文档说明静态目录不依赖 Models collection；动态 refresh 是另一个显式异步操作。
+另核对 pi-coding-agent docs/sdk.md 与 docs/models-configuration.md 的默认 runtime/auth 行为及 modelOverrides 元数据契约。
+
+1. RED
+命令（electron-agent/）：
+npx vitest run electron/app/providerService.builtinModels.test.ts
+结果：exit 1，4 个断言测试因 service.listBuiltinModels / pi.listBuiltinModels 尚不存在而失败。
+日志：catalog-red.log
+
+2. GREEN + 定向回归
+命令（electron-agent/）：
+npx vitest run electron/app/providerService.builtinModels.test.ts electron/app/providerService.test.ts electron/ipc/register.test.ts electron/ipc/commandCoverage.test.ts
+结果：exit 0，4 文件 / 75 测试通过（新增 4 项）。
+日志：catalog-green.log
+覆盖：精确 provider 隔离、未知/原型键为空；chat-only（包括纯分类供应商返回空）；完整允许元数据、显式 false/0/null、阶梯价格、采样与分档采样、输入图片限制和缓存寿命；不返回连接地址/headers/凭据或函数；结果深复制不污染 SDK；临时配置覆盖不影响内置默认值，临时 auth/models 文件不变；禁止 fetch/runtime/probe/refresh；真实 renderer pi API → bridge → 已注册 IPC → service → 真实 CLI SDK，并校验 IPC provider 参数。
+测试使用的是 CLI 的同一 SDK 物理目录；仅 Electron IPC transport/window 被替换。没有真实凭据读取、真实 runtime 创建或付费请求。
+修正过一次测试假设：同一 model ID 可在聊天和图片/分类目录并存，故 chat-only 比较 id+api，不能只按 ID 排除。
+
+3. 新模块严格类型检查
+命令（cli/）：
+npx tsc --noEmit --skipLibCheck --strict --target es2023 --module nodenext --moduleResolution nodenext src/builtin-models.ts
+结果：exit 0。
+日志：catalog-module-typecheck.log（无诊断）
+
+4. CLI 全工程类型检查
+命令（cli/）：npx tsc --noEmit
+结果：exit 2。现有 src/agent-data-plugins.test.ts 无 vitest 类型，以及 extensions sandbox/mcp/multi-agent 等大量无关类型错误；没有 builtin-models.ts 诊断。本子任务未修改这些文件。
+日志：catalog-cli-typecheck.log
+
+5. 原生 Node/tsx 离线实跑
+命令（cli/）：node --import tsx --input-type=module -e <直接导入 ./src/builtin-models.ts；fetch 替换为抛错；逐个读取 openai/anthropic/openrouter/typesafe/not-a-provider/__proto__，检查无 baseUrl/headers/credentials/apiKey 且 structuredClone 成功>
+结果：exit 0；聊天数量分别 44/18/402/0/0/0。
+日志：catalog-native-offline.log
+
+6. git diff --check（仅本子任务路径）
+结果：exit 0；只有已有 CRLF→LF 提示，无空白错误。
+日志：catalog-diff-check.log
+
+未运行全量测试或 UI 场景；当前子任务仅只读目录与 IPC。UI/adapter/notes 验证由主代理负责。未改 AGENTS、决策笔记、UI 或 adapter；cli/src/pi-sdk.ts 无需修改。

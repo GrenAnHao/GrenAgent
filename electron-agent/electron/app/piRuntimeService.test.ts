@@ -7,6 +7,8 @@ import { getAgentMode, hasAgentMode, setAgentMode, __resetAgentModeForTest } fro
 import { setSessionPlan, __resetPlanStateForTest } from '../../../extensions/agent-mode/planState.js';
 import { createPlan } from '../../../extensions/agent-mode/plan.js';
 import { PiRuntimeService, type AgentHostPort } from './piRuntimeService';
+import { AgentDataService } from './agentDataService';
+import { AgentDataRuntime } from '../agentData/runtime';
 import { SessionManager } from '../../../cli/src/pi-sdk.js';
 import {
   readRequestedPreferences,
@@ -103,6 +105,26 @@ function hostSwitchingSession(sourceFile: string, targetFile: string) {
 }
 
 describe('PiRuntimeService', () => {
+  it.each([
+    { message: '普通文字消息' },
+    { message: '', images: [{ type: 'image', mimeType: 'image/png', data: 'fixture' }] },
+  ])('sends $message through the real turn RPC before reaching the model handle', async (args) => {
+    const dir = await mkdtemp(join(tmpdir(), 'pi-turn-rpc-'));
+    const data = new AgentDataService({ runtime: new AgentDataRuntime({ dataPath: join(dir, 'data.db') }) });
+    const { host, handle } = fakeAgentHost();
+    const service = new PiRuntimeService({ agentDir: dir, agentHost: host, modelRuntimeHost: noopModelHost, threadStore: data });
+    try {
+      await data.start();
+      await service.send(dir, 'agent_prompt', args);
+      expect(handle.prompt).toHaveBeenCalledWith(args.message, expect.objectContaining({ images: args.images }), 'main');
+      const [thread] = await data.listThreads();
+      expect((await data.readThread(thread.id))?.turns[0].input).toBe(args.message);
+    } finally {
+      await data.stop();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps turns and late lifecycle events isolated for two sessions in one workspace', async () => {
     const thread = {
       createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
@@ -1201,11 +1223,54 @@ describe('进程内宿主交互路径', () => {
     }
   });
 
-  it('agent_abort 调 session.abort', async () => {
+  it('agent_abort 调 session.abort，按时收口时回报已停', async () => {
     const { host, handle } = fakeAgentHost();
     const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
-    await service.send('C:/work', 'agent_abort', {});
+    await expect(service.send('C:/work', 'agent_abort', {})).resolves.toEqual({ stopped: true, aborted: true });
     expect(handle.session.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('abort 卡在 SDK 的 waitForIdle 上时，到点仍回报已停并标明 timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const never = new Promise<void>(() => {});
+      const { host, handle } = fakeAgentHost(fakeHandle({ abort: vi.fn(() => never), isStreaming: true }));
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      const pending = service.send('C:/work', 'agent_abort', {});
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(pending).resolves.toEqual({
+        stopped: true, aborted: true, reason: 'timeout', isStreaming: true,
+      });
+      expect(handle.session.abort).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('agent_settled 到得比 agent_end 晚、或 agent_end 丢了，也把回合登记收掉', async () => {
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued' })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const { host, handle } = fakeAgentHost(fakeHandle({ sessionId: 'session-a', isStreaming: true }));
+    host.get = vi.fn(() => handle);
+    const service = new PiRuntimeService({
+      agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: thread as never,
+    });
+    await service.send('C:/work', 'agent_prompt', { message: 'hello', sessionId: 'session-a' });
+    expect(service.listRunningTurns()).toEqual([expect.objectContaining({ sessionId: 'session-a' })]);
+
+    // 只来 agent_settled（agent_end 丢了）：必须收口，否则 listRunningTurns 永远把这份会话算在跑。
+    handle.session.isStreaming = false;
+    await service.handlePiEvent('C:/work', { type: 'agent_settled', aborted: false }, 'session-a');
+    expect(service.listRunningTurns()).toEqual([]);
+    expect(thread.updateTurn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'completed' }));
+
+    // 之后再来的 agent_end 不能重复收口。
+    const calls = thread.updateTurn.mock.calls.length;
+    await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-a');
+    expect(thread.updateTurn.mock.calls.length).toBe(calls);
   });
 
   it('暂停后取走引导队列，并把跟进按原样放回', async () => {
@@ -1319,10 +1384,13 @@ describe('进程内宿主交互路径', () => {
       expect(front.prompt).toHaveBeenCalledWith('to front', expect.anything(), 'main');
     });
 
-    it('目标会话已不在任何 handle 上时 abort 不落到别的会话', async () => {
+    it('目标会话已不在任何 handle 上时 abort 不落到别的会话，并回一个「已停」回执', async () => {
       const { parked, front, host } = twoHandles();
       const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
-      await expect(service.send('C:/work', 'agent_abort', { targetSessionPath: 'C:/sessions/gone.jsonl' })).resolves.toBeUndefined();
+      // 没有承载它的 handle 就没有在跑的回合：回执要说已停，界面才能把运行态收掉，
+      // 而不是继续显示停止按钮、点了没反应。
+      await expect(service.send('C:/work', 'agent_abort', { targetSessionPath: 'C:/sessions/gone.jsonl' }))
+        .resolves.toEqual({ stopped: true, aborted: false });
       expect(parked.session.abort).not.toHaveBeenCalled();
       expect(front.session.abort).not.toHaveBeenCalled();
     });

@@ -1,6 +1,7 @@
 import { Input, Select } from 'antd';
 import { useEffect, useState } from 'react';
 import { useProviderModelData } from './providerModelData';
+import { isModelHidden, useModelVisibilityStore } from '../../stores/modelVisibilityStore';
 
 /** 固定像素，避免 placeholder / 选中项把两行下拉撑成不同宽度。 */
 export const MODEL_SELECT_PROVIDER_WIDTH = 130;
@@ -30,6 +31,7 @@ function splitModelValue(v: string): { provider: string; id: string } {
  */
 export function ModelSelectField({ value, placeholder, testId, onChange }: ModelSelectFieldProps) {
   const { ready, providerOptions, nameOf, modelsFor } = useProviderModelData();
+  const hidden = useModelVisibilityStore((state) => state.hidden);
 
   const parsed = splitModelValue(value);
   // 选中的供应商用本地态：换供应商到选定新模型之间已提交值尚不完整，
@@ -60,7 +62,8 @@ export function ModelSelectField({ value, placeholder, testId, onChange }: Model
 
   const modelOpts = modelsFor(provider);
   // 当前值的模型若不在该供应商可用列表，补一项保留显示，避免被清空。
-  if (provider === parsed.provider && parsed.id && !modelOpts.some((o) => o.value === parsed.id)) {
+  const currentHidden = isModelHidden(hidden, parsed.provider, parsed.id);
+  if (provider === parsed.provider && parsed.id && !currentHidden && !modelOpts.some((o) => o.value === parsed.id)) {
     modelOpts.unshift({ label: parsed.id, value: parsed.id });
   }
 
@@ -89,6 +92,7 @@ export function ModelSelectField({ value, placeholder, testId, onChange }: Model
         data-testid={testId}
         value={modelValue || undefined}
         options={modelOpts}
+        labelRender={({ label, value }) => currentHidden && provider === parsed.provider ? `${parsed.id}（已隐藏）` : label ?? value}
         placeholder={placeholder ?? '模型'}
         style={{ width: MODEL_SELECT_MODEL_WIDTH }}
         disabled={!provider}

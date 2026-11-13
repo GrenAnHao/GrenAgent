@@ -12,7 +12,6 @@
 | [`image-gen`](./image-gen) | `generate_image` | 是 | 文生图(OpenAI 兼容) |
 | [`multi-agent`](./multi-agent) | `spawn_agent` | 子 agent 需 | 委派隔离 pi 子进程(单个/并行) |
 | [`fable-behavior`](./fable-behavior) | — | 否 | Fable 5 + coding-agent 行为层(Tier 注入 + 子 agent 种子) |
-| [`gpt-with-taste`](./gpt-with-taste) | — | 否 | GPT 系模型的行为层(请求期投影 + `/taste` 开关)；生效时 fable 让位 |
 | [`tts`](./tts) | `speak` | 是 | 文字转语音(OpenAI 兼容) |
 | [`im-gateway`](./im-gateway) / [`im-platforms`](./im-platforms) | — | — | **暂缓**：源码保留，未打进产品加载清单。接回见仓库根目录 `docs/im-reintroduction.md` |
 

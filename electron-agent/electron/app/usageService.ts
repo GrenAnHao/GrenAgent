@@ -1,7 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UsageReport } from '../../src/lib/usageReport';
-import { callFromMessage, defaultLedgerPath, sharedLedger, type UsageLedger } from '../../../extensions/usage-ledger/ledger.js';
+import { callFromMessage, callKey, warmFromEntry, warmKey, defaultLedgerPath, sharedLedger, type UsageLedger } from '../../../extensions/usage-ledger/ledger.js';
+import { ensureLegacyRoster } from '../../../extensions/usage-ledger/legacyRoster.js';
+import { UsageOriginRegistry, defaultOriginRegistryPath } from '../../../extensions/usage-ledger/originRegistry.js';
 import { firstLineOf, forEachLineContaining } from './sessionLineScan';
 
 // Note: 账本取代扫描的取舍见 .agents/notes/implemented/architecture/2026-10-21-usage-ledger.md
@@ -12,7 +14,7 @@ import { firstLineOf, forEachLineContaining } from './sessionLineScan';
 // 运行在 agent-host 子进程：同步 sqlite 和导入时的解析都不占主进程。
 
 /** 历史导入的版本；导入口径变了就加一，下次打开用量页会重新补录一遍（按键去重，不会重复计数）。 */
-const IMPORT_VERSION = '1';
+const IMPORT_VERSION = '2';
 const IMPORT_META_KEY = 'import_version';
 /** 同时在读 / 解析的会话文件数。 */
 const SCAN_CONCURRENCY = 4;
@@ -24,6 +26,7 @@ export interface ImportResult {
 
 export class UsageService {
   private readonly ledger: UsageLedger;
+  private registry:UsageOriginRegistry | undefined;
   private importing: Promise<ImportResult> | null = null;
 
   constructor(private readonly agentDir: string, options: { ledger?: UsageLedger } = {}) {
@@ -42,6 +45,9 @@ export class UsageService {
   }
 
   private async importSessions(): Promise<ImportResult> {
+    this.registry=new UsageOriginRegistry(defaultOriginRegistryPath(this.agentDir));
+    try {
+    ensureLegacyRoster(this.agentDir,this.registry);
     const paths = await collectJsonl(join(this.agentDir, 'sessions'));
     let added = 0;
     let cursor = 0;
@@ -58,6 +64,7 @@ export class UsageService {
     await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, worker));
     this.ledger.setMeta(IMPORT_META_KEY, IMPORT_VERSION);
     return { files: paths.length, added };
+    } finally {this.registry.close();this.registry=undefined;}
   }
 
   /** 一个会话文件：只解码含标记的行（工具结果这类大行不转字符串、不 JSON.parse）。 */
@@ -73,18 +80,33 @@ export class UsageService {
       const value = entry?.type === 'session_info' ? text(entry.name)?.trim() : undefined;
       if (value) name = value;
     });
+    const required=buffer.includes(Buffer.from('"usage_origin_required"'));
+    const registry=this.registry!;
+    const legacy=registry.isLegacySession({sessionId,path,required});
+    const warms:NonNullable<ReturnType<typeof warmFromEntry>>[]=[];
     const calls: NonNullable<ReturnType<typeof callFromMessage>>[] = [];
     forEachLineContaining(buffer, '"usage"', (line) => {
-      if (!line.includes('"assistant"')) return;
+
       const entry = parse(line);
-      if (entry?.type !== 'message') return;
+      if(!entry)return;
+      const entryId=text(entry.id);if(!entryId)return;
+      let origin=registry.resolveUsageOrigin({sessionId,entryId});
+      if(origin.kind==='unverified'&&legacy){registry.registerLocalEntry({sessionId,entryId},path);origin=registry.resolveUsageOrigin({sessionId,entryId});}
+      if(origin.kind!=='local-origin')return;
+      const original=origin.originSessionId===sessionId&&origin.originEntryId===entryId;
+      const canonical=registry.ledgerKey({sessionId,entryId});
+      // A copy may only reference an existing canonical binding; its fields cannot backfill.
+      if(!original||!registry.ownsSessionPath(sessionId,path))return;
+      const warm=warmFromEntry(entry,sessionId);if(warm){warms.push(warm);return;}
+      if (entry.type !== 'message') return;
       const call = callFromMessage(entry.message, sessionId, text(entry.timestamp) ?? headerTimestamp);
-      if (call) calls.push({ ...call, entryId: text(entry.id) });
+      if (call) { if(legacy && typeof (entry.message as any)?.usage?.cost?.totalFromProvider!=='boolean' && typeof (entry.message as any)?.responseModel!=='string')call.costSource='unknown';calls.push({ ...call, entryId, ...(canonical?{canonicalKey:canonical}:{}) });}
     });
     return this.ledger.transaction(() => {
       this.ledger.upsertSession({ id: sessionId, path, cwd: text(header.cwd), startedAt: headerTimestamp, name });
       let added = 0;
-      for (const call of calls) if (this.ledger.record(call, 'import')) added += 1;
+      for (const call of calls) { if (this.ledger.record(call, 'import')) added += 1; const key=callKey(call);if(key&&call.entryId)registry.bindLedgerKey({sessionId,entryId:call.entryId},key); }
+      for(const warm of warms){if(this.ledger.recordWarm(warm))added+=1;registry.bindLedgerKey({sessionId,entryId:warm.entryId},warmKey(warm));}
       return added;
     });
   }

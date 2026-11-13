@@ -1,5 +1,5 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { BarChart3, BrainCircuit, type LucideIcon, MessageSquare, Plug, Settings, SquareTerminal } from 'lucide-react';
+import { BarChart3, Code2, type LucideIcon, MessageSquare, Plug, Settings, SquareTerminal } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
 import { useLayoutStore } from '../../stores/layoutStore';
 import { IS_DEV } from '../../lib/devMode';
@@ -19,7 +19,7 @@ const MODULES: ModuleDef[] = [
   { id: 'chat', label: '对话', Icon: MessageSquare },
   { id: 'extensions', label: '扩展', Icon: Plug },
   { id: 'usage', label: '用量', Icon: BarChart3 },
-  { id: 'agentData', label: 'Agent 数据', Icon: BrainCircuit },
+  { id: 'codeIndex', label: '代码索引', Icon: Code2 },
   { id: 'devWorkbench', label: '开发者工作台', Icon: SquareTerminal, footer: true, devOnly: true },
   { id: 'settings', label: '设置', Icon: Settings, footer: true },
 ];

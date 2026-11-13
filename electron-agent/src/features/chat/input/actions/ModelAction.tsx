@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Select } from '@lobehub/ui/base-ui';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
+import { isModelHidden, useModelVisibilityStore, useVisibleModels } from '../../../../stores/modelVisibilityStore';
 import { useThinkingMemoryStore } from '../../../../stores/thinkingMemoryStore';
 import { pi } from '../../../../lib/pi';
 import { loadProviderList } from '../../../settings/providerListCache';
@@ -29,8 +30,11 @@ export default function ModelAction() {
     workspaceReady ? workspace : undefined,
   );
   const [models, setModels] = useState<ModelInfo[]>(() => getCachedAvailableModels(workspace) ?? []);
+  const visibleModels = useVisibleModels(models);
   const [providerNames, setProviderNames] = useState<Map<string, string>>(new Map());
   const [value, setValue] = useState(() => lastModelByWorkspace.get(workspace) ?? '');
+  const selected = parseModelKey(value);
+  const currentHidden = useModelVisibilityStore((state) => isModelHidden(state.hidden, selected.provider, selected.id));
 
   // 切换对话（workspace 变化）时同步回显该 workspace 上次选中的模型：React「render 期对齐 state」模式，
   // 不会先画出上一个对话的值再跳变，和 ModeAction 的 per-workspace 即时回显一致。
@@ -74,7 +78,8 @@ export default function ModelAction() {
     };
   }, [workspace, workspaceReady]);
 
-  const onChange = (key: string) => {
+  const onChange = (key: string | undefined) => {
+    if (!key || !visibleModels.some((model) => modelKey(model.provider, model.id) === key)) return;
     const { provider, id } = parseModelKey(key);
     setValue(key);
     lastModelByWorkspace.set(workspace, key);
@@ -109,7 +114,7 @@ export default function ModelAction() {
   // 按供应商分组（保留出现顺序）；组名优先用供应商显示名，缺失时回退 provider id。
   const groups: { provider: string; items: ModelInfo[] }[] = [];
   const groupIndex = new Map<string, number>();
-  for (const m of models) {
+  for (const m of visibleModels) {
     let gi = groupIndex.get(m.provider);
     if (gi === undefined) {
       gi = groups.length;
@@ -132,10 +137,11 @@ export default function ModelAction() {
       size="small"
       popupMatchSelectWidth={false}
       loading={loading}
-      disabled={!workspaceReady || models.length === 0}
-      value={value || undefined}
+      disabled={!workspaceReady || visibleModels.length === 0}
+      // base-ui Select re-adds missing selected values to options; keep hidden identity outside its UI value.
+      value={currentHidden ? null : value || undefined}
       options={options}
-      placeholder={loading ? '加载模型…' : '模型'}
+      placeholder={currentHidden ? `${models.find((model) => modelKey(model.provider, model.id) === value)?.name ?? selected.id}（已隐藏）` : loading ? '加载模型…' : '模型'}
       style={{ width: 'fit-content', minWidth: 88, maxWidth: 240 }}
       onChange={onChange}
       onOpenChange={onOpenChange}

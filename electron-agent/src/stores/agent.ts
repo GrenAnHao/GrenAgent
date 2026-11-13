@@ -515,6 +515,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       restoreInlineQuestionOnLoad(workspace, msgs, sessionPath);
       return;
     }
+    useStore.setState({ contextEdits: new Set(msgs.filter(m => m.contextReplaced === true && typeof m.entryId === 'string').map(m => m.entryId as string)) });
     const sig = sessionSignature(sanitized);
     // 浮层恢复：正常写入与「签名未变提前 return」两条路径都要跑，否则缓存命中会跳过浮层。
     // 读草稿异步，不 await，以免打乱上面「先补行再算签名」的顺序。
@@ -558,6 +559,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       // 在跑也只留后端快照末尾还在等的调用；UI 历史里更早的 running 卡是进程被杀时留下的。
       messages: interruptPendingToolCards(sanitized, running ? pendingCallIds : undefined),
       excluded: excludedFromAgent(msgs),
+      contextEdits: new Set(msgs.filter(m => m.contextReplaced === true && typeof m.entryId === 'string').map(m => m.entryId as string)),
       composerQueue,
       assistantStop: assistantStopFromMessages(msgs),
       todoListFinished: todoListFinishedInTranscript(msgs),

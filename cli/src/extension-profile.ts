@@ -35,7 +35,6 @@ export const CORE_ALWAYS_ON = new Set<string>([
   "agent-mode",
   "diagram-hint",
   "fable-behavior",
-  "gpt-with-taste",
   "session-memory",
   "web-fetch",
   "resource-manager",

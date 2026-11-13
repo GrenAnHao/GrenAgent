@@ -1,0 +1,16 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { defineConfig } from 'vitest/config';
+
+// Local verification only: existing untracked compiler output must not shadow TypeScript sources.
+export default defineConfig({
+  plugins: [{
+    name: 'verify-typescript-sources', enforce: 'pre',
+    resolveId(id, importer) {
+      if (!importer || importer.includes('/node_modules/') || importer.includes('\\node_modules\\') || !id.startsWith('.') || !id.endsWith('.js')) return;
+      const source = resolve(dirname(importer), id.slice(0, -3) + '.ts');
+      if (existsSync(source)) return source;
+    },
+  }],
+  test: { include: ['**/*.test.ts'], exclude: ['**/node_modules/**'], fileParallelism: false },
+});

@@ -1,0 +1,57 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+ ❯ |main| electron/agentProcess/agentProcessClient.test.ts (27 tests | 4 failed) 848ms
+       × stdout 同步 EPIPE 不打断后续行、RPC 或错误尾巴 18ms
+       × stderr 同步 EPIPE 不打断后续行、RPC 或错误尾巴 12ms
+       × stdout 同步 EPIPE 不打断后续行、RPC 或错误尾巴 16ms
+       × stderr 同步 EPIPE 不打断后续行、RPC 或错误尾巴 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |main| electron/agentProcess/agentProcessClient.test.ts > AgentProcessClient > console 日志错误隔离 > stdout 同步 EPIPE 不打断后续行、RPC 或错误尾巴
+AssertionError: expected [Function] to not throw an error but 'Error: broken pipe, write' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"Error: broken pipe, write"
+
+ ❯ electron/agentProcess/agentProcessClient.test.ts:337:68
+    335|         await client.start();
+    336|         const output = children[0]![stream];
+    337|         expect(() => output.emit('data', 'first\nsecond\r\n')).not.toT…
+       |                                                                    ^
+    338|         expect(() => output.emit('data', 'third\nlast')).not.toThrow();
+    339|         expect(() => output.emit('end')).not.toThrow();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  |main| electron/agentProcess/agentProcessClient.test.ts > AgentProcessClient > console 日志错误隔离 > stderr 同步 EPIPE 不打断后续行、RPC 或错误尾巴
+ FAIL  |main| electron/agentProcess/agentProcessClient.test.ts > AgentProcessClient > callback 日志错误隔离 > stdout 同步 EPIPE 不打断后续行、RPC 或错误尾巴
+ FAIL  |main| electron/agentProcess/agentProcessClient.test.ts > AgentProcessClient > callback 日志错误隔离 > stderr 同步 EPIPE 不打断后续行、RPC 或错误尾巴
+AssertionError: expected [Function] to not throw an error but 'Error: broken pipe, write' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"Error: broken pipe, write"
+
+ ❯ electron/agentProcess/agentProcessClient.test.ts:337:68
+    335|         await client.start();
+    336|         const output = children[0]![stream];
+    337|         expect(() => output.emit('data', 'first\nsecond\r\n')).not.toT…
+       |                                                                    ^
+    338|         expect(() => output.emit('data', 'third\nlast')).not.toThrow();
+    339|         expect(() => output.emit('end')).not.toThrow();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  4 failed | 27 passed (31)
+   Start at  23:55:58
+   Duration  1.26s (transform 112ms, setup 0ms, import 172ms, tests 854ms, environment 0ms)
+

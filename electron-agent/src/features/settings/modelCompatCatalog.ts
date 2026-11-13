@@ -13,6 +13,8 @@ export interface BoolCompatField extends FieldDoc {
   kind: 'bool';
   group: CompatGroupId;
   apis: readonly ApiType[];
+  /** 有 SDK 自动行为的字段使用三态选择，不把缺省误显示成显式关闭。 */
+  defaultLabel?: string;
 }
 
 export interface SelectCompatField extends FieldDoc {
@@ -131,6 +133,18 @@ export const COMPAT_FIELDS: CompatField[] = [
     help: '少数接口要求 tool 结果后面必须再跟一条助手消息，才能继续聊。',
   },
   {
+    key: 'requiresNonNullAssistantContent', kind: 'bool', group: 'message', apis: OPENAI_COMPLETIONS,
+    label: '工具调用消息不用 null 正文', en: 'requiresNonNullAssistantContent',
+    help: '只包含工具调用的助手消息发送空字符串，而不是 null。网关拒绝 null 正文时开启。',
+    defaultLabel: '跟随 SDK（默认关闭）',
+  },
+  {
+    key: 'requiresToolsWithToolHistory', kind: 'bool', group: 'message', apis: OPENAI_COMPLETIONS,
+    label: '无可用工具时仍发空列表', en: 'requiresToolsWithToolHistory',
+    help: '历史含工具调用、当前没有工具时仍发送 tools: []。仅旧版 LiteLLM 等要求此字段的代理需要开启。',
+    defaultLabel: '跟随 SDK（默认关闭）',
+  },
+  {
     key: 'supportsStrictMode', kind: 'bool', group: 'message', apis: OPENAI_BOTH,
     label: '严格 JSON 工具', en: 'supportsStrictMode',
     help: '工具参数按严格 JSON Schema 校验。服务商不支持时关掉。',
@@ -176,6 +190,17 @@ export const COMPAT_FIELDS: CompatField[] = [
     key: 'supportsLongCacheRetention', kind: 'bool', group: 'cache', apis: [...OPENAI_BOTH, ...ANTHROPIC],
     label: '支持长缓存', en: 'supportsLongCacheRetention',
     help: '是否接受更长的提示缓存时间。代理不认这个字段时关掉。',
+  },
+  {
+    key: 'promptCacheKeyMode', kind: 'select', group: 'cache', apis: OPENAI_BOTH,
+    label: '提示缓存键', en: 'promptCacheKeyMode',
+    help: '控制 prompt_cache_key。网关拒绝该字段时禁用；启用只在缓存生效时发送，仍需有效的会话 ID。',
+    emptyLabel: '跟随 SDK（自动）',
+    options: [
+      { value: 'auto', label: '自动检测' },
+      { value: 'enabled', label: '启用' },
+      { value: 'disabled', label: '禁用' },
+    ],
   },
   {
     key: 'sendSessionAffinityHeaders', kind: 'bool', group: 'cache', apis: [...OPENAI_COMPLETIONS, ...ANTHROPIC],
@@ -233,6 +258,12 @@ export const COMPAT_FIELDS: CompatField[] = [
     key: 'supportsMidConvoEffort', kind: 'bool', group: 'anthropic', apis: ANTHROPIC,
     label: '对话中途改推理强度', en: 'supportsMidConvoEffort',
     help: '仅忠实 Anthropic 传输上的新 Claude 需要。仿 Messages 的中转站不要开。',
+  },
+  {
+    key: 'supportsMessageThreads', kind: 'bool', group: 'anthropic', apis: ANTHROPIC,
+    label: '增量消息线程', en: 'supportsMessageThreads',
+    help: '续聊只发送新增消息，上下文变动时回退完整请求。仅官方 Anthropic 直连默认启用；确认网关转发 thread 字段后才为网关开启。',
+    defaultLabel: '跟随 SDK（按端点判断）',
   },
   {
     key: 'supportsEagerToolInputStreaming', kind: 'bool', group: 'anthropic', apis: ANTHROPIC,

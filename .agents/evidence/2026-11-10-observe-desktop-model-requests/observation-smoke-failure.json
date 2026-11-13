@@ -1,0 +1,65 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: actual host resolved local registered fixture model",
+  "observationCount": 0,
+  "observations": [],
+  "stderr": "(node:40144) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n",
+  "warming": [],
+  "states": [
+    {
+      "model": {
+        "id": "unknown",
+        "provider": "unknown",
+        "name": "unknown",
+        "api": "unknown",
+        "baseUrl": "",
+        "reasoning": false,
+        "input": [],
+        "fast": false
+      },
+      "thinkingLevel": "off",
+      "isStreaming": false,
+      "isCompacting": false,
+      "steeringMode": "one-at-a-time",
+      "followUpMode": "one-at-a-time",
+      "sessionFile": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-ibjCy9\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-ibjCy9-A--\\2026-11-10T04-02-18-626Z_01a1c39e-fb82-7206-a063-c75de6e34456.jsonl",
+      "sessionId": "01a1c39e-fb82-7206-a063-c75de6e34456",
+      "autoCompactionEnabled": false,
+      "messageCount": 0,
+      "pendingMessageCount": 0,
+      "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-ibjCy9\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-ibjCy9-A--\\2026-11-10T04-02-18-626Z_01a1c39e-fb82-7206-a063-c75de6e34456.jsonl",
+      "preferences": {
+        "thinkingLevel": "off",
+        "revision": 0
+      },
+      "unavailable": []
+    },
+    {
+      "model": {
+        "id": "unknown",
+        "provider": "unknown",
+        "name": "unknown",
+        "api": "unknown",
+        "baseUrl": "",
+        "reasoning": false,
+        "input": [],
+        "fast": false
+      },
+      "thinkingLevel": "off",
+      "isStreaming": false,
+      "isCompacting": false,
+      "steeringMode": "one-at-a-time",
+      "followUpMode": "one-at-a-time",
+      "sessionFile": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-ibjCy9\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-ibjCy9-B--\\2026-11-10T04-02-18-762Z_01a1c39e-fc0a-7206-a063-c75f1f694360.jsonl",
+      "sessionId": "01a1c39e-fc0a-7206-a063-c75f1f694360",
+      "autoCompactionEnabled": false,
+      "messageCount": 0,
+      "pendingMessageCount": 0,
+      "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-ibjCy9\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-ibjCy9-B--\\2026-11-10T04-02-18-762Z_01a1c39e-fc0a-7206-a063-c75f1f694360.jsonl",
+      "preferences": {
+        "thinkingLevel": "off",
+        "revision": 0
+      },
+      "unavailable": []
+    }
+  ]
+}

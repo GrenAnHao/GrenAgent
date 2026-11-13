@@ -1,18 +1,9 @@
-import type { KnowledgeTaskMetadata } from '../../shared/knowledgeKernelContracts';
 export type TaskRef = { source: 'user' | 'system'; id: string };
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled';
-export type ResourceRef = { type: 'wiki' | 'project' | 'repoWiki'; id: string; language?: string };
-export interface RepoWikiJobPayload {
-  projectId: string; language: string; target: 'wiki' | 'cards'; force: boolean; confirmExternal: true;
-  runId?: string;
-}
-export interface NativeWikiPublicationSummary { id: string; coverage: { published: number; readable: number; failed: string[]; partial: boolean }; projection: { status: 'pending' | 'ready' | 'conflict' | 'error'; error?: string } }
-export interface NativeWikiTaskSummary { engine: 'qoder-wiki-local-v1'; operationId: string; projectId?: string; revision: number; publication?: NativeWikiPublicationSummary }
+export type ResourceRef = { type: 'wiki' | 'project'; id: string; language?: string };
 export interface JobMetadata {
-  repoWiki?: KnowledgeTaskMetadata;
-  nativeWiki?: NativeWikiTaskSummary;
   target?: ResourceRef;
-  payload?: { kbId: string; sourceIds: string[] } | { workspace: string } | RepoWikiJobPayload;
+  payload?: { kbId: string; sourceIds: string[] } | { workspace: string };
   retryOf?: string; resourceName?: string; cancellationRequested?: boolean; cancellationError?: string;
   /** 自动同步熔断后留下的失败任务，用来在任务中心重试。不是用户点的同步。 */
   origin?: 'breaker';
@@ -25,8 +16,6 @@ export interface TaskView {
   processed?: number; total?: number; attempts?: number; retryOf?: string; error?: string;
   createdAt: number; updatedAt: number;
   capabilities: { cancel: boolean; retry: boolean; remove: boolean; removeReason?: 'native_referenced' };
-  knowledge?: import('../../shared/knowledgeKernelContracts').RepoWikiKnowledgeSnapshot;
-  nativeWiki?: NativeWikiTaskSummary;
 }
 export interface TaskPage { items: TaskView[]; nextCursor?: string; activeCount?: number; pollingCount?: number }
 export interface TaskListInput {
@@ -60,7 +49,6 @@ export interface DiagnosticReport { items: DiagnosticItem[]; checkedAt: number }
 export type ResourceNavigation =
   | { view: 'overview' }
   | { view: 'wiki'; kbId?: string; pageId?: string; mode?: 'read' | 'create' }
-  | { view: 'repoWiki'; workspace?: string; language?: string }
   | { view: 'code'; workspace?: string; file?: string; line?: number }
   | { view: 'jobs'; task?: TaskRef }
   | { view: 'audit'; resource?: ResourceRef };

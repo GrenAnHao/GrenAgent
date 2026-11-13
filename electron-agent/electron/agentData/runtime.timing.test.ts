@@ -39,10 +39,10 @@ describe('AgentDataRuntime sync timing', () => {
   });
 
   it('records trusted admin calls and keeps the existing error shape', async () => {
-    await runtime.requestAdmin('admin.tasks.list', { limit: 5 });
+    await runtime.requestAdmin('codeRetrieval.admin.projects');
     await expect(runtime.requestAdmin('admin.nothing')).rejects.toThrow('METHOD_NOT_FOUND: unknown management method: admin.nothing');
     const methods = new Map(agentDataTiming.drain()!.methods.map((row) => [row.method, row]));
-    expect(methods.get('admin.tasks.list')?.n).toBe(1);
+    expect(methods.get('codeRetrieval.admin.projects')?.n).toBe(1);
     expect(methods.get('admin.unknown')?.n).toBe(1);
     expect(agentDataTiming.nested).toBe(false);
   });

@@ -132,7 +132,10 @@ export function SettingsPanel() {
       const [settings, cfg] = await Promise.all([pi.getSettings(), pi.getProviderConfig()]);
       const r = migratePhase2(settings, cfg.modelsJson, cfg.authJson);
       if (!r.changed) return;
-      await pi.setProviderConfig(r.modelsJson, r.authJson);
+      await pi.setProviderConfig(r.modelsJson);
+      for (const [provider, key] of Object.entries(r.apiKeys)) {
+        await pi.setProviderApiKey(provider, key);
+      }
       await pi.setSettings(r.nextSettings);
     })().catch(() => {});
   }, []);

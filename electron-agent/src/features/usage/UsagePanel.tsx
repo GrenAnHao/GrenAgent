@@ -1,3 +1,4 @@
+import {costSourceLabel} from '../../lib/usageReport';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pagination } from 'antd';
 import { Icon } from '@lobehub/ui';
@@ -14,7 +15,7 @@ import { buildConversations, friendlyTime } from '../sessions/useConversations';
 import { useProviderList } from '../settings/providerListCache';
 
 function formatCost(n: number): string {
-  if (!n) return '—';
+  if (n === 0) return '$0.0000';
   if (n < 1) return `$${n.toFixed(4)}`;
   return `$${n.toFixed(2)}`;
 }
@@ -332,7 +333,7 @@ export function UsagePanel() {
       </div>
     );
   }
-  if (error && !report) return <div className={styles.root}><div className={styles.state}>加载失败:{error}</div></div>;
+  if (error && !report) return <div className={styles.root}><div className={styles.state} role="alert">加载失败:{error}<button type="button" onClick={()=>void load()}>重试</button></div></div>;
   if (!report) return <div className={styles.root}><div className={styles.state}>暂无数据</div></div>;
 
   const t = report.totals;
@@ -359,7 +360,7 @@ export function UsagePanel() {
         <div>
           <span className={styles.title}>用量统计</span>
           <span className={styles.sub}>
-            {error ? `刷新失败:${error}` : notice ?? '全部项目汇总 · 每次模型调用结束时记账'}
+            {notice ?? '全部项目汇总 · 每次模型调用结束时记账'}
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -380,14 +381,20 @@ export function UsagePanel() {
         </div>
       </div>
 
+      {error?<div role="alert">加载失败:{error} <button type="button" onClick={()=>void load()}>重试</button></div>:null}
+      <section data-testid="usage-provenance-summary" style={{marginBottom:16,fontSize:13}}>
+        <div>助手费用 {formatCost(report.recordedCost?.assistantCost??t.cost)} · 助手调用 {t.messages} 次；预热费用 {formatCost(report.warmingTotals?.cost??0)} · 预热 {report.warmingTotals?.messages??0} 次</div>
+        <div>{report.recordedCost?`费用来源：${Object.values(report.recordedCost.sourceBreakdown).filter(n=>n!==0).length>1?'混合来源':'分类如下'} · 供应商报告 ${formatCost(report.recordedCost.sourceBreakdown.provider)} · 目录估算 ${formatCost(report.recordedCost.sourceBreakdown.catalog)} · 来源未知 ${formatCost(report.recordedCost.sourceBreakdown.unknown)}`:'旧报表：费用来源未知，预热费用未提供'}</div>
+        <div>已记录费用包含助手与独立预热费用。外部导入历史仅展示；来源未验证的继承历史不入账。未计入缺少可靠归属的压缩、分支摘要及工具自报用量。</div>
+      </section>
       <div className={styles.kpis}>
         <div className={styles.kpi}>
           <div className={styles.kpiLabel}>总 Token</div>
           <div className={styles.kpiValue}>{formatTokens(t.totalTokens)}</div>
         </div>
         <div className={styles.kpi}>
-          <div className={styles.kpiLabel}>总费用</div>
-          <div className={styles.kpiValue}>{formatCost(t.cost)}</div>
+          <div className={styles.kpiLabel}>已记录费用</div>
+          <div className={styles.kpiValue}>{formatCost(report.recordedCost?.totalCost??t.cost)}</div>
         </div>
         <div className={styles.kpi}>
           <div className={styles.kpiLabel}>会话数</div>
@@ -558,7 +565,7 @@ export function UsagePanel() {
               <tr>
                 <th className={cx(styles.th, styles.thSticky)}>时间</th>
                 <th className={cx(styles.th, styles.thSticky)}>供应商</th>
-                <th className={cx(styles.th, styles.thSticky)}>模型</th>
+                <th className={cx(styles.th, styles.thSticky)}>请求模型 / 响应模型</th>
                 <th className={cx(styles.thRight, styles.thSticky)}>输入</th>
                 <th className={cx(styles.thRight, styles.thSticky)}>输出</th>
                 <th className={cx(styles.thRight, styles.thSticky)}>缓存读</th>
@@ -572,13 +579,13 @@ export function UsagePanel() {
                 <tr key={`${c.timestamp ?? 'na'}-${(curCallPage - 1) * CALL_PAGE_SIZE + i}`}>
                   <td className={styles.td}>{c.timestamp ? new Date(c.timestamp).toLocaleString() : '—'}</td>
                   <td className={styles.td} title={providerNameOf(c.provider)}>{c.provider ? providerNameOf(c.provider) : '—'}</td>
-                  <td className={styles.td} title={c.model}>{c.model}</td>
+                  <td className={styles.td} title={c.model}>{c.model}<br/><span style={{opacity:0.7}}>响应：{c.responseModel??'未报告'}</span></td>
                   <td className={styles.tdRight}>{formatTokens(c.input)}</td>
                   <td className={styles.tdRight}>{formatTokens(c.output)}</td>
                   <td className={styles.tdRight}>{formatTokens(c.cacheRead)}</td>
                   <td className={styles.tdRight}>{formatTokens(c.cacheWrite)}</td>
                   <td className={styles.tdRight}>{formatTokens(c.totalTokens)}</td>
-                  <td className={styles.tdRight}>{formatCost(c.cost)}</td>
+                  <td className={styles.tdRight}>{formatCost(c.cost)}<br/><span style={{opacity:0.7}}>{costSourceLabel(c.costSource)}</span></td>
                 </tr>
               ))}
               {callRows.length === 0 && (

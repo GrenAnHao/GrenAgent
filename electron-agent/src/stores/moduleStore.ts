@@ -6,11 +6,11 @@ import { create } from 'zustand';
  * 'devWorkbench' 只在 DEV 构建里由 ModuleRail 渲染入口并可达（生产构建整棵子树被 tree-shake），
  * 但仍列在联合类型里：类型层不区分构建模式，运行时由 ModuleRail 决定要不要露出来。
  */
-export type ModuleId = 'chat' | 'connections' | 'extensions' | 'usage' | 'agentData' | 'repoWiki' | 'devWorkbench' | 'settings';
+export type ModuleId = 'chat' | 'connections' | 'extensions' | 'usage' | 'codeIndex' | 'agentData' | 'devWorkbench' | 'settings';
 
 /**
  * 工作区视图：项目级、绑定当前活跃工作区，渲染在主列内（对话区位置），侧栏常驻。
- * 'chat' 为默认且唯一视图；代码检索和 Wiki 由 Agent Data 中心管理。
+ * 'chat' 为默认且唯一视图；代码索引有自己的模块入口；Agent Data 中心逐步下线。
  */
 export type WorkspaceView = 'chat';
 
@@ -32,13 +32,16 @@ export function registerModuleLeaveGuard(module: ModuleId, guard: () => boolean)
 }
 
 // 首启一律进对话页：activeModule / activeWorkspaceView 均不持久化，避免重启恢复到上次停留的设置/工具面板。
+// 'agentData' 正在下线：仍保留在类型里供兼容映射，但不再有导航入口；任何来源把它设成活跃模块时归一化到对话。
+const RETIRED_MODULES = new Set<ModuleId>(['agentData']);
 export const useModuleStore = create<ModuleState>((set, get) => ({
   activeModule: 'chat',
   activeWorkspaceView: 'chat',
   setActiveModule: (module) => {
     const current = get().activeModule;
     if (module === current || leaveGuards.get(current)?.() === false) return;
-    set({ activeModule: module });
+    // 已下线模块不接受为活跃目标，落到仍可用的对话页而不是留一个空白容器。
+    set({ activeModule: RETIRED_MODULES.has(module) ? 'chat' : module });
   },
   setActiveWorkspaceView: (view) => set({ activeWorkspaceView: view }),
 }));

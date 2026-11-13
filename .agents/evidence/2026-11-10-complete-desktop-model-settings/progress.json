@@ -1,0 +1,174 @@
+{
+  "changeName": "complete-desktop-model-settings",
+  "changeDir": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\proposal.md"
+    ],
+    "specs": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\specs\\desktop-model-configuration\\spec.md",
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\specs\\model-compaction-budgets\\spec.md"
+    ],
+    "design": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\design.md"
+    ],
+    "tasks": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 20,
+    "complete": 20,
+    "remaining": 0
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 在 apply 开始时核对真实 SDK 1.5.1 解析路径、目标文件既有 dirty 与相关类型诊断，写/更新本主题 Agent Note；验证：保存可回溯基线和原 models/settings fixture，`npm run verify-notes` 通过，不动真实凭据或无关生成文件。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 5
+    },
+    {
+      "id": "2",
+      "description": "1.2 先补 `providerConfigAdapter.test.ts` 红灯案例：高级字段/未知嵌套字段、内置 modelOverrides 与同 ID 替换条目并存、模型 api 覆盖供应商 api、undefined/0 与非法 TTL null、未编辑保存；验证：在现有实现上复现缺口，失败原因与本 change 字段缺失对应。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 6
+    },
+    {
+      "id": "3",
+      "description": "1.3 建立高级字段类型与纯校验/patch 模块并接入 adapter，保留原供应商/模型原文档未编辑部分；验证：上述 fixture 往返值一致，非法 JSON/数值被定点拒绝，`npx vitest run src/features/settings/providerConfigAdapter.test.ts` 通过。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 7
+    },
+    {
+      "id": "4",
+      "description": "2.1 在 `ProviderService` 落盘前接上同一字段校验，保持原 setConfig 调用和 RefreshResult 兼容；验证：临时目录测试非法配置不改盘、不执行凭据命令、不触碰 auth.json，保存后部分刷新失败有明确返回。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 11
+    },
+    {
+      "id": "5",
+      "description": "2.2 为自定义模型接入采样 JSON、分档采样、图片限制和缓存寿命编辑；验证：组件测试覆盖 draft/错误保留、协议切换不清字段、省略继承/无来源未知/有限正数秒区分，非法手写 null 保留原文件，原思考/Fast/价格分段保持。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 12
+    },
+    {
+      "id": "6",
+      "description": "2.3 为内置目录增加定点高级覆盖入口，保留自定义同 ID 模型的原替换语义；验证：保存仅改对应 modelOverrides 字段，清除最后一个编辑字段不删除其他覆盖，目录元数据继续继承。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 13
+    },
+    {
+      "id": "7",
+      "description": "2.4 新增 `model-advanced-settings` harness 场景/probe 与入口说明；验证：`npm run ui:check -- model-advanced-settings` 覆盖真实选择/编辑/保存/重挂/失败反馈、内置与自定义模型、深浅主题、窄屏，检查实际截图，其他场景不顺带运行。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 14
+    },
+    {
+      "id": "8",
+      "description": "3.1 为预算 map 和逐字段继承写红灯测试，覆盖精确模型身份、ID 含斜杠、0/未设置、非法安全整数、未匹配模型记录；验证：测试在没有新预算能力的实现上失败。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 18
+    },
+    {
+      "id": "9",
+      "description": "3.2 在 `SettingsService` 增加专属预算 get/patch/clear 路径与类型化 IPC，保留一般 set_settings 原使用契约但使它不拥有新预算键；验证：真实临时 app/settings/runtime 文件中只有显式修改的模型预算变化。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 19
+    },
+    {
+      "id": "10",
+      "description": "3.3 将专属 patch 与一般设置写入纳入同一文件串行边界，保留其他模型和旧表单未拥有的新键；验证：先后/并发保存旧设置快照与不同模型预算均不互相覆盖，失败不留下部分 JSON。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 20
+    },
+    {
+      "id": "11",
+      "description": "3.4 增加“模型压缩预算”设置分区，展示桌面覆盖、SDK继承和有效值，模型配置保存与预算保存状态分开；验证：组件测试确认未操作不写、逐字段/整模型 clear、非法输入不写，其他设置保存不改变预算。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 21
+    },
+    {
+      "id": "12",
+      "description": "4.1 用真实临时 SDK SettingsManager 编写当前模型覆盖/清除/切换与读取失败测试；验证：先复现 applyOverrides 空对象不能清除旧深合并值的红灯，不以假 setter 替代 SDK 行为。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 25
+    },
+    {
+      "id": "13",
+      "description": "4.2 实现单 owner 的预算控制器并接入 `makeGrenRuntimeFactory` 初始绑定、模型选择、配置通知和请求预检；验证：只通过公开 API 投射当前模型预算，未使用新偏好的会话不受影响，dispose 释放订阅。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 26
+    },
+    {
+      "id": "14",
+      "description": "4.3 对 clear、A/B 往返及 SDK 基线外部变化重新解析可信基线并定点恢复；验证：实际 `getCompactionSettings(model)` 不残留旧值，SDK原文件、compaction.enabled 和其他会话偏好未改。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 27
+    },
+    {
+      "id": "15",
+      "description": "4.4 将保存与会话应用回执分开处理，部分失败可只重试同步；验证：双会话集成 fixture 一方失败时仍保留成功写盘和另一方结果，不重发回合、不丢失用户草稿。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 28
+    },
+    {
+      "id": "16",
+      "description": "5.1 增加 SDK 手动/自动 preparation.settings、压缩中修改预算、百分比与 token 阈值并存回归；验证：既有百分比设置/续跑/取消行为不变，进行中压缩保持旧快照，后续压缩使用新预算；provider 使用隔离本地 fixture。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 32
+    },
+    {
+      "id": "17",
+      "description": "5.2 新增 `model-compaction-budgets` harness 场景/probe，补用户说明和旧设置来源提示；验证：`npm run ui:check -- model-compaction-budgets` 覆盖继承/显式0/清除/保存/部分生效失败、A/B 模型、深浅主题和窄屏，实际截图无误，只跑本场景。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 33
+    },
+    {
+      "id": "18",
+      "description": "5.3 在真实 SDK 请求测试中串起 adapter → 临时 models.json → ModelRuntime → 注入 fetch 截断，覆盖采样优先级、SDK缩图、桌面最终payload数量/UTF-8未压缩JSON字节预检与已知/未知缓存 TTL；验证：组合原onPayload、不重复调用、区分实际API与续传省略图片，Gren prompt/oneshot超限在fetch前拒绝且保留附件，未知协议显示未支持，请求/模型 metadata 与 UI 选择一致，无远程请求和真实凭据读取。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 34
+    },
+    {
+      "id": "19",
+      "description": "6.1 在生产 main/agent-host/worker 的隔离 fixture 中操作新 IPC，核对新会话、现有会话与重建后的预算和模型字段；验证：真实 IPC 回执和实际 SDK 有效值一致，使用新生产产物且不启动正式应用。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 38
+    },
+    {
+      "id": "20",
+      "description": "6.2 运行 CLI/Electron 生产构建及本 change 定向测试、类型增量对照，更新 Note/evidence 与 AGENTS 新场景说明；验证：构建成功、无本次新增诊断、`npm run verify-notes` 与 `openspec validate complete-desktop-model-settings --strict` 通过，明确未做真实供应商/安装包验证的边界。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-model-settings\\tasks.md",
+      "line": 39
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "all_done",
+  "instruction": "All tracked tasks are complete.\nReview or verify the change as appropriate before archiving.",
+  "root": {
+    "path": "D:\\OneDrive\\Project Files\\Pi",
+    "source": "nearest"
+  }
+}

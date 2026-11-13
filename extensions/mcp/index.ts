@@ -11,7 +11,7 @@ import { exposureForTool, normalizeExposure, type McpExposure } from "./merge.js
 import { summary } from "./summary.js";
 import { registerToolName } from "./naming.js";
 import { shapeMcpResult } from "./resultShape.js";
-import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
+import { desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 import { currentCwd } from "../_shared/workspace-context.js";
 import { batchToolRefresh } from "../_shared/tool-refresh-batch.js";
 import { waitForDirect } from "./wait.js";
@@ -44,7 +44,7 @@ export const pluginManifest = {
 } as const;
 
 export { summary, type ServerSummary } from "./summary.js";
-type McpToolDetails = { server: string; tool: string; error?: 'denied' | 'blocked' };
+type McpToolDetails = { server: string; tool: string };
 
 const mcpResultOutputSchema = {
   type: "object",
@@ -231,14 +231,13 @@ export function project(
   pi: ProjectablePi,
   snap: McpSnapshot,
   mgr: ResourceManager,
-  control?: DesktopControlPort,
   savedMcpNames: readonly string[] = [],
   registered: ProjectionCache = new Map(),
 ): string[] {
   // pi 每次 registerTool 都全量刷新一次工具表（重渲染全部 codemode 描述）。整批注册合并成一次刷新；
   // 下面算活动工具要用刷新后的工具表，所以必须放在批量结束之后。
   const { direct, hasCodemodeServer, hasDeferred, taken } = batchToolRefresh(
-    () => registerProjectedTools(pi, snap, mgr, control, registered),
+    () => registerProjectedTools(pi, snap, mgr, registered),
   );
   const pending = savedMcpNames.filter((name) => outstandingMcpName(name, snap, taken));
   try {
@@ -267,7 +266,6 @@ function registerProjectedTools(
   pi: ProjectablePi,
   snap: McpSnapshot,
   mgr: ResourceManager,
-  control: DesktopControlPort | undefined,
   registered: ProjectionCache,
 ): RegisteredProjection {
   const direct: string[] = [];
@@ -310,23 +308,9 @@ function registerProjectedTools(
         exposure,
         namespace,
         outputSchema: mcpResultOutputSchema,
-        async execute(_toolCallId, params, _signal, _update, ctx): Promise<AgentToolResult<McpToolDetails>> {
-          if (control) {
-            const authorization = await authorizeDesktopOperation(control, {
-              kind: 'mcp.call',
-              workspace: typeof ctx?.cwd === 'string' ? projectCwd(ctx) : currentCwd(),
-              server,
-              toolName: originalToolName,
-              args: params ?? {},
-            });
-            if (authorization.status !== 'allowed') {
-              return {
-                content: [{ type: 'text', text: `MCP 调用已被 Electron 权限策略${authorization.status === 'blocked' ? '暂停' : '拒绝'}` }],
-                details: { server, tool: originalToolName, error: authorization.status },
-                isError: true,
-              };
-            }
-          }
+        async execute(_toolCallId, params, _signal, _update, _ctx): Promise<AgentToolResult<McpToolDetails>> {
+          // 审批只有一条链路：safety 的 tool_call 钩子问主进程的 permission.tool.evaluate，
+          // mcp-policy 再按 auto / needs_approval / disabled 拦。这里不另设前置门。
           const raw = await mgr.callTool(server, originalToolName, (params ?? {}) as Record<string, unknown>);
           const shaped = shapeMcpResult({
             content: Array.isArray(raw.content) ? raw.content as { type: string }[] : undefined,
@@ -360,25 +344,9 @@ function registerProjectedTools(
         parameters: Type.Unsafe(name === "read_mcp_resource" ? READ_RESOURCE_PARAMETERS : LIST_RESOURCE_PARAMETERS),
         exposure: resourcesExposure,
         outputSchema: mcpResultOutputSchema,
-        async execute(_toolCallId, params, _signal, _update, ctx): Promise<AgentToolResult<McpToolDetails>> {
+        async execute(_toolCallId, params, _signal, _update, _ctx): Promise<AgentToolResult<McpToolDetails>> {
           const args = (params ?? {}) as Record<string, unknown>;
           const server = typeof args.server === "string" ? args.server : "";
-          if (control) {
-            const authorization = await authorizeDesktopOperation(control, {
-              kind: "mcp.call",
-              workspace: typeof ctx?.cwd === "string" ? projectCwd(ctx) : currentCwd(),
-              server,
-              toolName: name,
-              args,
-            });
-            if (authorization.status !== "allowed") {
-              return {
-                content: [{ type: "text", text: `MCP 调用已被 Electron 权限策略${authorization.status === "blocked" ? "暂停" : "拒绝"}` }],
-                details: { server, tool: name, error: authorization.status },
-                isError: true,
-              };
-            }
-          }
           const raw = await callResource(mgr, name, args);
           const shaped = shapeMcpResult({
             content: Array.isArray(raw?.content) ? raw.content as { type: string }[] : undefined,
@@ -460,7 +428,7 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
     }
     const render = (snap: McpSnapshot): void => {
       if (!alive) return;
-      savedMcpNames = project(pi, snap, mgr, control, savedMcpNames, registered);
+      savedMcpNames = project(pi, snap, mgr, savedMcpNames, registered);
       void control.request('mcp.state.publish', {
         workspace: typeof ctx.cwd === 'string' ? projectCwd(ctx) : currentCwd(),
         servers: summary(snap),

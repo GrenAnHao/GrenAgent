@@ -1,41 +1,126 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { defaultKeymap } from '@codemirror/commands';
+import { defaultHighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language';
+import { languages } from '@codemirror/language-data';
+import { Compartment, EditorState, StateEffect, StateField, type Extension } from '@codemirror/state';
+import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
+import { Decoration, EditorView, drawSelection, highlightSpecialChars, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
+import { cssVar, useThemeMode } from 'antd-style';
 import { codeStyles as styles } from './codeStyles';
-
-/** 超过这么多行才虚拟化；短文件整块渲染，在预览里选中、复制整段不受影响。 */
-export const VIRTUALIZE_LINE_THRESHOLD = 1000;
 
 export interface CodeSourceLinesHandle {
   /** 把第 line 行（从 1 起）滚到预览中间；行不在文件里就什么都不做。 */
   scrollToLine(line: number): void;
 }
 
-interface CodeSourceLinesProps { lines: string[]; /** 高亮并标 aria-current 的行（从 1 起） */ target?: number }
+interface CodeSourceLinesProps { lines: string[]; /** 高亮成当前位置的行（从 1 起） */ target?: number; /** 供语言识别的文件路径 */ path?: string }
+
+const setTargetLine = StateEffect.define<number | null>();
+
+const targetLineField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, tr) {
+    let next = value.map(tr.changes);
+    for (const effect of tr.effects) if (effect.is(setTargetLine)) {
+      if (effect.value == null) next = Decoration.none;
+      else {
+        const line = Math.min(Math.max(1, effect.value), tr.state.doc.lines);
+        next = Decoration.set([Decoration.line({ class: 'cm-target-line' }).range(tr.state.doc.line(line).from)]);
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+function themeExtension(isDark: boolean): Extension {
+  return [
+    EditorView.theme(
+      {
+        '&': { height: '100%', fontSize: '12px', color: cssVar.colorText, backgroundColor: 'transparent' },
+        '&.cm-focused': { outline: 'none' },
+        '.cm-scroller': { fontFamily: cssVar.fontFamilyCode, lineHeight: '1.7' },
+        // 行号栏必须不透明：横向滚动时代码从栏下穿过，透明底会让行号叠在代码上。
+        '.cm-gutters': { backgroundColor: cssVar.colorBgContainer, color: cssVar.colorTextQuaternary, border: 'none' },
+        '.cm-target-line': { backgroundColor: cssVar.colorPrimaryBg, boxShadow: `inset 2px 0 ${cssVar.colorPrimary}` },
+        '.cm-selectionBackground, .cm-content ::selection': { backgroundColor: cssVar.controlItemBgActive },
+      },
+      { dark: isDark },
+    ),
+    syntaxHighlighting(isDark ? oneDarkHighlightStyle : defaultHighlightStyle),
+  ];
+}
 
 /**
- * 只读源码预览。滚动容器就是 `pre` 自己（max-height 在样式里），长文件用 virtua 的 Virtualizer 只挂可视窗口附近的行；
- * 行会按预览宽度折行、高度不一，由 Virtualizer 自己量。
+ * 只读源码预览：CodeMirror 6，语法高亮 + 行号，目标行橄榄绿强调。
+ * 滚动容器是 CM 自己的 scroller，长文件天然只画可视窗口；高度由外层 flex 铺满。
  */
-export const CodeSourceLines = forwardRef<CodeSourceLinesHandle, CodeSourceLinesProps>(function CodeSourceLines({ lines, target }, ref) {
-  const scroller = useRef<HTMLPreElement>(null);
-  const virtualizer = useRef<VirtualizerHandle>(null);
-  const virtual = lines.length > VIRTUALIZE_LINE_THRESHOLD;
+export const CodeSourceLines = forwardRef<CodeSourceLinesHandle, CodeSourceLinesProps>(function CodeSourceLines({ lines, target, path }, ref) {
+  const host = useRef<HTMLDivElement>(null);
+  const view = useRef<EditorView | null>(null);
+  const { isDarkMode } = useThemeMode();
+  const darkRef = useRef(isDarkMode);
+  darkRef.current = isDarkMode;
+  const compartments = useRef({ theme: new Compartment(), language: new Compartment() }).current;
+  const doc = lines.join('\n');
+  const docRef = useRef(doc);
+  docRef.current = doc;
 
   useImperativeHandle(ref, () => ({
     scrollToLine(line) {
-      if (line < 1 || line > lines.length) return;
-      // 虚拟化后目标行可能根本没挂在 DOM 里，只能按下标滚。
-      if (virtual) virtualizer.current?.scrollToIndex(line - 1, { align: 'center' });
-      else scroller.current?.querySelector(`[data-source-line="${line}"]`)?.scrollIntoView?.({ block: 'center' });
+      const current = view.current;
+      if (!current || line < 1 || line > current.state.doc.lines) return;
+      current.dispatch({ effects: EditorView.scrollIntoView(current.state.doc.line(line).from, { y: 'center' }) });
     },
-  }), [virtual, lines.length]);
+  }), []);
 
-  const renderLine = (text: string, index: number) => <div key={index} data-source-line={index + 1} data-testid={`code-source-line-${index + 1}`} aria-current={target === index + 1 ? 'location' : undefined}>
-    <span data-line-number aria-hidden="true">{index + 1}</span><code>{text || ' '}</code>
-  </div>;
+  useEffect(() => {
+    const parent = host.current;
+    if (!parent) return undefined;
+    const editor = new EditorView({
+      state: EditorState.create({
+        doc: docRef.current,
+        extensions: [
+          lineNumbers(),
+          highlightSpecialChars(),
+          drawSelection(),
+          keymap.of(defaultKeymap),
+          EditorState.readOnly.of(true),
+          targetLineField,
+          compartments.theme.of(themeExtension(darkRef.current)),
+          compartments.language.of([]),
+        ],
+      }),
+      parent,
+    });
+    view.current = editor;
+    return () => { editor.destroy(); view.current = null; };
+  }, [compartments]);
 
-  // 虚拟化时用 data + 函数子元素：只为窗口里的行创建元素，不是每次渲染都为整个文件造一遍。
-  return <pre ref={scroller} className={styles.source} aria-label="源码内容">
-    {virtual ? <Virtualizer ref={virtualizer} scrollRef={scroller} data={lines}>{renderLine}</Virtualizer> : lines.map(renderLine)}
-  </pre>;
+  // 换文件：整份替换文档但保留扩展与语言；目标行装饰随 changes 映射。
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor || editor.state.doc.toString() === doc) return;
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: doc } });
+  }, [doc]);
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: setTargetLine.of(target ?? null) });
+  }, [target, doc]);
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: compartments.theme.reconfigure(themeExtension(isDarkMode)) });
+  }, [isDarkMode, compartments]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const description = path ? LanguageDescription.matchFilename(languages, path.replace(/\\/g, '/').split('/').pop() ?? path) : undefined;
+    if (!description) return undefined;
+    description.load()
+      .then((language) => { if (!cancelled) view.current?.dispatch({ effects: compartments.language.reconfigure(language) }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [path, compartments]);
+
+  return <div ref={host} className={styles.sourceViewer} aria-label="源码内容" />;
 });

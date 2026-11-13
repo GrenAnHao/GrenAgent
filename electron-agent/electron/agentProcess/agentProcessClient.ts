@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { processRegistry } from '../app/processRegistry';
+import { isBrokenPipeError } from '../browser/brokenPipe';
 import { RpcPeer, type EventListener, type MethodHandler, type WireMessage } from './rpcPeer';
 
 /** 子进程只用到 ChildProcess 的这一小部分，测试用假对象替换。 */
@@ -295,12 +296,17 @@ export class AgentProcessClient {
   }
 
   private log(stream: 'stdout' | 'stderr', line: string): void {
-    if (this.options.log) {
-      this.options.log(stream, line);
-      return;
+    try {
+      if (this.options.log) {
+        this.options.log(stream, line);
+        return;
+      }
+      if (stream === 'stderr') console.error(`[agent-host] ${line}`);
+      else console.log(`[agent-host] ${line}`);
+    } catch (error) {
+      // 启动器关闭输出管道时，日志写入不能打断子进程事件处理。
+      if (!isBrokenPipeError(error)) throw error;
     }
-    if (stream === 'stderr') console.error(`[agent-host] ${line}`);
-    else console.log(`[agent-host] ${line}`);
   }
 }
 

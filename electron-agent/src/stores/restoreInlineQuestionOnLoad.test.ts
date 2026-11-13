@@ -309,3 +309,8 @@ describe('restoreInlineQuestionOnLoad', () => {
     });
   });
 });
+
+it('does not revive an inherited/imported ask_user history as an active pending question',async()=>{
+ restoreInlineQuestionOnLoad('/ws',pendingMsgs.map(message=>({...message,historyOnly:true})),'/s/imported.jsonl');await Promise.resolve();await Promise.resolve();
+ expect(readAskUserDraft).not.toHaveBeenCalled();expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toBeUndefined();
+});

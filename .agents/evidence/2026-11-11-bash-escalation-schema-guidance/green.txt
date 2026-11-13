@@ -1,0 +1,11 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+(node:81744) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  33 passed | 1 skipped (34)
+      Tests  431 passed | 26 skipped (457)
+   Start at  11:49:15
+   Duration  49.20s (transform 2.33s, setup 0ms, import 13.38s, tests 28.24s, environment 3ms)
+

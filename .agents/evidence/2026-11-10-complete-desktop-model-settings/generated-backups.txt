@@ -1,0 +1,8 @@
+electron-agent/electron/app/settingsService.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\electron-agent\electron\app\settingsService.js
+electron-agent/electron/app/providerService.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\electron-agent\electron\app\providerService.js
+electron-agent/electron/app/piRuntimeService.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\electron-agent\electron\app\piRuntimeService.js
+electron-agent/electron/agentProcess/contract.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\electron-agent\electron\agentProcess\contract.js
+electron-agent/electron/agentProcess/runtimeGraph.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\electron-agent\electron\agentProcess\runtimeGraph.js
+electron-agent/electron/agentProcess/mainBindings.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\electron-agent\electron\agentProcess\mainBindings.js
+cli/src/probe-models.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\cli\src\probe-models.js
+extensions/_shared/oneshot.js -> C:\Users\rxstudio\AppData\Local\Temp\gren-model-settings-generated-backup\extensions\_shared\oneshot.js

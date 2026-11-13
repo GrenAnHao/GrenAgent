@@ -1,6 +1,32 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { collectModels, type RegistryLike } from "./probe-models.js";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { collectModels, probeRuntimePaths, type RegistryLike } from "./probe-models.js";
+
+test("probeRuntimePaths follows PI_CODING_AGENT_DIR like the Electron main process", () => {
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(homedir(), "custom-agent-dir");
+  try {
+    assert.deepEqual(probeRuntimePaths(), {
+      authPath: join(homedir(), "custom-agent-dir", "auth.json"),
+      modelsPath: join(homedir(), "custom-agent-dir", "models.json"),
+    });
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+});
+
+test("probeRuntimePaths falls back to the default agent dir", () => {
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  delete process.env.PI_CODING_AGENT_DIR;
+  try {
+    assert.equal(probeRuntimePaths().authPath, join(homedir(), ".pi", "agent", "auth.json"));
+  } finally {
+    if (previous !== undefined) process.env.PI_CODING_AGENT_DIR = previous;
+  }
+});
 
 test("collectModels maps registry models to serializable rows", () => {
   const registry: RegistryLike = {
@@ -56,4 +82,11 @@ test("collectModels fills defaults for sparse models", () => {
 
 test("collectModels returns [] when registry has no models", () => {
   assert.deepEqual(collectModels({ getAll: () => [] }), []);
+});
+
+test('collectModels preserves advanced metadata without leaking headers or credentials',()=>{
+ const options={samplingParams:{top_p:0},samplingParamsByThinkingLevel:{low:{top_k:3}},inputLimits:{images:{maxPerMessage:2}},promptCache:{short:0.5}};
+ const rows=collectModels({getAll:()=>[{provider:'fixture',id:'org/A',...options,apiKey:'do-not-export',headers:{Authorization:'do-not-export'}}]} as RegistryLike);
+ for(const key of Object.keys(options))assert.deepEqual((rows[0] as any)[key],(options as any)[key]);
+ assert.equal('headers' in rows[0],false);assert.equal('apiKey' in rows[0],false);
 });

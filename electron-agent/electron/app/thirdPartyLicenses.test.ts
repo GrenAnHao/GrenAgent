@@ -32,13 +32,13 @@ describe('collect-third-party-licenses', () => {
     expect(fromConfig).toContain('node_modules/@splinetool/**');
   });
 
-  it('lists installed production dependencies and the vendored RepoWiki, dev ones excluded', () => {
+  it('lists installed production dependencies, dev ones excluded', () => {
     const inventory = script.buildInventory();
     const names = new Set(inventory.map((entry) => entry.name));
     expect(names.has('react')).toBe(true);
     expect(names.has('mermaid')).toBe(true);
     expect(names.has('elkjs')).toBe(true);
-    for (const name of ['diff', 'ignore', 'fflate', 'dompurify', 'react-markdown', 'remark-gfm', 'shiki', 'remark-parse', 'unified', 'repo-wiki']) {
+    for (const name of ['diff', 'ignore', 'fflate', 'dompurify', 'react-markdown', 'remark-gfm', 'shiki', 'remark-parse', 'unified']) {
       expect(names.has(name)).toBe(true);
     }
     // @splinetool 只由 @lobehub/ui 的依赖声明拉进来，本项目不分发它。
@@ -71,15 +71,6 @@ describe('collect-third-party-licenses', () => {
       expect(existsSync(join(out, 'dompurify', version, 'LICENSE'))).toBe(true);
       expect(existsSync(join(out, 'dompurify', version, 'LICENSE-MPL'))).toBe(true);
     }
-
-    const vendoredJsonRepair = script.buildInventory().find((entry) => entry.name === 'jsonrepair-vendored');
-    expect(vendoredJsonRepair).toMatchObject({ version: '3.15.0', license: 'ISC', files: ['LICENSE.md'] });
-    const jsonRepairLicense = readFileSync(join(root, 'electron/wikiService/reference/qoder-0.5.1/jsonrepair-3.15.0/LICENSE.md'), 'utf8');
-    expect(readFileSync(join(out, vendoredJsonRepair!.directory, 'LICENSE.md'), 'utf8')).toBe(jsonRepairLicense);
-    expect(jsonRepairLicense).toContain('Copyright (c) 2020-2026 by Jos de Jong');
-
-    expect(readFileSync(join(out, 'repo-wiki', 'LICENSE'), 'utf8')).toContain('Copyright (c) 2026 Yufeng He');
-    expect(readFileSync(join(out, 'repo-wiki', 'THIRD_PARTY_NOTICES.md'), 'utf8')).toContain('he-yufeng/RepoWiki');
 
     // 本仓库的许可与第三方来源说明也一并给出。
     expect(readFileSync(join(out, 'LICENSE.txt'), 'utf8')).toContain('PolyForm Noncommercial License 1.0.0');

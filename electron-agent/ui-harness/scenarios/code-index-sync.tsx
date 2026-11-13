@@ -1,6 +1,5 @@
 import type { ReactElement } from 'react'
 import { CodeRetrievalPanel } from '../../src/features/agentData/CodeRetrievalPanel'
-import { AgentDataTaskProvider } from '../../src/features/agentData/AgentDataTaskProvider'
 import { styles } from '../../src/features/agentData/agentDataStyles'
 import { useSessionStore } from '../../src/store'
 import { exposeActions, exposeData, installBridge, track } from '../stubs'
@@ -16,7 +15,7 @@ const FILES = 120
 const base = { workspace: WORKSPACE, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.2', nodes: 900, edges: 2100, lastIndexedAt: Date.parse('2026-10-18T00:00:00.000Z'), autoSync: true, consecutiveFailures: 0, pendingChanges: 0 }
 const watching = { active: true, degraded: false }
 
-type Phase = 'syncing' | 'idle' | 'locked' | 'rebuilding' | 'failed' | 'degraded'
+type Phase = 'syncing' | 'idle' | 'locked' | 'rebuilding' | 'failed' | 'degraded' | 'watch-starting'
 let phase: Phase = 'syncing'
 
 function status(): Record<string, unknown> {
@@ -28,6 +27,8 @@ function status(): Record<string, unknown> {
     case 'rebuilding': return { ...base, state: 'indexing', files: FILES + 2, phase: 'rebuilding', mode: 'full', trigger: 'manual', servingStale: false, watcher: watching, generation: 5 }
     case 'failed': return { ...base, state: 'failed', files: FILES + 2, message: 'parse exploded', phase: 'failed', consecutiveFailures: 6, lastError: { message: 'parse exploded', at: 0 }, servingStale: false, watcher: watching, generation: 5 }
     case 'degraded': return { ...base, state: 'indexed', files: FILES + 2, phase: 'idle', servingStale: false, watcher: { active: false, degraded: true, reason: 'EMFILE: too many open files' }, generation: 6 }
+    // 首查后 watch 异步挂载的中间态：active:false/degraded:false，几秒内落定。
+    case 'watch-starting': return { ...base, state: 'indexed', files: FILES + 2, phase: 'idle', servingStale: false, watcher: { active: false, degraded: false }, generation: 7 }
   }
 }
 
@@ -58,9 +59,7 @@ export default function CodeIndexSyncScenario(): ReactElement {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--gren-content-bg)' }}>
       <div className={styles.panel} data-testid="agent-data-panel">
-        <AgentDataTaskProvider visible activeView="code">
-          <CodeRetrievalPanel initialProject={WORKSPACE} visible />
-        </AgentDataTaskProvider>
+        <CodeRetrievalPanel initialProject={WORKSPACE} visible />
       </div>
     </div>
   )

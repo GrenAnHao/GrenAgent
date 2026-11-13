@@ -12,7 +12,6 @@
   "include": [
     "electron.vite.config.ts",
     "electron/**/*.ts",
-    "vendor/repo-wiki/packages/*/src/**/*.ts",
     "src/lib/usageReport.ts",
     "src/features/chat/skillCommandText.ts",
     "../extensions/**/*.ts",

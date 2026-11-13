@@ -3,9 +3,21 @@
 //
 // collectModels 是纯逻辑（无 pi 依赖，便于单测）；runModelProbe 动态 import pi，仅在实际运行子命令时加载。
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { supportsFastMode } from "../../extensions/_shared/fast-mode.js";
+import type { ProviderModelOptions } from '../../extensions/_shared/provider-model-options.js';
 
-export interface ModelRow {
+/** 与主进程 / agent 子进程共用同一份 auth.json 与 models.json；不传会用 SDK 默认目录，自定义 agentDir 下会读到空凭据。 */
+export function probeRuntimePaths(): { authPath: string; modelsPath: string } {
+  const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+  return {
+    authPath: join(agentDir, "auth.json"),
+    modelsPath: join(agentDir, "models.json"),
+  };
+}
+
+export interface ModelRow extends ProviderModelOptions {
   provider: string;
   id: string;
   name: string;
@@ -42,13 +54,17 @@ export function collectModels(registry: RegistryLike): ModelRow[] {
     input: m.input ?? ["text"],
     cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
+    ...(m.samplingParams !== undefined ? { samplingParams: m.samplingParams } : {}),
+    ...(m.samplingParamsByThinkingLevel !== undefined ? { samplingParamsByThinkingLevel: m.samplingParamsByThinkingLevel } : {}),
+    ...(m.inputLimits !== undefined ? { inputLimits: m.inputLimits } : {}),
+    ...(m.promptCache !== undefined ? { promptCache: m.promptCache } : {}),
   }));
 }
 
 export async function runModelProbe(): Promise<void> {
   try {
     const { ModelRuntime, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
-    const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+    const modelRuntime = await ModelRuntime.create({ ...probeRuntimePaths(), allowModelNetwork: false });
     const registry = new ModelRegistry(modelRuntime) as unknown as RegistryLike;
     process.stdout.write(`${JSON.stringify({ ok: true, models: collectModels(registry) })}\n`);
   } catch (e) {

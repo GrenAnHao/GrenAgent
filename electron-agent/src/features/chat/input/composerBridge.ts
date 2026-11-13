@@ -78,3 +78,8 @@ export async function sendViaComposer(text: string, images?: PromptImage[]): Pro
   if (!sendFn) throw new Error('composer send is not registered');
   await sendFn(text, images);
 }
+
+export interface ComposerSnapshot {ownerKey:string;text:string;hasContent:boolean}
+let readSnapshotFn:(()=>ComposerSnapshot)|null=null;
+export function registerComposerSnapshot(fn:(()=>ComposerSnapshot)|null):void{readSnapshotFn=fn;}
+export function readComposerSnapshot():ComposerSnapshot|null{return readSnapshotFn?.()??null;}

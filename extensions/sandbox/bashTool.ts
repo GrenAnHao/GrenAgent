@@ -69,7 +69,7 @@ const bashSchema = Type.Object({
       description: SANDBOX_PERMISSIONS_DESCRIPTION,
     }),
   ),
-  justification: Type.Optional(Type.String({ description: JUSTIFICATION_DESCRIPTION })),
+  justification: Type.Optional(Type.String({ minLength: 1, description: JUSTIFICATION_DESCRIPTION })),
 });
 
 /** 与 pi 的 bashOutputSchema 一致：codemode 脚本拿到的就是这个形状。 */

@@ -32,6 +32,7 @@ import {
   registerComposerLoad,
   registerComposerSend,
   registerComposerSetValue,
+  registerComposerSnapshot,
   type ComposerFileRef,
 } from './input/composerBridge';
 import { INSERT_CHAT_TAG_COMMAND } from './input/editor/ChatTag/command';
@@ -97,6 +98,11 @@ export function ChatInput({
   const readDraft = useCallback(() => readComposerText(editor), [editor]);
   // 存草稿用整份：文本之外还带 Lexical JSON，胶囊和 @ 标签靠它原样回来（见 composerDraft.ts）。
   const readStoredDraft = useCallback(() => readComposerDraft(editor), [editor]);
+
+  useEffect(() => {
+    registerComposerSnapshot(() => { const text=readDraft();return {ownerKey:draftKey,text,hasContent:Boolean(text.length||attachments.length||pastedTexts.length)}; });
+    return () => registerComposerSnapshot(null);
+  }, [draftKey,readDraft,attachments.length,pastedTexts.length]);
 
   const sendingRef = useRef(false);
   // 草稿持久化：debounce 写，避免每键都落 localStorage。

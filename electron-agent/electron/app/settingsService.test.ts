@@ -69,3 +69,44 @@ describe('SettingsService runtime control keys', () => {
     });
   });
 });
+
+describe('model compaction budget ownership', () => {
+  const key = 'PI_MODEL_COMPACTION_OVERRIDES';
+  it('ordinary settings snapshots cannot erase or supply the dedicated budget key', async () => {
+    const {service, directory} = await createService();
+    const original = JSON.stringify({'Exact/org/Model':{reserveTokens:0}});
+    await writeFile(join(directory,'settings.json'),JSON.stringify({[key]:original, OTHER:'old'}));
+    await service.replace({OTHER:'new',[key]:'{}'});
+    expect((await service.getAll())[key]).toBe(original);
+    expect(JSON.parse(await readFile(join(directory,'runtime-settings.json'),'utf8'))[key]).toBe(original);
+  });
+  it('patches exact identities and serializes concurrent snapshots and model edits', async () => {
+    const {service,directory}=await createService();
+    await service.replace({OTHER:'old'});
+    await Promise.all([
+      service.patchModelCompactionBudget('Exact','org/Model',{reserveTokens:0}),
+      service.replace({OTHER:'new'}),
+      service.patchModelCompactionBudget('exact','org/Model',{keepRecentTokens:300}),
+    ]);
+    expect(await service.getModelCompactionBudgets()).toEqual({'Exact/org/Model':{reserveTokens:0},'exact/org/Model':{keepRecentTokens:300}});
+    await service.patchModelCompactionBudget('Exact','org/Model',{reserveTokens:null});
+    expect(await service.getModelCompactionBudgets()).toEqual({'exact/org/Model':{keepRecentTokens:300}});
+    for(const name of ['settings.json','runtime-settings.json']) {
+      const saved=JSON.parse(await readFile(join(directory,name),'utf8'));
+      expect(saved.OTHER).toBe('new');
+      expect(JSON.parse(saved[key])).toEqual({'exact/org/Model':{keepRecentTokens:300}});
+    }
+    expect(JSON.parse(await readFile(join(directory,'app-state.json'),'utf8')).settings.OTHER).toBe('new');
+  });
+  it('rejects invalid patches before writing and preserves unmatched records', async () => {
+    const {service}=await createService();
+    await service.patchModelCompactionBudget('removed','id/with/slashes',{reserveTokens:100,keepRecentTokens:0});
+    const before=await service.getAll();
+    for(const value of [-1,1.5,Number.MAX_SAFE_INTEGER+1,NaN,'10']) {
+      await expect(service.patchModelCompactionBudget('p','m',{reserveTokens:value} as never)).rejects.toThrow();
+    }
+    expect(await service.getAll()).toEqual(before);
+    await service.clearModelCompactionBudget('removed','id/with/slashes');
+    expect(await service.getModelCompactionBudgets()).toEqual({});
+  });
+});

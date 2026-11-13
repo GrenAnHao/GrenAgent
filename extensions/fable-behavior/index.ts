@@ -1,8 +1,6 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getConfig } from "../_shared/runtime-config.js";
-import { branchEntriesOf, tasteApplies } from "../_shared/taste-scope.js";
 import { buildFableBehaviorPrompt, readTier3Module, resolveAgentModeFromEntries, TIER3_TOPICS } from "./loader.js";
 import { seedFableAgents } from "./seed.js";
 
@@ -14,7 +12,7 @@ const tier3Tool = () => (getConfig("FABLE_BEHAVIOR_TIER3_TOOL") ?? "1") !== "0";
 
 // topic 单一真相源在 loader.ts（TIER3_TOPICS）；此处直接复用，避免两处枚举漂移失配。
 const RefParams = Type.Object({
-  topic: StringEnum(TIER3_TOPICS),
+  topic: Type.String({ enum: TIER3_TOPICS }),
 });
 
 let seededThisProcess = false;
@@ -64,9 +62,6 @@ export default function (pi: ExtensionAPI) {
       customType?: string;
       data?: unknown;
     }>;
-    // gpt-with-taste 接管时让位：两者都是行为层，同时注入会互相覆盖语气与纪律。
-    // 判据与 taste 侧共用 _shared/taste-scope.ts；切回非 GPT 模型或 /taste off 后这里自动恢复。
-    if (tasteApplies({ model: ctx.model, entries: branchEntriesOf(ctx) })) return undefined;
     const mode = resolveAgentModeFromEntries(entries);
     const now = new Date();
     const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;

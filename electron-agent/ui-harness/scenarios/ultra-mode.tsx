@@ -54,6 +54,8 @@ installBridge({
   subscribe: async () => () => {},
   invoke: async (command: string, args: Record<string, unknown>) => {
     switch (command) {
+      case 'get_cache_warming':
+        return 'idle'
       case 'get_settings':
         return { ...settings }
       case 'agent_get_state':

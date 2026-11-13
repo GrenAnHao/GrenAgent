@@ -41,12 +41,11 @@ flowchart LR
   R["渲染层<br/>React 19 + Vite"] -->|"window.gren<br/>gren:invoke"| M["Electron 主进程"]
   M -->|"gren:event:"| R
   M <-->|"RPC"| A["agent-host 子进程<br/>Pi SDK / 全部扩展 / 后台任务"]
-  M <-->|"RPC"| D["agentdata-host 子进程<br/>Wiki / 任务 / 审计"]
-  D -->|"子进程"| C["codegraph-host<br/>CodeGraph SDK"]
+  M -->|"子进程"| C["codegraph-host<br/>CodeGraph SDK"]
   A -->|"spawn"| W["pi-worker<br/>CLI 与嵌套子代理"]
 ```
 
-渲染层只通过 `window.gren` 与主进程通信：请求走单一通道 `gren:invoke`，流式事件用 `gren:event:` 前缀广播。Pi SDK 跑在 `agent-host` 子进程里，所有工作区共用；Wiki、任务审计和代码索引由 `agentdata-host` 与 `codegraph-host` 独立承载，数据落在本机 SQLite。主进程与两个 host 之间是 Node IPC，扩展则经命名管道直连 `agentdata-host`。主进程自己只做窗口、IPC 路由、模型短调用和各类服务。业务代码统一走 `src/platform/runtime.ts` 的后端抽象，不直接依赖 Electron。详见 [架构文档](./docs/architecture.md)。
+渲染层只通过 `window.gren` 与主进程通信：请求走单一通道 `gren:invoke`，流式事件用 `gren:event:` 前缀广播。Pi SDK 跑在 `agent-host` 子进程里，所有工作区共用；代码索引由主进程持有的 `codegraph-host` 承载。AgentData 运行时与 `agentdata-host` 已下线：运行时改为在主进程内装配，扩展通过一个最小命名管道端点使用代码检索与工具授权。业务代码统一走 `src/platform/runtime.ts` 的后端抽象，不直接依赖 Electron。详见 [架构文档](./docs/architecture.md)。
 
 | 目录 | 包名 | 职责 |
 | --- | --- | --- |
@@ -98,7 +97,7 @@ pnpm ui:check -- <场景名>          # 真实 Electron 窗口里的 UI 检查�
 | 类别 | 扩展 | 说明 |
 | --- | --- | --- |
 | 安全与策略 | `safety`、`approval`、`sandbox`、`loop-guard`、`rulebook`、`mcp-policy` | 工具拦截、审批策略、OS 沙箱 bash、相同调用提醒、声明式规则、MCP 工具权限与审计 |
-| 提示词与行为 | `prompt-commands`、`context-rules`、`header-placeholders`、`fable-behavior`、`gpt-with-taste` | 参数化命令、规则文件注入系统提示、请求头占位符、行为层提示；taste 生效时 fable 让位 |
+| 提示词与行为 | `prompt-commands`、`context-rules`、`header-placeholders`、`fable-behavior` | 参数化命令、规则文件注入系统提示、请求头占位符、行为层提示 |
 | 上下文与会话 | `compaction-policy`、`image-limits`、`session-memory`、`auto-title`、`usage-ledger`、`todo`、`present` | 压缩与裁剪、图片限幅、会话工作状态、自动标题、用量记账、待办、产物声明 |
 | 任务驱动 | `goal`、`agent-mode`、`multi-agent`、`jobs`、`working-directory` | 目标续跑、Agent / Ask / Debug / Plan / Ultra 模式、子代理委派、后台任务、工作目录与独立工作区 |
 | 知识库 | `wiki-rag` | Wiki 只读检索 |
@@ -124,7 +123,7 @@ pnpm ui:check -- <场景名>          # 真实 Electron 窗口里的 UI 检查�
 .
 ├── electron-agent/   # 桌面应用
 │   ├── src/          # 渲染层：features / stores / lib / platform / components / theme
-│   ├── electron/     # 主进程：app / agent / agentProcess / agentData / agentDataProcess / pi / ipc
+│   ├── electron/     # 主进程：app / agent / agentProcess / agentData / pi / ipc
 │   ├── native/       # Windows 原生 helper 源码（进程树守卫）
 │   └── ui-harness/   # UI 自动化检查：场景与断言
 ├── extensions/       # 内置扩展，由 allExtensions 汇总

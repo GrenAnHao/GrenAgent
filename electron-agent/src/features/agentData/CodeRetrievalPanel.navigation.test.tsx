@@ -1,22 +1,22 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const monitor = vi.hoisted(() => ({ jobs: [] as import('../../lib/agentData').AgentJob[], tasks: undefined as import('../../lib/agentData').TaskView[] | undefined, track: vi.fn(), watchedTaskVersion: 0 }));
-vi.mock('./AgentDataTaskProvider', () => ({ useAgentDataTaskMonitor: () => monitor }));
 vi.mock('./useProjectOptions', () => ({ useProjectOptions: () => [{ cwd: 'D:/a', name: 'A' }, { cwd: 'D:/b', name: 'B' }] }));
 vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { projects: vi.fn(), status: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
 vi.mock('../../lib/files', () => ({ files: { read: vi.fn() } }));
 vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
+vi.mock('./CodeSourceLines', async () => await import('./codeSourceLinesStub'));
 import { agentDataApi } from '../../lib/agentData';
 import { files } from '../../lib/files';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
+import { scrollToLineSpy } from './codeSourceLinesStub';
 import { deferred } from './operationsTestData';
 import { task } from './operationsTestData';
 import { expectSelectDisplay, pickSelectOption } from './antdSelectTestUtils';
 
 describe('CodeRetrievalPanel resource navigation', () => {
   beforeEach(() => {
-    vi.resetAllMocks(); monitor.watchedTaskVersion = 0; monitor.tasks = undefined; monitor.jobs = [];
+    vi.resetAllMocks();
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([]);
     vi.mocked(agentDataApi.code.status).mockImplementation(async (workspace) => ({ workspace, connected: true, indexed: true }));
     vi.mocked(agentDataApi.code.call).mockResolvedValue({ structuredContent: [] });
@@ -35,22 +35,20 @@ describe('CodeRetrievalPanel resource navigation', () => {
   });
 
   it('waits until visible and repeats an explicit request without jumping on ordinary rerenders', async () => {
-    const scroll = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll });
     const navigation = { view: 'code' as const, workspace: 'D:/a', file: 'a.ts', line: 2 };
     const { rerender } = render(<CodeRetrievalPanel visible={false} navigation={navigation} navigationRequest={1} />);
     expect(agentDataApi.code.status).not.toHaveBeenCalled();
     expect(files.read).not.toHaveBeenCalled();
     rerender(<CodeRetrievalPanel navigation={navigation} navigationRequest={1} />);
     await screen.findByText('target');
-    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scrollToLineSpy).toHaveBeenCalledTimes(1);
+    // 任务视图下线后没有 watchedTaskVersion 回调：普通重渲染不再触发第二次状态读取。
     rerender(<CodeRetrievalPanel navigation={{ ...navigation }} navigationRequest={1} />);
-    monitor.watchedTaskVersion++;
     rerender(<CodeRetrievalPanel navigation={navigation} navigationRequest={1} />);
-    await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledTimes(2));
-    expect(scroll).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledTimes(1));
+    expect(scrollToLineSpy).toHaveBeenCalledTimes(1);
     rerender(<CodeRetrievalPanel navigation={navigation} navigationRequest={2} />);
-    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(scrollToLineSpy).toHaveBeenCalledTimes(2));
   });
 
   it('refuses unknown workspaces and outside files without reading or creating tasks', async () => {
@@ -86,18 +84,14 @@ describe('CodeRetrievalPanel resource navigation', () => {
     expect((screen.getByLabelText('搜索代码') as HTMLInputElement).value).toBe('alpha query');
   });
 
-  it('uses projected task stages without fabricating zero progress', async () => {
+  it('surfaces the sync state banner after starting a sync, without a task list', async () => {
     vi.mocked(agentDataApi.jobs.create).mockResolvedValue({ id: 'job-1', workspace: 'D:/a', kind: 'codegraph.sync', state: 'running', progress: 0, createdAt: 1, updatedAt: 1 });
-    monitor.jobs = [{ id: 'job-1', workspace: 'D:/a', kind: 'codegraph.sync', state: 'running', progress: 0, createdAt: 1, updatedAt: 1 }];
-    monitor.tasks = [{ ...task, ref: { source: 'user', id: 'job-1' }, status: 'running', progress: undefined, stage: '扫描文件' }];
-    const { rerender } = render(<CodeRetrievalPanel initialProject="D:/a" />);
+    vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/a', connected: true, indexed: true });
+    render(<CodeRetrievalPanel initialProject="D:/a" />);
     fireEvent.click(await screen.findByRole('button', { name: '同步索引' }));
-    await screen.findByText(/扫描文件/);
-    expect(screen.queryByText(/0%/)).toBeNull();
-    monitor.tasks = [{ ...monitor.tasks[0], cancellationRequested: true, stage: undefined }];
-    rerender(<CodeRetrievalPanel />);
-    expect(screen.getByText(/正在取消.*等待确认/)).toBeTruthy();
-    expect(screen.getByText(/进度未提供/)).toBeTruthy();
+    // 横幅不再来自任务列表，而是读 status 轮询的结果。
+    await screen.findByText(/已开始同步/);
+    expect(screen.queryByText(/查看任务/)).toBeNull();
   });
 
   it('invalidates same-project query and node replies on direct file navigation', async () => {

@@ -1,0 +1,22 @@
+Windows, 2026-11-13
+
+Before:
+  Existing Vite listener: [::1]:31415
+  Node HTTP GET localhost:31415: EACCES
+  Node HTTP GET 127.0.0.1:31415: ECONNREFUSED
+  Independent HTTP loopback test: ::1 EACCES; 127.0.0.1 HTTP 200
+
+Patched config:
+  Resolved the real electron-vite config for localrun and dev, then started
+  Vite with the resolved renderer config on an isolated port/cache.
+  localrun leaves DNS order unchanged
+  dev listener 127.0.0.1
+  200 /
+  200 /@vite/client
+  200 /src/features/sessions/ArchivedSessions.tsx
+  HTTP requests used localhost; process exited 0.
+
+Live recovery:
+  Started an IPv4-only renderer service at the original localhost:31415
+  origin, leaving the existing Electron process in place. Reloaded its
+  renderer and observed the conversation history, composer and active goal.

@@ -1,10 +1,52 @@
 import { describe, expect, it } from 'vitest';
 import { allowedCompatKeys, groupsForEditor } from './modelCompatCatalog';
 import { defaultThinkingLevelMap, loadState, MODELS_JSON_SCHEMA, modelsWithApiThinkingLevels, serializeState, type UiProvider } from './providerConfigAdapter';
+import { PROVIDER_PRESETS } from './providerPresets';
 
 const presets = [{ id: 'openai', name: 'OpenAI', api: 'openai-responses' }];
 
 describe('providerConfigAdapter', () => {
+  it('round-trips Pi 1.5 OpenAI compatibility overrides including explicit false', () => {
+    for (const promptCacheKeyMode of ['auto', 'enabled', 'disabled']) {
+      const compat = { requiresNonNullAssistantContent: true, requiresToolsWithToolHistory: false, promptCacheKeyMode };
+      const { modelsJson } = serializeState([{
+        id: 'relay', name: 'Relay', builtIn: false, api: 'openai-completions',
+        models: [{ id: 'fixture', compat }],
+      }]);
+      expect(JSON.parse(modelsJson).providers.relay.models[0].compat).toEqual(compat);
+      const back = loadState(modelsJson, '{}', presets).find((p) => p.id === 'relay')!;
+      expect(back.models[0].compat).toEqual(compat);
+      expect(JSON.parse(serializeState([back]).modelsJson).providers.relay.models[0].compat).toEqual(compat);
+    }
+  });
+
+  it('keeps message threads tri-state and filters Pi 1.5 fields by protocol', () => {
+    for (const supportsMessageThreads of [undefined, false, true]) {
+      const { modelsJson } = serializeState([{
+        id: 'relay', name: 'Relay', builtIn: false, api: 'anthropic-messages',
+        models: [{ id: 'fixture', compat: { supportsMessageThreads, requiresToolsWithToolHistory: true, promptCacheKeyMode: 'enabled' } }],
+      }]);
+      const raw = JSON.parse(modelsJson).providers.relay.models[0].compat;
+      expect(raw?.supportsMessageThreads).toBe(supportsMessageThreads);
+      expect(raw?.requiresToolsWithToolHistory).toBeUndefined();
+      expect(raw?.promptCacheKeyMode).toBeUndefined();
+      const back = loadState(modelsJson, '{}', presets).find((p) => p.id === 'relay')!;
+      expect(back.models[0].compat?.supportsMessageThreads).toBe(supportsMessageThreads);
+    }
+    expect(allowedCompatKeys('openai-responses').has('promptCacheKeyMode')).toBe(true);
+    expect(allowedCompatKeys('openai-responses').has('requiresToolsWithToolHistory')).toBe(false);
+    expect(allowedCompatKeys('openai-completions').has('supportsMessageThreads')).toBe(false);
+    const fields = groupsForEditor('anthropic-messages').flatMap((group) => group.fields);
+    expect(fields.find((field) => field.key === 'supportsMessageThreads')).toMatchObject({ kind: 'bool', defaultLabel: expect.any(String) });
+  });
+
+  it('omits inherited Pi 1.5 flags rather than silently opting every model in or out', () => {
+    for (const api of ['openai-completions', 'openai-responses', 'anthropic-messages']) {
+      const { modelsJson } = serializeState([{ id: 'relay', name: 'Relay', builtIn: false, api, models: [{ id: 'fixture' }] }]);
+      expect(JSON.parse(modelsJson).providers.relay.models[0].compat).toBeUndefined();
+    }
+  });
+
   it('loads built-in key from auth.json', () => {
     const ps = loadState('{}', '{"openai":{"type":"api_key","key":"sk-x"}}', presets);
     expect(ps[0]).toMatchObject({ id: 'openai', builtIn: true, apiKey: 'sk-x' });
@@ -22,27 +64,28 @@ describe('providerConfigAdapter', () => {
         models: [{ id: 'm1', name: 'M1' }],
       },
     ];
-    const { modelsJson, authJson } = serializeState(custom);
-    const back = loadState(modelsJson, authJson, presets).find((p) => p.id === 'my');
+    const { modelsJson } = serializeState(custom);
+    const back = loadState(modelsJson, null, presets).find((p) => p.id === 'my');
     expect(back).toMatchObject({ id: 'my', apiKey: 'k', baseUrl: 'https://x/v1', builtIn: false });
     expect(back?.models[0].id).toBe('m1');
   });
 
-  it('built-in key goes to auth.json, not models.json', () => {
-    const { modelsJson, authJson } = serializeState([
+  it('built-in API key is never written to models.json or a generated auth.json', () => {
+    const result = serializeState([
       { id: 'openai', name: 'OpenAI', builtIn: true, apiKey: 'sk-y', models: [] },
     ]);
-    expect(JSON.parse(modelsJson).providers.openai).toBeUndefined();
-    expect(JSON.parse(authJson).openai).toEqual({ type: 'api_key', key: 'sk-y' });
+    expect(JSON.parse(result.modelsJson).providers.openai).toBeUndefined();
+    // 凭据归官方 CredentialStore：设置页不再生成整份 auth.json，避免保存时抹掉 OAuth 凭据。
+    expect(Object.keys(result)).toEqual(['modelsJson']);
   });
 
   it('writes the published models.json $schema first and still loads it back', () => {
-    const { modelsJson, authJson } = serializeState([]);
+    const { modelsJson } = serializeState([]);
     const parsed = JSON.parse(modelsJson);
     expect(Object.keys(parsed)[0]).toBe('$schema');
     expect(parsed.$schema).toBe(MODELS_JSON_SCHEMA);
     expect(MODELS_JSON_SCHEMA).toBe('https://pi.dev/schemas/models.schema.json');
-    expect(loadState(modelsJson, authJson, presets)).toHaveLength(presets.length);
+    expect(loadState(modelsJson, null, presets)).toHaveLength(presets.length);
   });
 
   it('built-in with custom model writes a models.json entry', () => {
@@ -74,10 +117,10 @@ describe('providerConfigAdapter', () => {
   });
 
   it('round-trips custom provider headers', () => {
-    const { modelsJson, authJson } = serializeState([
+    const { modelsJson } = serializeState([
       { id: 'p', name: 'P', builtIn: false, api: 'anthropic-messages', headers: { 'X-Foo': 'bar' }, models: [] },
     ]);
-    const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
+    const back = loadState(modelsJson, null, presets).find((x) => x.id === 'p');
     expect(back?.headers).toMatchObject({ 'X-Foo': 'bar', 'User-Agent': 'pi-agent/1.0' });
   });
 
@@ -98,7 +141,7 @@ describe('providerConfigAdapter', () => {
   });
 
   it('round-trips a custom anthropic reasoning model: per-model map + adaptive thinking on by default', () => {
-    const { modelsJson, authJson } = serializeState([
+    const { modelsJson } = serializeState([
       {
         id: 'p', name: 'P', builtIn: false, api: 'anthropic-messages',
         models: [
@@ -113,32 +156,32 @@ describe('providerConfigAdapter', () => {
     expect(raw[0].thinkingLevelMap).toEqual({ minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' });
     expect(raw[1].thinkingLevelMap).toEqual(raw[0].thinkingLevelMap);
 
-    const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
+    const back = loadState(modelsJson, null, presets).find((x) => x.id === 'p');
     expect(back?.models[0]).toMatchObject({ id: 'claude-opus-4-6', reasoning: true, forceAdaptiveThinking: true });
     expect(back?.models[1]).toMatchObject({ id: 'claude-opus-4-8', reasoning: true, forceAdaptiveThinking: true });
   });
 
   it('persists adaptive-thinking turned off (budget thinking, no effort) for older anthropic models', () => {
-    const { modelsJson, authJson } = serializeState([
+    const { modelsJson } = serializeState([
       {
         id: 'p', name: 'P', builtIn: false, api: 'anthropic-messages',
         models: [{ id: 'claude-3-7-sonnet', reasoning: true, forceAdaptiveThinking: false }],
       },
     ]);
     expect(JSON.parse(modelsJson).providers.p.models[0].compat).toEqual({ forceAdaptiveThinking: false });
-    const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
+    const back = loadState(modelsJson, null, presets).find((x) => x.id === 'p');
     expect(back?.models[0].forceAdaptiveThinking).toBe(false);
   });
 
   it('does not write compat/forceAdaptiveThinking for non-anthropic reasoning models', () => {
-    const { modelsJson, authJson } = serializeState([
+    const { modelsJson } = serializeState([
       {
         id: 'p', name: 'P', builtIn: false, api: 'openai-completions',
         models: [{ id: 'gpt-x', reasoning: true }],
       },
     ]);
     expect(JSON.parse(modelsJson).providers.p.models[0].compat).toBeUndefined();
-    const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
+    const back = loadState(modelsJson, null, presets).find((x) => x.id === 'p');
     expect(back?.models[0].forceAdaptiveThinking).toBeUndefined();
   });
 
@@ -251,7 +294,7 @@ describe('providerConfigAdapter', () => {
   });
 
   it('round-trips image input, thinkingFormat and openai compat flags', () => {
-    const { modelsJson, authJson } = serializeState([
+    const { modelsJson } = serializeState([
       {
         id: 'p', name: 'P', builtIn: false, api: 'openai-completions',
         models: [{
@@ -277,7 +320,7 @@ describe('providerConfigAdapter', () => {
     });
     expect(raw.compat.forceAdaptiveThinking).toBeUndefined();
 
-    const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
+    const back = loadState(modelsJson, null, presets).find((x) => x.id === 'p');
     expect(back?.models[0]).toMatchObject({
       id: 'glm-5.2',
       input: ['text', 'image'],
@@ -305,10 +348,58 @@ describe('providerConfigAdapter', () => {
     expect(compat.supportsMidConvoEffort).toBeUndefined();
   });
 
+  it('lists the 1.4.0 subscription providers without hardcoding OAuth capability', () => {
+    for (const id of ['github-copilot', 'openai-codex', 'meta']) {
+      const preset = PROVIDER_PRESETS.find((p) => p.id === id);
+      expect(preset?.name).toBeTruthy();
+      // 是否支持 OAuth 一律由运行时探测，preset 只负责显示名与默认 api。
+      expect(preset).not.toHaveProperty('oauth');
+    }
+  });
+
   it('shows the Anthropic group in the editor but does not allow those keys on openai-completions', () => {
     const groups = groupsForEditor('openai-completions');
     expect(groups.some((g) => g.id === 'anthropic')).toBe(true);
     expect(allowedCompatKeys('openai-completions').has('forceAdaptiveThinking')).toBe(false);
     expect(allowedCompatKeys('anthropic-messages').has('forceAdaptiveThinking')).toBe(true);
   });
+});
+
+describe('advanced options lossless patch',()=>{
+ const original={version:'future',providers:{openai:{futureProvider:{x:1},api:'anthropic-messages',modelOverrides:{shared:{samplingParams:{top_p:0},future:{x:true}}},models:[{id:'shared',api:'openai-completions',reasoning:true,compat:{supportsFastMode:false,unknownCompat:'keep'},samplingParams:{top_p:0,flag:false,future:{x:1}},samplingParamsByThinkingLevel:{low:{top_k:3},future:{temperature:0}},inputLimits:{images:{maxPerMessage:2,resize:{maxWidth:100,future:9}},future:{x:1}},promptCache:{short:0.5,future:9},futureModel:['keep']}]}}};
+ it('keeps the whole unedited document and coexisting replacement/override entries',()=>{
+  const state=loadState(JSON.stringify(original),'{}',presets);
+  expect(JSON.parse(serializeState(state).modelsJson)).toMatchObject(original);
+  expect(JSON.parse(serializeState(state).modelsJson).providers.openai.models[0]).toEqual(original.providers.openai.models[0]);
+ });
+ it('patches advanced fields without rewriting model api, compat or future nested metadata',()=>{
+  const state=loadState(JSON.stringify(original),'{}',presets);
+  const provider=state[0];
+  provider.models[0]={...provider.models[0],samplingParams:{...provider.models[0].samplingParams,top_p:0.8}};
+  const saved=JSON.parse(serializeState(state).modelsJson);
+  expect(saved.providers.openai.modelOverrides).toEqual(original.providers.openai.modelOverrides);
+  expect(saved.providers.openai.models[0]).toEqual({...original.providers.openai.models[0],samplingParams:{...original.providers.openai.models[0].samplingParams,top_p:0.8}});
+ });
+ it('rejects invalid advanced values including hand-written TTL null',()=>{
+  for(const patch of [{samplingParams:[]},{samplingParams:'x'},{inputLimits:{images:{maxPerMessage:0}}},{promptCache:{long:null}},{promptCache:{short:0}}]){
+   expect(()=>serializeState([{id:'p',name:'p',builtIn:false,api:'openai-completions',models:[{id:'m',...patch} as never]}])).toThrow();
+  }
+ });
+ it('does not synthesize advanced defaults for new models',()=>{
+  const saved=JSON.parse(serializeState([{id:'p',name:'p',builtIn:false,models:[{id:'m'}]}]).modelsJson);
+  for(const field of ['samplingParams','samplingParamsByThinkingLevel','inputLimits','promptCache'])expect(saved.providers.p.models[0]).not.toHaveProperty(field);
+ });
+});
+
+it('preserves inline built-in credentials for model-only edits but removes the legacy inline fallback only after explicit key edits',()=>{
+ const raw=JSON.stringify({providers:{openai:{apiKey:'fixture-old',modelOverrides:{'gpt-5':{samplingParams:{top_p:0.2}}}}}});
+ const unchanged=loadState(raw,'{}',presets);expect(JSON.parse(serializeState(unchanged).modelsJson).providers.openai.apiKey).toBe('fixture-old');
+ unchanged[0].apiKey='fixture-new';expect(JSON.parse(serializeState(unchanged).modelsJson).providers.openai.apiKey).toBeUndefined();
+ const cleared=loadState(raw,'{}',presets);cleared[0].apiKey=undefined;expect(JSON.parse(serializeState(cleared).modelsJson).providers.openai.apiKey).toBeUndefined();
+});
+
+it('loaded custom providers still clear known optional fields rather than resurrecting raw source values',()=>{
+ const state=loadState(JSON.stringify({providers:{relay:{name:'Relay',api:'openai-completions',baseUrl:'https://fixture.invalid/v1',apiKey:'fixture-key',models:[{id:'m'}],future:'keep'}}}),'{}',[]);
+ state[0].api=undefined;state[0].baseUrl=undefined;state[0].apiKey=undefined;const saved=JSON.parse(serializeState(state).modelsJson).providers.relay;
+ expect(saved.api).toBeUndefined();expect(saved.baseUrl).toBeUndefined();expect(saved.apiKey).toBeUndefined();expect(saved.future).toBe('keep');
 });

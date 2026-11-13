@@ -92,8 +92,10 @@ describe('createAgentPorts', () => {
       agent.pi.closeWorkspace('D:/p'),
       agent.pi.respondUi('D:/p', { id: 'r' }),
       agent.pi.send('D:/p', 'agent_get_state', {}),
+      agent.pi.sessionWorkflow('D:/p', {action:'tree'}),
       agent.pi.permissionProfile('D:/p', 's1'),
       agent.pi.refreshModelRegistry(),
+      agent.pi.syncModelCompactionBudgets(),
       agent.pi.enqueueTurn('D:/p', 'hi', 'workspace', { sessionId: 's1' }),
       agent.pi.releaseSessions(['a.jsonl']),
       agent.pi.ownsSession('D:/p', 's1'),
@@ -116,6 +118,7 @@ describe('createAgentPorts', () => {
       agent.controlPlane.releaseChildForDelete('D:/p', null, 'c.jsonl'),
       agent.resources.reload(),
       agent.extensions.catalog(),
+      agent.observations.command({action:'list'}),
       agent.usage.report(),
       agent.usage.reconcile(),
     ]);

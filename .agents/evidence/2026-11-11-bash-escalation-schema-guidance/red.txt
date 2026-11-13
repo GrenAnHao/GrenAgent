@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+ ❯ sandbox/bashTool.test.ts (61 tests | 1 failed | 60 skipped) 12ms
+     × strict sampling rejects an escalation with the empty reason from the reported call 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  sandbox/bashTool.test.ts > bash · schema and prompt (pi 1.0.2 contract) > strict sampling rejects an escalation with the empty reason from the reported call
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ sandbox/bashTool.test.ts:128:54
+    126|     };
+    127|     // Wire constraints must be checked without coercion: SDK argument…
+    128|     expect(Check(strict.parameters, call.arguments)).toBe(false);
+       |                                                      ^
+    129|     expect(Check(strict.parameters, { ...call.arguments, justification…
+    130|     expect(Check(strict.parameters, { ...call.arguments, sandbox_permi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 60 skipped (61)
+   Start at  11:48:39
+   Duration  2.34s (transform 258ms, setup 0ms, import 2.04s, tests 12ms, environment 0ms)
+

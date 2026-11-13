@@ -1,0 +1,182 @@
+[
+  {
+    "role": "system",
+    "content": "",
+    "sections": {
+      "preamble": "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.",
+      "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nAdditional tools may be available.\n</tools>",
+      "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use edit for targeted changes. Batch changes to one file in a single call.\n- Each edits[].oldText must exactly and uniquely match the original file. Keep matches short and non-overlapping; merge nearby changes without including large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+      "docs": "<docs>\nPi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: D:\\OneDrive\\Project Files\\Pi\\electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_aaa0854c1a65a32aafaa5d1d855555e5\\node_modules\\@earendil-works\\pi-coding-agent\\README.md\n- Additional docs: D:\\OneDrive\\Project Files\\Pi\\electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_aaa0854c1a65a32aafaa5d1d855555e5\\node_modules\\@earendil-works\\pi-coding-agent\\docs\n- Examples: D:\\OneDrive\\Project Files\\Pi\\electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_aaa0854c1a65a32aafaa5d1d855555e5\\node_modules\\@earendil-works\\pi-coding-agent\\examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- Before implementing harness changes, read the relevant docs and examples in full, following related cross-references.\n</docs>",
+      "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nResolve relative paths against the skill's directory (parent of SKILL.md). Use absolute paths in tool calls.\n\n<available_skills>\n  <skill>\n    <name>api-security-testing</name>\n    <description>Security-test a REST, GraphQL, or gRPC API with Strix — autonomous agents that enumerate endpoints from an OpenAPI/GraphQL schema (or by crawling), then actually exploit the API-specific vulnerability classes in the OWASP API Security Top 10 (2023) — broken object-level authorization (BOLA/IDOR), broken object property level authorization (excessive data exposure and mass assignment), broken function-level authorization, unrestricted resource consumption, SSRF, injection, and auth/token flaws. Every finding comes with a working proof-of-concept request. Use when the user asks to pentest, security-test, audit, or find vulnerabilities in an API, endpoint, or backend service.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\api-security-testing\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>brainstorming</name>\n    <description>在任何创造性工作之前必须使用此技能——创建功能、构建组件、添加功能、修改行为，或筹划任何新东西，无论是软件还是软件之外（一场分享、一门生意、一次装修）。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\brainstorming\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>chinese-code-review</name>\n    <description>中文 review 沟通参考——话术模板、分级标注（必须修复/建议修改/仅供参考）、国内团队常见反模式应对。仅在用户显式 /chinese-code-review 时调用，不要根据上下文自动触发。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\chinese-code-review\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>chinese-commit-conventions</name>\n    <description>中文 commit 与 changelog 配置参考——Conventional Commits 中文适配、commitlint/husky/commitizen 中文模板、conventional-changelog 中文配置。仅在用户显式 /chinese-commit-conventions 时调用，不要根据上下文自动触发。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\chinese-commit-conventions\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>chinese-documentation</name>\n    <description>中文文档排版参考——中英文空格、全半角标点、术语保留、链接格式、中文文案排版指北约定。仅在用户显式 /chinese-documentation 时调用，不要根据上下文自动触发。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\chinese-documentation\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>chinese-git-workflow</name>\n    <description>国内 Git 平台配置参考——Gitee、Coding.net、极狐 GitLab、CNB 的 SSH/HTTPS/凭据/CI 接入差异与镜像同步配置。仅在用户显式 /chinese-git-workflow 时调用，不要根据上下文自动触发。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\chinese-git-workflow\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>ci-security-scanning-with-strix</name>\n    <description>Add security scanning to CI/CD with Strix — GitHub Actions, GitLab CI, or any pipeline — so every pull request gets a diff-scoped AI pentest that blocks vulnerable code before it merges, with results as PR comments and SARIF uploaded to code scanning. Covers both the self-hosted open-source CLI (runs in your runner) and the managed app.strix.ai platform (GitHub/GitLab app or API, no runner infra). Use when the user asks to add security scanning, SAST/DAST, pentesting, vulnerability checks, or automated security review to their CI pipeline, pre-merge gate, or PR workflow.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\ci-security-scanning-with-strix\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>deploy-agent-notes</name>\n    <description>当用户要把 write-notes-like-deepseek（Agent Notes 决策笔记）一键部署到某个项目仓库时使用：装 Skill、建目录、写 AGENTS.md 规矩、加校验脚本，并把 pstack 的 verify skill 接成「笔记落地必须有实跑证据」的闭环，最后跑通校验。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\deploy-agent-notes\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>diagnosing-superpowers</name>\n    <description>当一次 superpowers 会话出了问题、你的人类伙伴想知道原因时使用——重复劳动、无视计划、磕磕绊绊、结果质量差、某个技能没触发、&quot;太慢了&quot;、&quot;为什么这么贵&quot;、&quot;它到底在干什么&quot;——或者想给 superpowers 维护者整理一份 bug 报告；适用于当前会话，或按 id / 路径指定的过往会话，任何工具均可</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\diagnosing-superpowers\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>dispatching-parallel-agents</name>\n    <description>当面对 2 个以上可以独立进行、无共享状态或顺序依赖的任务时使用</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\dispatching-parallel-agents\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>doc</name>\n    <description>Use when the task involves reading, creating, or editing `.docx` documents, especially when formatting or layout fidelity matters; prefer `python-docx` plus the bundled `scripts/render_docx.py` for visual checks.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\doc\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>electron-ui-harness</name>\n    <description>为 Electron 应用搭建和维护 UI 自动化检查（ui-harness）。用 Vite 生产构建把真实组件或整页渲染进 Electron 窗口，preload 桥换成桩，通过 webContents.sendInputEvent 发真实的鼠标键盘事件，再读 DOM 和计算样式断言。附脚手架脚本、probe 工具箱模板和 AGENTS.md 章节模板。适用场景：给 Electron（React + Vite 渲染层）项目加 UI 自动化测试；编写或修复 ui-harness 场景 / probe；断言表格、弹层开合、动画过渡、主题色、布局对齐、滚动性能；把 UI 检查流程写进 AGENTS.md。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\electron-ui-harness\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>evolver</name>\n    <description>Use EvoX/Evolver durable memory (genes and capsules) when the user wants to remember a proven approach, recall past work, or save a lesson. Trigger: remember this, what did we learn, evolver, EvoMap, gene, capsule, 记住, 沉淀.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\evolver\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>executing-plans</name>\n    <description>当你要在当前会话里亲自担任实现者执行一份实现计划时使用——你的人类伙伴选择了内联执行，或者没有可用的子智能体工具</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\executing-plans\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>find-skills</name>\n    <description>Helps users discover and install agent skills when they ask questions like &quot;how do I do X&quot;, &quot;find a skill for X&quot;, &quot;is there a skill that can...&quot;, or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\find-skills\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>finishing-a-development-branch</name>\n    <description>当实现完成、所有测试通过、需要决定如何集成这份工作时使用</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\finishing-a-development-branch\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>mcp-builder</name>\n    <description>在构建 MCP 服务器或 MCP 工具时使用 —— 系统化的生产级 MCP 构建方法论，覆盖工具设计、错误处理、传输层选择与测试，让 AI 助手连接外部能力</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\mcp-builder\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>motion-prompt</name>\n    <description>Motion Prompt (showheyohtaki.github.io/motion-prompt) is a numbered library of names for motion-graphics moves, camera moves and transitions, UI components, landing-page and web effects, and photo looks and lighting, each with a moving sample, a spec of its timings and easing, and dependency-free Canvas 2D code. The main use: open the gallery for the user with the pick command, let them tick what they want, receive their picks, then rebuild exactly those in the project (Canvas, Remotion, CSS/SVG/Lottie, After Effects) or turn them into prompts for video or image models. Use when the user wants to see or choose from the library, e.g. &quot;open the motion-prompt library&quot;, &quot;show me the list&quot;, &quot;what moves are there?&quot;, &quot;I don&apos;t know the name, let me pick&quot;, &quot;motion-prompt のライブラリ出して&quot;, &quot;一覧見せて&quot;, &quot;どんな演出がある？&quot;, &quot;分からないから選びたい&quot;; when they paste picks copied from the gallery; or when they give element numbers, e.g. &quot;use #012 and #045&quot;, &quot;今のタイトルを #005 に差し替えて&quot;.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\motion-prompt\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>pdf</name>\n    <description>Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\pdf\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>penetration-testing-with-strix</name>\n    <description>Pentest a web app, API, codebase, repository, URL, domain, or IP with Strix — autonomous AI penetration testing that exploits and proves vulnerabilities (OWASP Top 10 and beyond — injection, XSS, SSRF, auth/access-control flaws, IDOR, business logic) instead of just flagging them. Runs self-hosted with the open-source CLI or via the managed app.strix.ai cloud, and returns validated findings with proof-of-concept exploits (Markdown, JSON, CSV, SARIF). Use when the user asks to pentest, hack, security-scan, security-audit, or find vulnerabilities in an app, API, website, or repo.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\penetration-testing-with-strix\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>playwright</name>\n    <description>Use when the task requires automating a real browser from the terminal (navigation, form filling, snapshots, screenshots, data extraction, UI-flow debugging) via `playwright-cli` or the bundled wrapper script.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\playwright\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>receiving-code-review</name>\n    <description>收到代码审查反馈后、实施建议之前使用，尤其当反馈不明确或技术上有疑问时——需要技术严谨性和验证，而非敷衍附和或盲目执行</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\receiving-code-review\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>requesting-code-review</name>\n    <description>完成任务、实现重要功能或合并前使用，用于验证工作成果是否符合要求</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\requesting-code-review\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>reverse-engineering</name>\n    <description>按证据推进的逆向分析工作流。用于 APK/AAB/APKS、DEX/Smali、Android SO/JNI、Magisk（面具）/Zygisk、Xposed（XP）/LSPosed/libxposed、PE/ELF、.NET/Java/Electron、JS/WASM、协议、固件和恶意样本。分章指导拆包解包、算法还原、请求签名、JADX/Frida/IDA/抓包工具实操，以及防侦测分析、启动异常、Frida/root/XP 检测定位、注入兼容和受控处理。用户要求逆向、反编译、Hook、注入后闪退、反调试、抓包、框架排错、算法复现或减少逆向幻觉时使用。按需读取资料，先验证工具版本和样本证据，再输出可复现结论。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\reverse-engineering\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>screenshot</name>\n    <description>Use when the user explicitly asks for a desktop or system screenshot (full screen, specific app or window, or a pixel region), or when tool-specific capture capabilities are unavailable and an OS-level capture is needed.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\screenshot\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>simplify</name>\n    <description>Simplify and refine recently modified code for clarity and consistency. Use after writing code to improve readability without changing functionality.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\simplify\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>skill-creator</name>\n    <description>Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill&apos;s description for better triggering accuracy.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\skill-creator\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>stop-slop</name>\n    <description>Remove AI writing patterns from prose. Use when drafting, editing, or reviewing text to eliminate predictable AI tells.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\stop-slop\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>subagent-driven-development</name>\n    <description>当在当前会话中执行包含独立任务的实现计划时使用</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\subagent-driven-development\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>systematic-debugging</name>\n    <description>遇到任何 bug、测试失败或异常行为时使用，在提出修复方案之前执行</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\systematic-debugging\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>tabbit</name>\n    <description>Use for browser navigation, inspection, interaction, and visual verification through Tabbit&apos;s installed CLI.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\tabbit\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>tabbit-devtools</name>\n    <description>Use Tabbit with agent-browser by reading Tabbit&apos;s live DevToolsActivePort file, deriving the browser wsEndpoint, and routing browser actions through agent-browser --cdp.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\tabbit-devtools\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>tdd</name>\n    <description>Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions &quot;red-green-refactor&quot;, or wants integration tests.</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\tdd\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>test-driven-development</name>\n    <description>在实现任何功能或修复 bug 时使用，在编写实现代码之前</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\test-driven-development\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>using-git-worktrees</name>\n    <description>当需要开始与当前工作区隔离的功能开发，或在执行实现计划之前使用——通过原生工具或 git worktree 回退机制确保隔离工作区存在</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\using-git-worktrees\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>using-superpowers</name>\n    <description>在开始任何对话时使用——确立如何查找和使用技能，要求在任何响应（包括澄清性问题）之前调用 Skill 工具</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\using-superpowers\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>verification-before-completion</name>\n    <description>在宣称工作完成、已修复或测试通过之前使用，在提交或创建 PR 之前——必须运行验证命令并确认输出后才能声称成功；始终用证据支撑断言</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\verification-before-completion\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>workflow-runner</name>\n    <description>在 Claude Code / OpenClaw / Cursor 中直接运行 agency-orchestrator YAML 工作流——无需 API key，使用当前会话的 LLM 作为执行引擎。当用户提供 .yaml 工作流文件或要求多角色协作完成任务时触发。</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\workflow-runner\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>write-notes-like-deepseek</name>\n    <description>Use when a change is non-trivial by DSH standards (behavior, architecture, cross-file contracts, process/tooling, testing strategy, or on-disk/wire/config formats), when choosing between technical alternatives, superseding a decision, or writing a postmortem. Records the why and rejected options in .agents/notes/ with script-enforced gates; skips purely mechanical edits (CRUD, styling, patches, tagging, formatting).</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\write-notes-like-deepseek\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>writing-plans</name>\n    <description>当你有规格说明或需求用于多步骤任务时使用，在动手写代码之前</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\writing-plans\\SKILL.md</location>\n  </skill>\n  <skill>\n    <name>writing-skills</name>\n    <description>当创建新技能、编辑现有技能或在部署前验证技能是否有效时使用</description>\n    <location>C:\\Users\\rxstudio\\.agents\\skills\\writing-skills\\SKILL.md</location>\n  </skill>\n</available_skills>\n</skills>",
+      "cwd": "<cwd>\nC:/Users/rxstudio/AppData/Local/Temp/gren-model-advanced-A4adp0\n</cwd>"
+    },
+    "timestamp": 1794285105203,
+    "toolsAdded": [
+      {
+        "name": "read",
+        "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to the file to read (relative or absolute)"
+            },
+            "offset": {
+              "type": "number",
+              "description": "Line number to start reading from (1-indexed)"
+            },
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of lines to read"
+            }
+          }
+        },
+        "constrainedSampling": {
+          "type": "json_schema",
+          "strict": "prefer"
+        }
+      },
+      {
+        "name": "bash",
+        "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "command"
+          ],
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Shell command to execute"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Timeout in seconds (optional, no default timeout)"
+            }
+          }
+        },
+        "constrainedSampling": {
+          "type": "json_schema",
+          "strict": "prefer"
+        }
+      },
+      {
+        "name": "edit",
+        "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "path",
+            "edits"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to the file to edit (relative or absolute)"
+            },
+            "edits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "oldText",
+                  "newText"
+                ],
+                "properties": {
+                  "oldText": {
+                    "type": "string",
+                    "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                  },
+                  "newText": {
+                    "type": "string",
+                    "description": "Replacement text for this targeted edit."
+                  }
+                }
+              },
+              "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+            }
+          }
+        },
+        "constrainedSampling": {
+          "type": "json_schema",
+          "strict": "prefer"
+        }
+      },
+      {
+        "name": "write",
+        "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "path",
+            "content"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to the file to write (relative or absolute)"
+            },
+            "content": {
+              "type": "string",
+              "description": "Content to write to the file"
+            }
+          }
+        },
+        "constrainedSampling": {
+          "type": "json_schema",
+          "strict": "prefer"
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "fixture\n\n[Image: original 32x32, displayed at 8x8. Multiply coordinates by 4.00 to map to original image.]\n[Image: original 32x32, displayed at 8x8. Multiply coordinates by 4.00 to map to original image.]"
+      },
+      {
+        "type": "image",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAVElEQVR4Ae3AA6AkWZbG8f937o3IzKdyS2Oubdu2bdu2bdu2bWmMnpZKr54yMyLu+Xa3anqmhztr1a8qinnBqLxwVF44Ki8clReOygtH5YWj8sLxjxzFASZXqfMLAAAAAElFTkSuQmCC",
+        "mimeType": "image/png"
+      },
+      {
+        "type": "image",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAVElEQVR4Ae3AA6AkWZbG8f937o3IzKdyS2Oubdu2bdu2bdu2bWmMnpZKr54yMyLu+Xa3anqmhztr1a8qinnBqLxwVF44Ki8clReOygtH5YWj8sLxjxzFASZXqfMLAAAAAElFTkSuQmCC",
+        "mimeType": "image/png"
+      }
+    ],
+    "timestamp": 1794285105200
+  },
+  {
+    "role": "assistant",
+    "content": [],
+    "api": "openai-completions",
+    "provider": "advanced-fixture",
+    "model": "org/model",
+    "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "stopReason": "error",
+    "timestamp": 1794285105208,
+    "errorMessage": "400: {\"message\":\"fixture-stop\"}",
+    "durationMs": 2,
+    "thinkingLevel": "medium"
+  }
+]

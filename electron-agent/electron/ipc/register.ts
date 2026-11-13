@@ -1,3 +1,7 @@
+import { parseSessionWorkflowRequest } from '../app/sessionWorkflowContractValidation.js';
+import type { SessionWorkflowRequest } from '../app/sessionWorkflowContracts.js';
+import {writeFile} from 'node:fs/promises';
+import type { ModelCompactionSettingsService } from '../app/modelCompactionSettings';
 import { BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
 import type { FilePickerOptions } from './filePicker';
@@ -9,7 +13,7 @@ import { FileWatchService } from '../app/fileWatchService';
 import type { SkillService } from '../app/skillService';
 import type { PromptLibraryService } from '../app/promptLibraryService';
 import type { UsageReport } from '../../src/lib/usageReport';
-import type { DiagnoseChunk, ProviderService } from '../app/providerService';
+import type { DiagnoseChunk, ProviderLoginUiEvent, ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
 import type { UiHistoryService } from '../app/uiHistoryService';
 import type { WorkspaceApprovalService } from '../app/workspaceApprovalService';
@@ -36,6 +40,7 @@ type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>)
  * 单测可以直接塞进程内的 PiRuntimeService / SubagentService / JobsBridge。
  */
 export interface PiCommandsPort {
+  sessionWorkflow?(workspace: string, request: SessionWorkflowRequest): unknown;
   openWorkspace(workspace: string): unknown;
   listRunningTurns(): unknown;
   warmWorkspace(workspace: string): unknown;
@@ -62,6 +67,9 @@ export interface JobsPort {
 }
 
 export interface IpcServices {
+  observations?: {command(params:Record<string,unknown>):Promise<any>};
+  modelCompaction?: ModelCompactionSettingsService;
+  cacheWarming?: { get(): string; set(mode: unknown): Promise<void> };
   settings?: SettingsService;
   mcpPolicy?: McpPolicyService;
   mcpConfig?: McpConfigService;
@@ -162,6 +170,17 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   });
 
   if (services.settings) registerSettingsCommands(services.settings);
+  if (services.modelCompaction) {
+    const service = services.modelCompaction;
+    registerCommand('get_model_compaction_budgets', () => service.get());
+    registerCommand('patch_model_compaction_budget', (_event, args) => service.patch(readString(args, 'provider'), readString(args, 'modelId'), args.patch as import('../../../extensions/_shared/model-compaction-budgets').ModelCompactionPatch));
+    registerCommand('clear_model_compaction_budget', (_event, args) => service.clear(readString(args, 'key')));
+    registerCommand('sync_model_compaction_budgets', () => service.retrySync());
+  }
+  if (services.cacheWarming) {
+    registerCommand('get_cache_warming', () => services.cacheWarming!.get());
+    registerCommand('set_cache_warming', (_event, args) => services.cacheWarming!.set(args.mode));
+  }
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
   if (services.permissions) registerPermissionCommands(services.permissions);
@@ -173,6 +192,18 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
   if (services.promptLibrary) registerPromptLibraryCommands(services.promptLibrary);
+  if(services.observations){
+    const observations=services.observations;
+    registerCommand('request_observation',(_event,args)=>observations.command(args));
+    registerCommand('export_request_observation',async(event,args)=>{
+      const snapshot=await observations.command({action:'readPreview',previewId:args.previewId});
+      const owner=BrowserWindow.fromWebContents(event.sender);
+      const saveOptions={title:'导出已预览的脱敏结构',defaultPath:'request-structure.json',filters:[{name:'JSON',extensions:['json']}]};
+      const target=owner?await dialog.showSaveDialog(owner,saveOptions):await dialog.showSaveDialog(saveOptions);
+      if(target.canceled||!target.filePath)return {saved:false};
+      await writeFile(target.filePath,JSON.stringify(snapshot,null,2),'utf8');return {saved:true};
+    });
+  }
   if (services.usage) {
     const usage = services.usage;
     registerCommand('usage_report', () => usage.report());
@@ -217,19 +248,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.shell) registerShellCommands(services.shell);
   if (services.dev) registerDevCommands(services.dev);
   if (services.agentData) {
-    registerCommand('agentData_tasks_list', (_event, args) => services.agentData!.requestAdmin('admin.tasks.list', args));
-    registerCommand('agentData_tasks_read', (_event, args) => services.agentData!.requestAdmin('admin.tasks.read', args));
-    registerCommand('agentData_tasks_previewRetry', (_event, args) => services.agentData!.requestAdmin('admin.tasks.previewRetry', args));
-    registerCommand('agentData_tasks_retry', (_event, args) => services.agentData!.requestAdmin('admin.tasks.retry', args));
-    registerCommand('agentData_audit_query', (_event, args) => services.agentData!.requestAdmin('admin.audit.query', args));
-    registerCommand('agentData_audit_export', (_event, args) => services.agentData!.requestAdmin('admin.audit.export', args));
-    registerCommand('agentData_diagnostics_check', () => services.agentData!.requestAdmin('admin.diagnostics.check', {}));
-    registerCommand('agentData_overview', (_event, args) => services.agentData!.requestAdmin('admin.overview', { userId: readString(args, 'userId') }));
-    registerCommand('agentData_diagnostics_open', async (_event, args) => {
-      const path = await services.agentData!.resolveDiagnosticPath(readString(args, 'id'));
-      const error = await shell.openPath(path);
-      if (error) throw new Error(error);
-    });
     registerCommand('thread_create', (_event, args) => services.agentData!.createThread({
       id: readString(args, 'id'), projectId: readString(args, 'projectId'), workspace: readString(args, 'workspace'),
       ...(args.title === undefined ? {} : { title: readText(args, 'title') }),
@@ -251,18 +269,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_status', () => services.agentData!.status());
     registerCommand('agentData_start', () => services.agentData!.start());
     registerCommand('agentData_stop', () => services.agentData!.stop());
-    registerCommand('agentData_admin_jobs_list', () => services.agentData!.request('admin.jobs.list'));
-    registerCommand('agentData_admin_jobs_get', (_event, args) => services.agentData!.request('admin.jobs.get', { id: readString(args, 'id') }));
-    registerCommand('agentData_admin_jobs_cancel', (_event, args) => services.agentData!.request('admin.jobs.cancel', { id: readString(args, 'id') }));
-    registerCommand('agentData_admin_jobs_remove', (_event, args) => services.agentData!.request('admin.jobs.remove', { id: readString(args, 'id') }));
-    registerCommand('agentData_admin_jobs_clear', (_event, args) => services.agentData!.request('admin.jobs.clear', { ids: args.ids }));
-    registerCommand('agentData_admin_config_get', (_event, args) => services.agentData!.request('admin.config.get', { module: readString(args, 'module') }));
-    registerCommand('agentData_admin_config_update', (_event, args) => services.agentData!.request('admin.config.update', { module: readString(args, 'module'), value: readRecord(args, 'value'), version: args.version }));
-    registerCommand('agentData_admin_audit_list', () => services.agentData!.request('admin.audit.list'));
-    registerCommand('agentData_admin_diagnostics', () => services.agentData!.request('admin.diagnostics'));
-    registerCommand('agentData_admin_export', () => services.agentData!.request('admin.export'));
-    registerCommand('agentData_admin_import', (_event, args) => services.agentData!.request('admin.import', { data: readRecord(args, 'data') }));
-    registerWikiManagement(services.agentData);
     registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
       workspace: readString(args, 'workspace'),
     }));
@@ -557,9 +563,27 @@ function registerProviderCommands(service: ProviderService): void {
   registerCommand('set_model_fast_preference', (_event, args) => service.setFastPreference(
     readString(args, 'provider'), readString(args, 'modelId'), readBoolean(args, 'enabled'),
   ));
-  registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson'), readString(args, 'authJson')));
+  registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson')));
+  registerCommand('set_provider_api_key', (_event, args) => service.setApiKey(
+    readString(args, 'provider'), readOptionalString(args, 'apiKey'),
+  ));
+  registerCommand('get_provider_credentials', () => service.getCredentials());
+  registerCommand('get_provider_oauth_capabilities', () => service.getOAuthCapabilities());
+  registerCommand('provider_login', (event, args) => {
+    const channel = args.onEvent;
+    const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
+      ? (e: ProviderLoginUiEvent) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, e)
+      : () => {};
+    return service.startLogin(readString(args, 'provider'), emit);
+  });
+  registerCommand('provider_login_prompt', (_event, args) => service.respondPrompt(
+    readString(args, 'promptId'), readString(args, 'value'),
+  ));
+  registerCommand('provider_login_cancel', (_event, args) => service.cancelLogin(readString(args, 'loginId')));
+  registerCommand('provider_logout', (_event, args) => service.logout(readString(args, 'provider')));
   registerCommand('refresh_model_registry', () => service.refresh());
   registerCommand('list_models_global', () => service.listModels());
+  registerCommand('list_builtin_models', (_event, args) => service.listBuiltinModels(readString(args, 'provider')));
   registerCommand('fetch_provider_models', (_event, args) => service.fetchModels(readString(args, 'baseUrl'), readString(args, 'apiKey'), readString(args, 'api'), readOptionalHeaders(args, 'headers')));
   registerCommand('fix_mermaid_diagram', (_event, args) => service.fixMermaid(readString(args, 'workspace'), readText(args, 'code'), readText(args, 'error')));
   registerCommand('diagnose_provider_model', (event, args) => {
@@ -742,6 +766,27 @@ function registerShellCommands(service: ShellService): void {
 }
 
 function registerPiCommands(service: PiCommandsPort): void {
+  registerCommand('agent_session_workflow', async (event, args) => {
+    const workspace = readString(args, 'workspace');
+    // Renderer paths never confer filesystem authority. Only this native dialog supplies source/destination.
+    const {workspace: _workspace, source: _source, destination: _destination, ...input} = args;
+    const request = parseSessionWorkflowRequest(input);
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (request.action === 'export-preview') {
+      if (request.format !== 'html' && request.format !== 'jsonl') throw new Error('Invalid export format');
+      const options = {title:'导出到本地文件',defaultPath:`session.${request.format}`,filters:[{name:request.format.toUpperCase(),extensions:[request.format]}]};
+      const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+      if (result.canceled || !result.filePath) return {status:'cancelled'};
+      request.destination = result.filePath;
+    }
+    if (request.action === 'import-preview') {
+      const options = {title:'导入本地 JSONL',properties:['openFile' as const],filters:[{name:'会话 JSONL',extensions:['jsonl']}]};
+      const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+      if (result.canceled || !result.filePaths[0]) return {status:'cancelled'};
+      request.source = result.filePaths[0];
+    }
+    return service.sessionWorkflow ? service.sessionWorkflow(workspace, request) : service.send(workspace,'agent_session_workflow',request as unknown as Record<string,unknown>);
+  });
   registerCommand('open_workspace', (_event, args) => service.openWorkspace(readString(args, 'workspace')));
   registerCommand('agent_list_running_turns', () => service.listRunningTurns());
   registerCommand('warm_workspace', (_event, args) => service.warmWorkspace(readString(args, 'workspace')));
@@ -775,53 +820,6 @@ function registerDevCommands(service: DevService): void {
   registerCommand('dev_list_commands', () => getRegisteredCommands());
 }
 
-function registerWikiManagement(service: AgentDataService): void {
-  registerCommand('agentData_wiki_create', (_event, args) => service.requestAdmin('wiki.create', {
-    name: readString(args, 'name'), ...(args.wikiId === undefined ? {} : { wikiId: readString(args, 'wikiId') }),
-  }));
-  registerCommand('agentData_wiki_read', (_event, args) => service.requestAdmin('wiki.read', { wikiId: readString(args, 'wikiId') }));
-  registerCommand('agentData_wiki_list', () => service.requestAdmin('wiki.list', {}));
-  registerCommand('agentData_wiki_update', (_event, args) => service.requestAdmin('wiki.update', {
-    wikiId: readString(args, 'wikiId'),
-    ...(args.name === undefined ? {} : { name: readString(args, 'name') }),
-    ...(args.summary === undefined ? {} : { summary: args.summary === null ? null : readText(args, 'summary') }),
-  }));
-  registerCommand('agentData_wiki_remove', (_event, args) => service.requestAdmin('wiki.remove', { wikiId: readString(args, 'wikiId') }));
-  registerCommand('agentData_wiki_resetDraft', (_event, args) => service.requestAdmin('wiki.resetDraft', { wikiId: readString(args, 'wikiId') }));
-  registerCommand('agentData_wiki_ingest', (_event, args) => service.requestAdmin('wiki.ingest', { wikiId: readString(args, 'wikiId') }));
-  registerCommand('agentData_wiki_rawWrite', (_event, args) => service.requestAdmin('wiki.rawWrite', {
-    wikiId: readString(args, 'wikiId'), filename: readString(args, 'filename'), content: readText(args, 'content'),
-  }));
-  registerCommand('agentData_wiki_rawRemove', (_event, args) => service.requestAdmin('wiki.rawRemove', {
-    wikiId: readString(args, 'wikiId'), filename: readString(args, 'filename'),
-  }));
-  registerCommand('agentData_wiki_rawList', (_event, args) => service.requestAdmin('wiki.rawList', { wikiId: readString(args, 'wikiId') }));
-  registerCommand('agentData_wiki_rawRead', (_event, args) => service.requestAdmin('wiki.rawRead', {
-    wikiId: readString(args, 'wikiId'), filename: readString(args, 'filename'),
-  }));
-  registerCommand('agentData_wiki_writeTemplate', (_event, args) => service.requestAdmin('wiki.writeTemplate', {
-    wikiId: readString(args, 'wikiId'), name: readString(args, 'name'), content: readText(args, 'content'),
-  }));
-  registerCommand('agentData_wiki_pageWrite', (_event, args) => service.requestAdmin('wiki.pageWrite', {
-    wikiId: readString(args, 'wikiId'), ref: readString(args, 'ref'), content: readText(args, 'content'),
-  }));
-  registerCommand('agentData_wiki_pageRemove', (_event, args) => service.requestAdmin('wiki.pageRemove', {
-    wikiId: readString(args, 'wikiId'), ref: readString(args, 'ref'),
-  }));
-  registerCommand('agentData_wiki_pageList', (_event, args) => service.requestAdmin('wiki.pageList', { wikiId: readString(args, 'wikiId') }));
-  registerCommand('agentData_wiki_pageRead', (_event, args) => service.requestAdmin('wiki.pageRead', {
-    wikiId: readString(args, 'wikiId'), ref: readString(args, 'ref'),
-  }));
-  registerCommand('agentData_wiki_search', (_event, args) => service.requestAdmin('wiki.search', {
-    wikiId: readString(args, 'wikiId'),
-    query: readString(args, 'query'),
-    ...(args.limit === undefined ? {} : { limit: readPositiveInteger(args, 'limit', 20) }),
-    ...(args.hop === undefined ? {} : { hop: Number(args.hop) }),
-    ...(args.decay === undefined ? {} : { decay: Number(args.decay) }),
-    ...(args.minScore === undefined ? {} : { minScore: Number(args.minScore) }),
-  }));
-  registerCommand('agentData_wiki_graph', (_event, args) => service.requestAdmin('wiki.graph', { wikiId: readString(args, 'wikiId') }));
-}
 
 function readDelivery(args: Record<string, unknown>, key: string): 'followUp' | 'steer' {
   const value = args[key];
@@ -844,6 +842,14 @@ function readText(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string') throw new Error(`${key} must be a string`);
   return value;
+}
+
+/** API Key 可为空：null / undefined / 空串都表示清除凭据。 */
+function readOptionalString(args: Record<string, unknown>, key: string): string | null {
+  const value = args[key];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') throw new Error(`${key} must be a string or null`);
+  return value.trim() ? value : null;
 }
 
 function readStringArray(args: Record<string, unknown>, key: string): string[] {

@@ -1,3 +1,4 @@
+import { setDefaultResultOrder } from "node:dns";
 import { resolve } from "node:path";
 import { defineConfig } from "electron-vite";
 import { copyPiAdjacentAssets } from "./electron/agent/copyPiAdjacentAssets";
@@ -5,7 +6,6 @@ import { CODEMODE_WORKER_ENTRY, CODEMODE_WORKER_SOURCE, codemodeWorkerMismatch }
 import { ignoreNonFrontendWatch, isFrontendHmrPath } from "./electron/dev/frontendWatch";
 import { removeMainCjsPackageJson, writeMainCjsPackageJson } from "./electron/agent/writeMainCjsPackageJson";
 import { installDevElectronHeapArg } from "./electron/mainHeap";
-import { buildRepoWikiHost } from "./electron/agent/repoWikiHostBuild";
 
 installDevElectronHeapArg();
 
@@ -14,8 +14,6 @@ const mainInput = {
   "pi-worker": resolve(__dirname, "electron/pi-worker-entry.ts"),
   // 交互运行时所在的子进程（ELECTRON_RUN_AS_NODE）。主进程只经 IPC 和它对话。
   "agent-host": resolve(__dirname, "electron/agentProcess/hostEntry.ts"),
-  // AgentData 运行时所在的子进程（ELECTRON_RUN_AS_NODE）：agent-data.db 的唯一持有者。
-  "agentdata-host": resolve(__dirname, "electron/agentDataProcess/hostEntry.ts"),
   // CodeGraph SDK 的索引与查询所在的子进程（ELECTRON_RUN_AS_NODE）。
   "codegraph-host": resolve(__dirname, "electron/app/codeGraph/hostEntry.ts"),
   // codegraph-host 里的 SDK 工作线程（worker_threads）。
@@ -35,6 +33,9 @@ const mainExternal = [
 ];
 
 export default defineConfig(({ command, mode }) => {
+  // 避免 Windows 上 Vite 只监听 ::1；保留 localhost origin，继续读原有草稿和偏好。
+  if (command === "serve" && process.platform === "win32") setDefaultResultOrder("ipv4first");
+
   // npm run start（--mode localrun）：渲染层用生产构建，主进程保持开发时的 ESM。
   // CJS 字节码产物 require 不到只有 import 条件的 pi 包，本机直接跑起不来。
   const production = command === "build" && mode !== "localrun";
@@ -71,6 +72,9 @@ export default defineConfig(({ command, mode }) => {
             ? {
                 output: {
                   format: "cjs" as const,
+                  // Pi's compat catalog and virtual extension view share live ESM bindings.
+                  // Preserve initialization order when those modules land in separate CJS chunks.
+                  strictExecutionOrder: true,
                   entryFileNames: "[name].js",
                   chunkFileNames: "chunks/[name]-[hash].js",
                 },
@@ -80,12 +84,6 @@ export default defineConfig(({ command, mode }) => {
         },
       },
       plugins: [
-        {
-          name: "build-repo-wiki-host",
-          async closeBundle() {
-            await buildRepoWikiHost(__dirname, mainOutDir);
-          },
-        },
         {
           name: "check-codemode-worker",
           generateBundle(_options, bundle) {

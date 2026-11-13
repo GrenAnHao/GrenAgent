@@ -17,7 +17,7 @@ export interface ProviderPreset {
 
 /**
  * 内置供应商目录：与 Pi 内置 provider 对齐（来源 `BUILT_IN_PROVIDER_DISPLAY_NAMES`）。
- * 内置 provider 的模型 / baseUrl 由 Pi registry 提供，UI 仅让填 API Key（+ 可追加自定义模型）。
+ * 内置 provider 的模型 / baseUrl 由 Pi 提供；UI 可按模型保存 modelOverrides，另可追加自定义模型。
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'openai', name: 'OpenAI', api: 'openai-responses', baseUrlHint: 'https://api.openai.com/v1' },
@@ -53,4 +53,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'xiaomi-token-plan-cn', name: 'Xiaomi MiMo Token Plan (China)', api: 'openai-completions' },
   { id: 'xiaomi-token-plan-ams', name: 'Xiaomi MiMo Token Plan (Amsterdam)', api: 'openai-completions' },
   { id: 'xiaomi-token-plan-sgp', name: 'Xiaomi MiMo Token Plan (Singapore)', api: 'openai-completions' },
+  // 1.4.0 官方新增的订阅制 OAuth 供应商；是否支持 OAuth 由运行时探测，这里只给显示名。
+  { id: 'github-copilot', name: 'GitHub Copilot', api: 'openai-completions' },
+  { id: 'openai-codex', name: 'OpenAI Codex (legacy)', api: 'openai-responses' },
+  { id: 'meta', name: 'Meta', api: 'openai-responses' },
 ];

@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const monitor = vi.hoisted(() => ({ jobs: [], error: undefined, track: vi.fn(), refresh: vi.fn(), watchedTaskVersion: 0 }));
-vi.mock('./AgentDataTaskProvider', () => ({ useAgentDataTaskMonitor: () => monitor }));
 vi.mock('./useProjectOptions', () => ({ useProjectOptions: () => [{ cwd: 'D:/proj/alpha', name: 'alpha' }, { cwd: 'D:/proj/beta', name: 'beta' }] }));
 vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { projects: vi.fn(), status: vi.fn(), search: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
 vi.mock('../../lib/files', () => ({ files: { read: vi.fn() } }));
@@ -18,7 +16,6 @@ function deferred<T>() {
 describe('CodeRetrievalPanel project and status', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    monitor.watchedTaskVersion = 0;
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([]);
     vi.mocked(agentDataApi.code.status).mockImplementation(async (workspace) => ({ workspace, indexed: true, connected: true }));
     vi.mocked(agentDataApi.code.call).mockImplementation(async (request) => request.tool === 'codegraph_search'
@@ -113,8 +110,8 @@ describe('CodeRetrievalPanel project and status', () => {
     await screen.findByText('src/a.ts');
     vi.mocked(agentDataApi.code.status).mockRejectedValue(new Error('Status unavailable'));
     vi.mocked(agentDataApi.code.call).mockRejectedValue(new Error('Search unavailable'));
-    monitor.watchedTaskVersion++;
-    rerender(<CodeRetrievalPanel />);
+    // 任务视图下线后不再有任务完成回调；用 refreshToken 触发同一次刷新。
+    rerender(<CodeRetrievalPanel initialProject="D:/proj/alpha" refreshToken={1} />);
     await waitFor(() => expect(screen.getAllByRole('alert').some((node) => node.textContent?.includes('Search unavailable'))).toBe(true));
     expect(screen.getByText('src/a.ts')).toBeTruthy();
     expect(screen.getByText('12 文件')).toBeTruthy();

@@ -1,5 +1,7 @@
 import { allowedCompatKeys, showsThinkingFormat } from './modelCompatCatalog';
 import { fastApiSupported } from '../../../../extensions/_shared/fast-mode';
+import { validateModelsAdvancedOptions, type ProviderModelOptions } from '../../../../extensions/_shared/provider-model-options';
+import type { AdvancedDrafts } from './ModelAdvancedOptionsEditor';
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
@@ -25,8 +27,11 @@ export interface ModelCost extends ModelCostRates {
   tiers?: ModelCostTier[];
 }
 
-export interface UiModel {
+export interface UiModel extends ProviderModelOptions, AdvancedDrafts {
   id: string;
+  api?: string;
+  /** Original SDK entry, retained through form spreads; never serialized as a field. */
+  _source?: ModelEntry;
   /** Fast access capability, separate from the per-model active preference. */
   fast?: boolean;
   name?: string;
@@ -57,13 +62,19 @@ export interface UiProvider {
   apiKey?: string;
   /** 自定义请求头（写入 models.json.headers）。自定义供应商会自动补一个中性 User-Agent。 */
   headers?: Record<string, string>;
-  /** 用户自定义/追加的模型（不含 Pi 内置只读模型） */
+  /** 用户自定义/追加的模型（不含内置目录；内置参数修改保存在 modelOverrides） */
   models: UiModel[];
+  modelOverrides?: Record<string, ProviderModelOptions & Record<string, unknown>>;
+  _source?: ProviderEntry;
+  _document?: ModelsJson;
+  /** Credential ownership remains with the explicit key command; model-only edits leave inline legacy keys alone. */
+  _initialApiKey?: string;
 }
 
 /** models.json 里的单个模型条目（落盘形态）：含 pi 的 compat，不含 UI 专用的 thinkingFormat / forceAdaptiveThinking。 */
-interface ModelEntry {
+interface ModelEntry extends ProviderModelOptions {
   id: string;
+  api?: string;
   name?: string;
   reasoning?: boolean;
   thinkingLevelMap?: ThinkingLevelMap;
@@ -75,12 +86,14 @@ interface ModelEntry {
 }
 
 interface ProviderEntry {
+  [key: string]: unknown;
   name?: string;
   baseUrl?: string;
   apiKey?: string;
   api?: string;
   headers?: Record<string, string>;
   models?: ModelEntry[];
+  modelOverrides?: Record<string, ProviderModelOptions & Record<string, unknown>>;
 }
 
 // 各兼容协议「官方原生推理档位」→ models.json 的 thinkingLevelMap（pi 内部档位 → 供应商原生取值，null = 隐藏）。
@@ -116,7 +129,7 @@ export function defaultThinkingLevelMap(api: string | undefined, _modelId?: stri
  */
 export function modelsWithApiThinkingLevels<T extends UiModel>(models: T[], api: string | undefined): T[] {
   return models.map((m) => {
-    if (!m.reasoning) return m;
+    if (!m.reasoning || m.api) return m;
     const next = defaultThinkingLevelMap(api, m.id);
     return { ...m, thinkingLevelMap: next ? { ...next } : undefined };
   });
@@ -149,7 +162,7 @@ function stringifyRoutingObject(value: unknown): string | undefined {
   }
 }
 
-function serializeCompat(m: UiModel, api: string | undefined): ModelCompat | undefined {
+export function serializeCompat(m: UiModel, api: string | undefined): ModelCompat | undefined {
   const allowed = allowedCompatKeys(api);
   const merged: ModelCompat = { ...(m.compat ?? {}) };
   if (showsThinkingFormat(api) && m.thinkingFormat) merged.thinkingFormat = m.thinkingFormat;
@@ -173,7 +186,8 @@ function serializeCompat(m: UiModel, api: string | undefined): ModelCompat | und
 }
 
 /** models.json 模型条目 → UI 模型：还原 compat / thinkingFormat / 自适应思考。 */
-function toUiModel(m: ModelEntry, api: string | undefined): UiModel {
+export function toUiModel(m: ModelEntry, api: string | undefined): UiModel {
+  api = m.api ?? api;
   const { compat, ...rest } = m;
   const thinkingFormat = typeof compat?.thinkingFormat === 'string' ? compat.thinkingFormat : undefined;
   const uiCompat: ModelCompat = { ...(compat ?? {}) };
@@ -182,6 +196,7 @@ function toUiModel(m: ModelEntry, api: string | undefined): UiModel {
   if (uiCompat.chatTemplateKwargs !== undefined) uiCompat.chatTemplateKwargs = stringifyRoutingObject(uiCompat.chatTemplateKwargs);
   const model: UiModel = {
     ...rest,
+    _source: m,
     ...(fastApiSupported(api) && typeof compat?.supportsFastMode === 'boolean' ? { fast: compat.supportsFastMode } : {}),
     ...(thinkingFormat ? { thinkingFormat } : {}),
     ...(Object.keys(uiCompat).length ? { compat: uiCompat } : {}),
@@ -209,7 +224,7 @@ function isValidThreshold(value: unknown): value is number {
  * 分段落盘：没填阈值的行丢掉，没填的价格沿用基础价；同阈值只留最后一行，按阈值升序。
  * pi 的 tier schema 同样要求四个价格都是数字。
  */
-function completeTiers(tiers: ModelCostTier[] | undefined, base: CompleteRates): CompleteTier[] {
+export function completeTiers(tiers: ModelCostTier[] | undefined, base: CompleteRates): CompleteTier[] {
   const byThreshold = new Map<number, CompleteTier>();
   for (const tier of tiers ?? []) {
     if (!isValidThreshold(tier?.inputTokensAbove)) continue;
@@ -244,19 +259,27 @@ function completeCost(cost: ModelCost | undefined): ModelCost | undefined {
 }
 
 function serializeModel(m: UiModel, api: string | undefined): ModelEntry {
-  const { forceAdaptiveThinking, thinkingFormat, compat, cost, fast, ...rest } = m;
+  api = m.api ?? api;
+  const { forceAdaptiveThinking, thinkingFormat, compat, cost, fast, _source, _advancedDrafts, _advancedErrors, ...rest } = m;
+  if (_advancedErrors && Object.keys(_advancedErrors).length) throw new Error(Object.values(_advancedErrors)[0]);
   void fast;
   void forceAdaptiveThinking;
   void thinkingFormat;
   void compat;
   const priced = completeCost(cost);
   const base: ModelEntry = priced ? { ...rest, cost: priced } : { ...rest };
-  if (!m.reasoning) return { ...base, thinkingLevelMap: undefined, compat: serializeCompat(m, api) };
-  return {
+  const serialized = !m.reasoning ? { ...base, thinkingLevelMap: undefined, compat: serializeCompat(m, api) } : {
     ...base,
     thinkingLevelMap: m.thinkingLevelMap ?? defaultThinkingLevelMap(api, m.id),
     compat: serializeCompat(m, api),
   };
+  if (_source) {
+    const initial = toUiModel(_source, api);
+    if (JSON.stringify([m.compat, m.fast, m.thinkingFormat, m.forceAdaptiveThinking]) === JSON.stringify([initial.compat, initial.fast, initial.thinkingFormat, initial.forceAdaptiveThinking])) serialized.compat = _source.compat;
+    if (JSON.stringify(m.cost) === JSON.stringify(initial.cost)) serialized.cost = _source.cost;
+    if (JSON.stringify([m.thinkingLevelMap, m.reasoning]) === JSON.stringify([initial.thinkingLevelMap, initial.reasoning])) serialized.thinkingLevelMap = _source.thinkingLevelMap;
+  }
+  return serialized;
 }
 
 /**
@@ -276,6 +299,7 @@ export function withDefaultUserAgent(headers: Record<string, string> | undefined
   return h;
 }
 interface ModelsJson {
+  [key: string]: unknown;
   providers?: Record<string, ProviderEntry>;
 }
 type AuthEntry = { type?: string; key?: string } | undefined;
@@ -312,9 +336,12 @@ export function loadState(
       id: p.id,
       name: providers[p.id]?.name ?? p.name,
       builtIn: true,
+      _source: providers[p.id], _document: models,
+      modelOverrides: providers[p.id]?.modelOverrides,
       api,
       baseUrl: providers[p.id]?.baseUrl,
       apiKey: auth[p.id]?.key ?? providers[p.id]?.apiKey,
+      _initialApiKey: auth[p.id]?.key ?? providers[p.id]?.apiKey,
       headers: providers[p.id]?.headers,
       models: (providers[p.id]?.models ?? []).map((m) => toUiModel(m, api)),
     };
@@ -327,6 +354,7 @@ export function loadState(
       id,
       name: c.name ?? id,
       builtIn: false,
+      _source: c, _document: models, modelOverrides: c.modelOverrides,
       api: c.api,
       baseUrl: c.baseUrl,
       apiKey: c.apiKey ?? auth[id]?.key,
@@ -338,44 +366,62 @@ export function loadState(
 }
 
 /**
- * UI 列表 → { modelsJson, authJson }。
- * 内置: Key 写 auth.json；仅当有 baseUrl/自定义模型时才写 models.json 段。
+ * UI 列表 → models.json。
+ * 内置: API Key 不再写 auth.json——凭据归官方 CredentialStore 所有，由
+ *       setProviderApiKey / login 写入；仅当有 baseUrl/自定义模型/请求头时才写 models.json 段。
  * 自定义: 整段写 models.json（含 apiKey，Pi schema 要求）。
  */
 /** Published by pi (1.2+); `$schema` is an accepted top-level key of models.json. */
 export const MODELS_JSON_SCHEMA = 'https://pi.dev/schemas/models.schema.json';
 
-export function serializeState(providers: UiProvider[]): { modelsJson: string; authJson: string } {
+export function serializeState(providers: UiProvider[]): { modelsJson: string } {
   const modelsProviders: Record<string, ProviderEntry> = {};
-  const auth: AuthJson = {};
 
   for (const p of providers) {
+    const overrides = p.modelOverrides ? Object.fromEntries(Object.entries(p.modelOverrides).map(([id, value]) => {
+      const { _advancedDrafts, _advancedErrors, ...options } = value;
+      if (_advancedErrors && Object.keys(_advancedErrors).length) throw new Error(Object.values(_advancedErrors as Record<string, string>)[0]);
+      return [id, options];
+    }).filter(([, value]) => Object.keys(value).length)) : undefined;
     const models = p.models.map((m) => serializeModel(m, p.api));
     if (p.builtIn) {
-      if (p.apiKey) auth[p.id] = { type: 'api_key', key: p.apiKey };
       const hasHeaders = p.headers && Object.keys(p.headers).length > 0;
-      if (p.baseUrl || models.length > 0 || hasHeaders) {
+      if (p._source || p.baseUrl || models.length > 0 || hasHeaders || (p.modelOverrides && Object.keys(p.modelOverrides).length)) {
         modelsProviders[p.id] = {
+          ...p._source,
           ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
           ...(hasHeaders ? { headers: p.headers } : {}),
           ...(models.length ? { models } : {}),
+          ...(overrides ? { modelOverrides: overrides } : {}),
         };
+        if (!p.baseUrl) delete modelsProviders[p.id].baseUrl;
+        if (!hasHeaders) delete modelsProviders[p.id].headers;
+        if (!models.length) delete modelsProviders[p.id].models;
+        if (!overrides || !Object.keys(overrides).length) delete modelsProviders[p.id].modelOverrides;
+        if (p.apiKey !== p._initialApiKey) delete modelsProviders[p.id].apiKey;
+        if (!Object.keys(modelsProviders[p.id]).length) delete modelsProviders[p.id];
       }
     } else {
       modelsProviders[p.id] = {
+        ...p._source,
         name: p.name,
         ...(p.api ? { api: p.api } : {}),
         ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
         ...(p.apiKey ? { apiKey: p.apiKey } : {}),
-        headers: withDefaultUserAgent(p.headers),
+        headers: p._source && JSON.stringify(p.headers) === JSON.stringify(p._source.headers) ? p._source.headers : withDefaultUserAgent(p.headers),
         models,
+        ...(overrides ? { modelOverrides: overrides } : {}),
       };
+      if (p._source?.name === undefined && p.name === p.id) delete modelsProviders[p.id].name;
+      for (const key of ['api', 'baseUrl', 'apiKey'] as const) if (!p[key]) delete modelsProviders[p.id][key];
+      if (!overrides || !Object.keys(overrides).length) delete modelsProviders[p.id].modelOverrides;
     }
   }
 
+  const document = { ...providers[0]?._document, $schema: MODELS_JSON_SCHEMA, providers: modelsProviders };
+  validateModelsAdvancedOptions(document);
   return {
     // pi 1.2+ publishes the schema; editors use it to validate and complete models.json.
-    modelsJson: JSON.stringify({ $schema: MODELS_JSON_SCHEMA, providers: modelsProviders }, null, 2),
-    authJson: JSON.stringify(auth, null, 2),
+    modelsJson: JSON.stringify(document, null, 2),
   };
 }

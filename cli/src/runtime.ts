@@ -1,3 +1,4 @@
+import "./pi-node-providers.js";
 import { type InlineExtension, main } from "@earendil-works/pi-coding-agent";
 import { allExtensions, safety } from "../../extensions/index.js";
 

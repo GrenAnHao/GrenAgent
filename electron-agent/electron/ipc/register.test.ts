@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const electron = vi.hoisted(() => ({
   ipcMain: { handle: vi.fn() },
-  dialog: { showOpenDialog: vi.fn() },
+  dialog: { showOpenDialog: vi.fn(),showSaveDialog:vi.fn() },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
   BrowserWindow: {
     fromWebContents: (sender: { getOwnerBrowserWindow?: () => unknown }) => sender.getOwnerBrowserWindow?.(),
@@ -79,56 +79,31 @@ describe('registerIpcHandlers', () => {
     await invoke({}, { command: 'agent_set_session_defaults', args: { workspace: 'D:/p', preferences: { fastMode: false } } });
     expect(send).toHaveBeenLastCalledWith('D:/p', 'agent_set_session_defaults', { preferences: { fastMode: false } });
   });
-  it('dispatches operations only to fixed management methods and opens diagnostic IDs not caller paths', async () => {
-    const agentData = { requestAdmin: vi.fn().mockResolvedValue({}), request: vi.fn(), resolveDiagnosticPath: vi.fn().mockResolvedValue('D:/safe/wiki/page.md') };
-    registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
-    const cases: Array<[string, string, Record<string, unknown>]> = [
-      ['tasks_list', 'admin.tasks.list', { source: 'system', group: 'active', limit: 10 }],
-      ['tasks_read', 'admin.tasks.read', { source: 'system', id: 'same' }], ['tasks_previewRetry', 'admin.tasks.previewRetry', { source: 'user', id: 'same' }],
-      ['tasks_retry', 'admin.tasks.retry', { source: 'user', id: 'same', expectedModel: 'model' }],
-      ['audit_query', 'admin.audit.query', { action: 'job.stage' }], ['audit_export', 'admin.audit.export', { from: 1, to: 2 }],
-      ['diagnostics_check', 'admin.diagnostics.check', {}], ['overview', 'admin.overview', { userId: 'u' }],
-    ];
-    for (const [command, method, args] of cases) {
-      await invoke({}, { command: `agentData_${command}`, args });
-      expect(agentData.requestAdmin).toHaveBeenLastCalledWith(method, args);
-    }
-    await invoke({}, { command: 'agentData_diagnostics_open', args: { id: 'known', path: 'D:/untrusted/file' } });
-    expect(agentData.resolveDiagnosticPath).toHaveBeenCalledExactlyOnceWith('known');
-    expect(electron.shell.openPath).toHaveBeenCalledWith('D:/safe/wiki/page.md');
-    expect(agentData.request).not.toHaveBeenCalled();
-  });
-
-  it('dispatches every Wiki management operation to its fixed method with only supported fields', async () => {
+  it('no longer exposes task reads now that the task surface is retired', async () => {
     const agentData = { requestAdmin: vi.fn().mockResolvedValue({}), request: vi.fn() };
     registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
-    const wikiId = 'w1';
-    const operations: Array<[string, Record<string, unknown>]> = [
-      ['create', { name: '产品' }], ['read', { wikiId }], ['list', {}], ['update', { wikiId, name: '新品', summary: '摘要' }],
-      ['remove', { wikiId }], ['resetDraft', { wikiId }], ['ingest', { wikiId }],
-      ['rawWrite', { wikiId, filename: 'note.md', content: '原文' }], ['rawRemove', { wikiId, filename: 'note.md' }],
-      ['rawList', { wikiId }], ['rawRead', { wikiId, filename: 'note.md' }],
-      ['writeTemplate', { wikiId, name: 'purpose', content: '# purpose' }],
-      ['pageWrite', { wikiId, ref: 'concepts/auth', content: '# 权限' }], ['pageRemove', { wikiId, ref: 'concepts/auth' }],
-      ['pageList', { wikiId }], ['pageRead', { wikiId, ref: 'concepts/auth' }],
-      ['search', { wikiId, query: '权限', limit: 10, hop: 1 }], ['graph', { wikiId }],
-    ];
-    for (const [method, args] of operations) {
-      await invoke({}, { command: `agentData_wiki_${method}`, args: { ...args, method: 'untrusted', admin: false } });
-      expect(agentData.requestAdmin).toHaveBeenLastCalledWith(`wiki.${method}`, args);
+    for (const command of ['agentData_tasks_list', 'agentData_tasks_read', 'agentData_tasks_retry', 'agentData_tasks_previewRetry']) {
+      await expect(invoke({}, { command, args: {} })).rejects.toThrow();
     }
-    expect(agentData.request).not.toHaveBeenCalled();
+    expect(agentData.requestAdmin).not.toHaveBeenCalled();
   });
 
-  it('uses a fixed in-process Wiki admin entry and rejects unknown wiki invoke', async () => {
-    const agentData = { requestAdmin: vi.fn().mockResolvedValue({ wikiId: 'w' }), request: vi.fn() };
+  it('rejects the retired Agent Data commands instead of returning empty data', async () => {
+    const agentData = { requestAdmin: vi.fn().mockResolvedValue({}), request: vi.fn(), resolveDiagnosticPath: vi.fn() };
     registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
-    await invoke({}, { command: 'agentData_wiki_create', args: { name: '手册', admin: false, method: 'wiki.deleteWorkspace' } });
-    expect(agentData.requestAdmin).toHaveBeenCalledWith('wiki.create', { name: '手册' });
+    // 已下线能力必须给出明确失败，不能静默成功让调用方以为“没有数据”。
+    for (const command of [
+      'agentData_tasks_previewRetry', 'agentData_tasks_retry',
+      'agentData_audit_query', 'agentData_audit_export',
+      'agentData_diagnostics_check', 'agentData_diagnostics_open',
+      'agentData_overview', 'agentData_admin_jobs_list', 'agentData_admin_export',
+      'agentData_wiki_list', 'agentData_wiki_ingest', 'agentData_wiki_search',
+    ]) {
+      await expect(invoke({}, { command, args: {} })).rejects.toThrow();
+    }
+    expect(agentData.requestAdmin).not.toHaveBeenCalled();
     expect(agentData.request).not.toHaveBeenCalled();
-    await invoke({}, { command: 'agentData_wiki_pageWrite', args: { wikiId: 'w', ref: 'concepts/a', content: '# a' } });
-    expect(agentData.requestAdmin).toHaveBeenLastCalledWith('wiki.pageWrite', { wikiId: 'w', ref: 'concepts/a', content: '# a' });
-    await expect(invoke({}, { command: 'agentData_wiki_invoke', args: { method: 'wiki.list' } })).rejects.toThrow();
+    expect(agentData.resolveDiagnosticPath).not.toHaveBeenCalled();
   });
 
   beforeEach(() => {
@@ -315,16 +290,23 @@ describe('registerIpcHandlers', () => {
     expect(terminal.execute).toHaveBeenCalledWith('git', ['status'], 'C:/project');
   });
 
-  it('routes Agent Data management commands without exposing runtime details', async () => {
-    const agentData = { request: vi.fn(async (method: string) => ({ method })) };
+  it('no longer exposes the retired Agent Data management surface', async () => {
+    const agentData = { request: vi.fn() };
     registerIpcHandlers({ agentData } as any);
     const invoke = handler(IPC_CHANNELS.invoke);
-    await expect(invoke({}, { command: 'agentData_admin_jobs_list', args: {} })).resolves.toEqual({ method: 'admin.jobs.list' });
-    await expect(invoke({}, { command: 'agentData_admin_config_update', args: { module: 'codeRetrieval', value: {}, version: 0 } })).resolves.toEqual({ method: 'admin.config.update' });
-    await expect(invoke({}, { command: 'agentData_admin_jobs_remove', args: { id: 'job-1' } })).resolves.toEqual({ method: 'admin.jobs.remove' });
-    await expect(invoke({}, { command: 'agentData_admin_jobs_clear', args: { ids: ['job-1', 'job-2'] } })).resolves.toEqual({ method: 'admin.jobs.clear' });
-    expect(agentData.request).toHaveBeenCalledWith('admin.jobs.remove', { id: 'job-1' });
-    expect(agentData.request).toHaveBeenCalledWith('admin.jobs.clear', { ids: ['job-1', 'job-2'] });
+    for (const [command, args] of [
+      ['agentData_admin_jobs_list', {}],
+      ['agentData_admin_config_update', { module: 'codeRetrieval', value: {}, version: 0 }],
+      ['agentData_admin_jobs_remove', { id: 'job-1' }],
+      ['agentData_admin_jobs_clear', { ids: ['job-1'] }],
+      ['agentData_admin_audit_list', {}],
+      ['agentData_admin_export', {}],
+      ['agentData_admin_import', { data: {} }],
+    ] as const) {
+      await expect(invoke({}, { command, args })).rejects.toThrow();
+    }
+    // 这些命令不得再被转发到运行时。
+    expect(agentData.request).not.toHaveBeenCalled();
   });
 
   it('routes Agent Data module queries and job creation with explicit scope', async () => {
@@ -505,4 +487,37 @@ describe('context rule mode scope IPC', () => {
       args: { scope: 'global', title: 'T', enabled: true, body: 'b', modes: 'ultra' },
     })).rejects.toThrow('modes must be a string array');
   });
+});
+
+it('exports only the frozen host preview and keeps it retryable after a real file write failure',async()=>{
+ const {mkdtemp,readFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const {RequestObservations}=await import('../../../extensions/_shared/requestObservation.js');const {RequestObservationService}=await import('../../../extensions/_shared/requestObservationService.js');
+ const dir=await mkdtemp(join(tmpdir(),'observation-export-'));const hub=new RequestObservations('export-generation');const observations=new RequestObservationService({hub});const r=hub.begin({sessionId:'export',provider:'fixture',api:'a',requestedModel:'m'});hub.collect(r.identity,true);r.raw({type:'text_delta',text:'DO_NOT_EXPORT'});
+ const preview=await observations.command({action:'preview',identity:r.identity});r.raw({index:2});registerIpcHandlers({observations});const invoke=handler(IPC_CHANNELS.invoke);const event={sender:{}};
+ try{
+  electron.dialog.showSaveDialog.mockResolvedValueOnce({canceled:false,filePath:join(dir,'missing','file.json')}).mockResolvedValueOnce({canceled:false,filePath:join(dir,'saved.json')});
+  const command={command:'export_request_observation',args:{previewId:preview.previewId}};
+  await expect(invoke(event,command)).rejects.toThrow();await expect(invoke(event,command)).resolves.toEqual({saved:true});
+  const text=await readFile(join(dir,'saved.json'),'utf8');expect(text).not.toContain('DO_NOT_EXPORT');expect(JSON.parse(text).events).toEqual([{type:'text_delta',text:'[redacted]'}]);
+ }finally{observations.clear();await rm(dir,{recursive:true,force:true});}
+});
+
+describe('session workflow file authority',()=>{
+ const target={targetSessionPath:'D:/sessions/a.jsonl',expectedSessionId:'A',expectedLeafId:null,expectedRevision:'host:1'};
+ it('drops renderer-supplied paths and accepts only native dialog source/destination',async()=>{
+  const sessionWorkflow=vi.fn(async(_workspace:string,_request:Record<string,unknown>)=>({status:'ok'}));registerIpcHandlers({pi:{sessionWorkflow} as never});const invoke=handler(IPC_CHANNELS.invoke),event={sender:{}};
+  electron.dialog.showSaveDialog.mockResolvedValueOnce({canceled:false,filePath:'D:/approved/session.html'});
+  await invoke(event,{command:'agent_session_workflow',args:{workspace:'D:/repo',...target,action:'export-preview',format:'html',destination:'D:/unapproved/overwrite.html',source:'D:/unapproved/history.jsonl'}});
+  expect(sessionWorkflow).toHaveBeenLastCalledWith('D:/repo',expect.objectContaining({destination:'D:/approved/session.html'}));expect(sessionWorkflow.mock.calls.at(-1)![1]).not.toHaveProperty('source');
+  electron.dialog.showOpenDialog.mockResolvedValueOnce({canceled:false,filePaths:['D:/approved/history.jsonl']});
+  await invoke(event,{command:'agent_session_workflow',args:{workspace:'D:/repo',...target,action:'import-preview',source:'D:/unapproved/history.jsonl',destination:'D:/unapproved/overwrite.html'}});
+  expect(sessionWorkflow).toHaveBeenLastCalledWith('D:/repo',expect.objectContaining({source:'D:/approved/history.jsonl'}));expect(sessionWorkflow.mock.calls.at(-1)![1]).not.toHaveProperty('destination');
+ });
+ it('cancelled native file selection never reaches runtime publication or export',async()=>{
+  const sessionWorkflow=vi.fn();registerIpcHandlers({pi:{sessionWorkflow} as never});const invoke=handler(IPC_CHANNELS.invoke),event={sender:{}};
+  electron.dialog.showSaveDialog.mockResolvedValueOnce({canceled:true,filePath:'D:/ignored.html'});
+  await expect(invoke(event,{command:'agent_session_workflow',args:{workspace:'D:/repo',...target,action:'export-preview',format:'html'}})).resolves.toEqual({status:'cancelled'});
+  electron.dialog.showOpenDialog.mockResolvedValueOnce({canceled:true,filePaths:[]});
+  await expect(invoke(event,{command:'agent_session_workflow',args:{workspace:'D:/repo',...target,action:'import-preview'}})).resolves.toEqual({status:'cancelled'});expect(sessionWorkflow).not.toHaveBeenCalled();
+ });
 });

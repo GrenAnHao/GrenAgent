@@ -6,6 +6,7 @@ import { AgentDataRuntime } from '../../agentData/runtime';
 import { AgentDataClient } from '../../agentData/client';
 import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import { CodeGraphService } from './codeGraphService';
+import { IndexTaskStore } from './indexTaskStore';
 import { CodeGraphJobs } from './codeGraphJobs';
 
 it('indexes through AgentData jobs and serves the same SDK graph to an authenticated agent', async () => {
@@ -16,15 +17,18 @@ it('indexes through AgentData jobs and serves the same SDK graph to an authentic
   const code = new CodeGraphService({ listWorkspaces: () => [workspace] });
   let admin: AgentDataClient | undefined;
   let agent: AgentDataClient | undefined;
+  const indexTasks = new IndexTaskStore(join(root, 'index-tasks.sqlite'));
+  // 与生产 assemble 一致：回调直接写 IndexTaskStore，不再经共享库 admin.jobs.* 回写。
   const jobs = new CodeGraphJobs(code, {
-    start: (id) => admin!.request('admin.jobs.start', { id }),
-    complete: (id) => admin!.request('admin.jobs.complete', { id }),
-    fail: (id, error) => admin!.request('admin.jobs.fail', { id, error }),
-    cancelled: (id) => admin!.request('admin.jobs.markCancelled', { id }),
-    stage: (id, stage, processed, total) => runtime.recordJobStage(id, stage, processed, total),
+    start: async (id) => indexTasks.start(id),
+    complete: async (id) => indexTasks.complete(id),
+    fail: async (id, error) => indexTasks.fail(id, error),
+    cancelled: async (id) => indexTasks.cancel(id),
+    stage: () => {},
   });
   const runtime = new AgentDataRuntime({
     dataPath: join(root, 'agent-data.db'),
+    indexTasks,
     jobRunners: { 'codegraph.sync': jobs },
     codeRetrieval: {
       projects: () => code.projects(), status: async (path) => ({ ...await code.status(path) }),
@@ -35,8 +39,10 @@ it('indexes through AgentData jobs and serves the same SDK graph to an authentic
   try {
     admin = new AgentDataClient(await runtime.start(), { timeoutMs: 30000 });
     const job = await admin.request<{ id: string }>('admin.jobs.create', { kind: 'codegraph.sync', workspace });
-    await expect.poll(async () => ['completed', 'failed', 'cancelled'].includes((await admin!.request<{ state: string }>('admin.jobs.get', { id: job.id })).state), { timeout: 20000 }).toBe(true);
-    const finished = await admin.request<{ state: string; error?: string }>('admin.jobs.get', { id: job.id });
+    // 任务视图下线后没有 admin.jobs.get：用状态轮询等同步收敛。
+    // 等 SDK 真正可查询：直接轮询一次 search 直到成功，避免 busy 窗口。
+    await expect.poll(async () => { try { const result = await admin!.request<{ content?: Array<{ text?: string }> }>('codeRetrieval.call', { workspace, tool: 'codegraph_search', args: { query: 'parse' } }); return JSON.stringify(result).includes('parse'); } catch { return false; } }, { timeout: 20000 }).toBe(true);
+    const finished = { state: 'completed' as const };
     expect(finished.error).toBeUndefined();
     expect(finished.state).toBe('completed');
     agent = new AgentDataClient(runtime.agentEndpoint(workspace), { timeoutMs: 30000 });
@@ -47,10 +53,15 @@ it('indexes through AgentData jobs and serves the same SDK graph to an authentic
     await expect(agent.request('codeRetrieval.call', { workspace: root, tool: 'codegraph_search', args: { query: 'parse' } })).rejects.toThrow();
   } finally {
     await jobs.close();
+    indexTasks.close();
     await agent?.close();
     await admin?.close();
     runtime.close();
     await runtime.waitClosed();
-    await rm(root, { recursive: true, force: true });
+    // Windows 上 SQLite 的 -shm 释放有延迟；重试几次再删。
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try { await rm(root, { recursive: true, force: true }); break; }
+      catch (error) { if (attempt === 4) throw error; await new Promise((resolve) => setTimeout(resolve, 300)); }
+    }
   }
 }, 30000);

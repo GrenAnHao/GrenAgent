@@ -4,7 +4,6 @@ import {
   approval,
   diagramHint,
   fableBehavior,
-  gptWithTaste,
   multiAgent,
   namedExtensions,
   manifestExtensions,
@@ -27,8 +26,6 @@ describe("allExtensions bundle (compiled into the sidecar)", () => {
   it("loads fable-behavior immediately after diagram-hint in the bundle", () => {
     expect(allExtensions.indexOf(diagramHint)).toBeGreaterThan(-1);
     expect(allExtensions.indexOf(fableBehavior)).toBe(allExtensions.indexOf(diagramHint) + 1);
-    // 行为层紧跟在 fable 后面，让位判据和 fable 的注入顺序在一起才好读。
-    expect(allExtensions.indexOf(gptWithTaste)).toBe(allExtensions.indexOf(fableBehavior) + 1);
   });
 
   it("registers safety first so its tool_call guard intercepts earliest", () => {
@@ -43,7 +40,8 @@ describe("allExtensions bundle (compiled into the sidecar)", () => {
   it("omits long-term memory while retaining Wiki, code retrieval and session state", () => {
     const names = namedExtensions.map((entry) => entry.name);
     expect(names).not.toContain("memory");
-    expect(names).toEqual(expect.arrayContaining(["wiki-rag", "code-retrieval", "session-memory"]));
+    expect(names).toEqual(expect.arrayContaining(["code-retrieval", "session-memory"]));
+    expect(names).not.toContain("wiki-rag");
     expect(selectAllowedExtensions(["memory"])).toEqual([]);
   });
 

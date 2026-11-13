@@ -49,6 +49,7 @@ import { useModuleStore } from '../../stores/moduleStore';
 import { commandLanes } from '../../lib/commandLanes';
 import { refreshGoalStatus } from '../extensionUi/goalStatus';
 import { awaitStreamingEnd } from '../../lib/streamingGate';
+import { markSessionStopped } from '../../stores/runningSessions';
 
 const COMPOSE_COLUMN: CSSProperties = {
   // 空态按聊天列留白，扣除 padding 与编辑器 margin 后卡片最大为 880px。
@@ -113,6 +114,23 @@ const EMPTY_TURN_MSG =
   '本轮没有返回任何内容：模型/供应商可能返回为空或出错。请检查该供应商的 Base URL、模型 ID 与 API Key；也可在启动 app 的终端查看 [pi stderr] 日志。';
 /** 重试退避：第 n 次重试前等待，线性增长并封顶 4s。 */
 const retryDelayMs = (attempt: number) => Math.min(800 * attempt, 4000);
+/**
+ * 停止的界面侧上限：后端自己的收口上限比这个短，留出 IPC 往返余量。
+ * 到这里还没回来就不再等它，以免停止按钮被一个不会返回的请求挂住。
+ */
+const ABORT_UI_TIMEOUT_MS = 12_000;
+
+/** 超时后返回 undefined；按时完成或报错时按原样返回 / 抛出。 */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise<T | undefined>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    timer.unref?.();
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
   if (a == null || b == null) return a == b;
@@ -150,12 +168,15 @@ export function ChatView() {
   const isStreaming = store.useStore((s) => s.isStreaming);
   const awaitingResponse = store.useStore((s) => s.awaitingResponse);
   const composerQueue = store.useStore((s) => s.composerQueue) ?? [];
+  const needsSessionReload = store.useStore(s => Boolean(s.sessionNeedsReload));
   const isEmpty = messages.length === 0;
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
   const showEmptyLayout = isEmpty && workspaceReady;
   const findOpen = useFindScope(CHAT_FIND_SCOPE).open && !showEmptyLayout;
   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
   const userAbortedRef = useRef(false);
+  /** 正在进行的那一次停止收尾；连点与多个入口共用它。 */
+  const abortInFlightRef = useRef<Promise<void> | null>(null);
   const cancelSleepRef = useRef<(() => void) | null>(null);
   const sleepOrAbort = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -650,25 +671,74 @@ export function ChatView() {
     </div>
   ) : null;
 
-  const handleAbort = async () => {
+  const abortOnce = async () => {
     // 标记用户主动中断：runOnce 据此把本轮判为中断（不报错、不重试），无论中断如何体现。
     userAbortedRef.current = true;
     cancelSleepRef.current?.();
     // 置 aborting：reducer 据此丢弃 abort 触发的 "request aborted" 类报错，避免红条闪一下。
     // 同时清掉重试条和「准备响应中」，失败等待期间停止必须立刻生效。
-    store.useStore.setState({ aborting: true, retrying: undefined, awaitingResponse: false });
+    // isStreaming / runActive 也在这里收：停止的语义是「用户看到它停下」，不能把它挂在
+    // 一个可能永不返回的后端 abort 上（会话已拆、回合卡在不响应中止的等待里）。
+    store.useStore.setState({
+      aborting: true,
+      retrying: undefined,
+      awaitingResponse: false,
+      isStreaming: false,
+      runActive: false,
+      runOpening: false,
+    });
     // 停的是画面上这个会话，不是项目前景里恰好在跑的另一个。
     const abortPath = store.getLoadedSessionPath() ?? null;
-    await pi.abort(workspace, abortPath);
+    // 先熄灭侧栏那一圈：它只认 agent_end / agent_settled，那两条一起丢时取消就没有第二条熄灭入口。
+    // 这里不等后端回执，也不管后端是否真的停下——用户已经对这份会话按下停止。
+    if (abortPath) markSessionStopped(abortPath);
+    // 后端的 abort 有自己的收口上限；这里再兜一层，保证任何情况下都不会把停止按钮永久挂住。
+    let timedOut = false;
+    try {
+      // 包一层哨兵，把「请求没回来」与「后端回执本身就是 undefined」分开。
+      const settled = await withTimeout(
+        pi.abort(workspace, abortPath).then((result) => ({ result })),
+        ABORT_UI_TIMEOUT_MS,
+      );
+      // 两种超时都算：请求没回来，或者回来了但后端说这一轮还没闲下来。
+      timedOut = settled === undefined || settled.result?.reason === 'timeout';
+    } catch (error) {
+      // 停止本身失败（IPC 断、会话已拆）：仍然把本地运行态收掉，不把界面留在「在跑」。
+      if (samePath(store.getLoadedSessionPath(), abortPath)) {
+        store.useStore.setState({
+          aborting: false,
+          isStreaming: false,
+          runActive: false,
+          lastError: `停止失败：${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+      return;
+    }
     // 暂停时 Pi 不会把没注入的引导继续发出。取出队列：第一条当新消息发送，其余回到输入区排队。
+    // 同样加限：后端已经卡住时，不能因为取队列再挂一次。
     let queued: string[] = [];
     try {
-      queued = (await pi.takeSteering(workspace, abortPath)).steering;
+      const taken = await withTimeout(pi.takeSteering(workspace, abortPath), ABORT_UI_TIMEOUT_MS);
+      queued = taken?.steering ?? [];
     } catch {
       queued = [];
     }
     if (!samePath(store.getLoadedSessionPath(), abortPath)) return;
     const current = store.useStore.getState();
+    if (timedOut) {
+      // 后端已收到中止但这一轮仍没 idle：界面不留在「在跑」，用错误条如实说明。
+      // 已经从后端取出的引导不能丢：放回跟进队列，用户稍后仍能发出去。
+      store.useStore.setState((s) => ({
+        aborting: false,
+        isStreaming: false,
+        runActive: false,
+        ...(queued.length
+          ? { composerQueue: [...(s.composerQueue ?? []), ...queued.map((text) => createComposerItem(text))] }
+          : {}),
+        lastError: '已请求停止，但这一轮还没有结束。可以直接重发，或稍后再试。',
+      }));
+      return;
+    }
     const plan = settleAbortedSteers(current.messages, current.composerQueue ?? [], queued);
     if (!plan.send) {
       store.useStore.setState({ aborting: false });
@@ -695,6 +765,22 @@ export function ChatView() {
       if (!userAbortedRef.current && !/abort/i.test(msg)) {
         store.useStore.setState({ lastError: msg, awaitingResponse: false, runOriginPinned: false });
       }
+    }
+  };
+
+  /**
+   * 停止的并发去重：连点停止、重试条上的「取消」与错误条的取消同时触发时，
+   * 只发一次 abort、只算一次引导，其余调用共享同一次收尾。
+   */
+  const handleAbort = async () => {
+    const running = abortInFlightRef.current;
+    if (running) return running;
+    const task = abortOnce();
+    abortInFlightRef.current = task;
+    try {
+      await task;
+    } finally {
+      if (abortInFlightRef.current === task) abortInFlightRef.current = null;
     }
   };
 
@@ -781,7 +867,7 @@ export function ChatView() {
         }}>
           {retryIndicator}
           {errorBanner}
-          <div style={{ width: '100%' }} data-testid="chat-input-region">
+          <div inert={needsSessionReload || undefined} style={{ width: '100%', opacity:needsSessionReload ? 0.55 : undefined }} data-testid="chat-input-region">
             <ChatInput
               onSend={handleSend}
               onAbort={handleAbort}

@@ -25,7 +25,14 @@ export interface LedgerCall {
   messageTimestamp: number | null;
   /** 只有导入时才有：没有 messageTimestamp 时退回条目 id。 */
   entryId?: string | null;
+  responseModel?: string | null;
+  costSource?: CostSource;
+  /** Trusted registry binding, never supplied by renderer/file metadata. */
+  canonicalKey?: string;
 }
+
+export type CostSource = "provider" | "catalog" | "unknown";
+export interface WarmUsage { sessionId:string; entryId:string; timestamp:string; kind:"cache_warm"; provider:string; attributedModel:string; input:number; output:number; cacheRead:number; cacheWrite:number; totalTokens:number; cost:number; costSource:CostSource }
 
 export interface LedgerSession {
   id: string;
@@ -43,7 +50,10 @@ export interface LedgerReport {
   byModel: Array<{ provider: string; model: string; tokens: number; cost: number; messages: number }>;
   byProject: Array<{ cwd: string; name: string | null; tokens: number; cost: number; sessions: number }>;
   recentSessions: Array<{ id: string; name: string | null; cwd: string | null; path: string; timestamp: string | null; tokens: number; cost: number }>;
-  calls: Array<{ timestamp: string | null; provider: string; model: string; input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: number }>;
+  warmingTotals: {cost:number;messages:number;totalTokens:number};
+  warmingCalls: WarmUsage[];
+  recordedCost: {assistantCost:number;warmingCost:number;totalCost:number;sourceBreakdown:Record<CostSource,number>};
+  calls: Array<{ responseModel:string|null;costSource:CostSource; timestamp: string | null; provider: string; model: string; input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: number }>;
 }
 
 const SCHEMA = `
@@ -111,6 +121,7 @@ export function defaultLedgerPath(agentDir: string): string {
 
 /** 去重键：有 responseId 用它（全局唯一），否则会话 id + 消息时间，再不行退回条目 id。 */
 export function callKey(call: Pick<LedgerCall, "sessionId" | "provider" | "responseId" | "messageTimestamp" | "entryId">): string | null {
+  if ((call as LedgerCall).canonicalKey) return (call as LedgerCall).canonicalKey!;
   if (call.responseId) return `r:${call.provider}:${call.responseId}`;
   if (typeof call.messageTimestamp === "number") return `t:${call.sessionId}:${call.messageTimestamp}`;
   if (call.entryId) return `e:${call.sessionId}:${call.entryId}`;
@@ -139,6 +150,8 @@ export function callFromMessage(message: unknown, sessionId: string, timestamp: 
     cost: typeof cost === "number" ? cost : 0,
     responseId: typeof m.responseId === "string" && m.responseId ? m.responseId : null,
     messageTimestamp,
+    responseModel: typeof m.responseModel === "string" && m.responseModel ? m.responseModel : null,
+    costSource: usage.cost && typeof usage.cost === "object" && (usage.cost as Record<string,unknown>).totalFromProvider === true ? "provider" : "catalog",
   };
 }
 
@@ -156,7 +169,15 @@ export class UsageLedger {
     } catch {
       /* 个别平台不支持 WAL 时退回默认日志模式 */
     }
-    db.exec(SCHEMA);
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      db.exec(SCHEMA);
+      const columns = db.prepare("PRAGMA table_info(calls)").all() as Array<{name:string}>;
+      if (!columns.some(c=>c.name==='response_model')) db.exec('ALTER TABLE calls ADD COLUMN response_model TEXT');
+      if (!columns.some(c=>c.name==='cost_source')) db.exec("ALTER TABLE calls ADD COLUMN cost_source TEXT DEFAULT 'unknown'");
+      db.exec(`CREATE TABLE IF NOT EXISTS aux_usage(key TEXT PRIMARY KEY,session_id TEXT NOT NULL,entry_id TEXT NOT NULL,ts TEXT NOT NULL,kind TEXT NOT NULL,provider TEXT NOT NULL,attributed_model TEXT NOT NULL,input INTEGER NOT NULL,output INTEGER NOT NULL,cache_read INTEGER NOT NULL,cache_write INTEGER NOT NULL,total_tokens INTEGER NOT NULL,cost REAL NOT NULL,cost_source TEXT NOT NULL)`);
+      db.exec("COMMIT");
+    } catch(error) { try { db.exec("ROLLBACK"); } catch { /* BEGIN may itself fail. */ } db.close(); throw error; }
     this.db = db;
     return db;
   }
@@ -172,11 +193,17 @@ export class UsageLedger {
     if (!key) return false;
     const result = this.database
       .prepare(
-        `INSERT OR IGNORE INTO calls (key, session_id, ts, provider, model, input, output, cache_read, cache_write, total_tokens, cost, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO calls (key, session_id, ts, provider, model, input, output, cache_read, cache_write, total_tokens, cost, source, response_model, cost_source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(key, call.sessionId, call.timestamp, call.provider, call.model, call.input, call.output, call.cacheRead, call.cacheWrite, call.totalTokens, call.cost, source);
+      .run(key, call.sessionId, call.timestamp, call.provider, call.model, call.input, call.output, call.cacheRead, call.cacheWrite, call.totalTokens, call.cost, source, call.responseModel ?? null, call.costSource ?? "unknown");
+    if (!Number(result.changes)) this.database.prepare(`UPDATE calls SET response_model=COALESCE(response_model,?), cost_source=CASE WHEN cost_source IS NULL OR cost_source='unknown' THEN ? ELSE cost_source END WHERE key=?`).run(call.responseModel ?? null,call.costSource ?? "unknown",key);
     return Number(result.changes) > 0;
+  }
+
+  recordWarm(warm:WarmUsage):boolean {
+    const key=warmKey(warm);
+    return Number(this.database.prepare('INSERT OR IGNORE INTO aux_usage VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(key,warm.sessionId,warm.entryId,warm.timestamp,warm.kind,warm.provider,warm.attributedModel,warm.input,warm.output,warm.cacheRead,warm.cacheWrite,warm.totalTokens,warm.cost,warm.costSource).changes)>0;
   }
 
   /** 会话信息：已知的字段不会被 null 覆盖。 */
@@ -271,15 +298,21 @@ export class UsageLedger {
 
     const calls = (db
       .prepare(
-        `SELECT ts AS timestamp, provider, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite, total_tokens AS totalTokens, cost
+        `SELECT ts AS timestamp, provider, model, response_model AS responseModel, cost_source AS costSource, input, output, cache_read AS cacheRead, cache_write AS cacheWrite, total_tokens AS totalTokens, cost
          FROM calls ORDER BY ts DESC LIMIT 500`,
       )
       .all() as Array<Record<string, unknown>>).map((r) => ({
+        responseModel:str(r.responseModel),costSource:(r.costSource === "provider" || r.costSource === "catalog" ? r.costSource : "unknown") as CostSource,
         timestamp: str(r.timestamp), provider: String(r.provider), model: String(r.model),
         input: num(r.input), output: num(r.output), cacheRead: num(r.cacheRead), cacheWrite: num(r.cacheWrite), totalTokens: num(r.totalTokens), cost: num(r.cost),
       }));
 
-    return { totals, byDay, byModel, byProject, recentSessions, calls };
+    const warmingCalls=(db.prepare('SELECT * FROM aux_usage ORDER BY ts DESC LIMIT 500').all() as Array<Record<string,unknown>>).map(r=>({sessionId:String(r.session_id),entryId:String(r.entry_id),timestamp:String(r.ts),kind:'cache_warm' as const,provider:String(r.provider),attributedModel:String(r.attributed_model),input:num(r.input),output:num(r.output),cacheRead:num(r.cache_read),cacheWrite:num(r.cache_write),totalTokens:num(r.total_tokens),cost:num(r.cost),costSource:r.cost_source as CostSource}));
+    const wt=db.prepare('SELECT COALESCE(SUM(cost),0) AS cost,COUNT(*) AS messages,COALESCE(SUM(total_tokens),0) AS totalTokens FROM aux_usage').get() as Record<string,number>;
+    const warmingTotals={cost:num(wt.cost),messages:num(wt.messages),totalTokens:num(wt.totalTokens)};
+    const sourceBreakdown:Record<CostSource,number>={provider:0,catalog:0,unknown:0};
+    for(const r of db.prepare("SELECT COALESCE(cost_source,'unknown') AS source,SUM(cost) AS cost FROM calls GROUP BY cost_source UNION ALL SELECT cost_source AS source,SUM(cost) AS cost FROM aux_usage GROUP BY cost_source").all() as Array<{source:CostSource;cost:number}>) sourceBreakdown[r.source in sourceBreakdown?r.source:'unknown']+=num(r.cost);
+    return { totals, byDay, byModel, byProject, recentSessions, calls, warmingCalls,warmingTotals,recordedCost:{assistantCost:totals.cost,warmingCost:warmingTotals.cost,totalCost:totals.cost+warmingTotals.cost,sourceBreakdown} };
   }
 }
 
@@ -301,4 +334,15 @@ export function sharedLedger(file: string): UsageLedger {
     ledgers.set(file, ledger);
   }
   return ledger;
+}
+
+export function warmKey(warm:Pick<WarmUsage,'provider'|'entryId'|'timestamp'>):string { return `u:cache_warm:${warm.provider}:${warm.entryId}:${warm.timestamp}`; }
+/** Only the SDK persisted usage envelope is accepted, never tool-result usage. */
+export function warmFromEntry(value:unknown,sessionId:string):WarmUsage|null {
+  if(!value||typeof value!=='object')return null;
+  const e=value as Record<string,unknown>;
+  if(e.type!=='usage'||e.kind!=='cache_warm'||typeof e.id!=='string'||!e.id||typeof e.timestamp!=='string'||!e.timestamp||typeof e.provider!=='string'||typeof e.model!=='string'||!e.usage||typeof e.usage!=='object')return null;
+  const u=e.usage as Record<string,unknown>;const c=u.cost as Record<string,unknown>|undefined;
+  const n=(key:string)=>typeof u[key]==='number'?u[key] as number:0;
+  return {sessionId,entryId:e.id,timestamp:e.timestamp,kind:'cache_warm',provider:e.provider,attributedModel:e.model,input:n('input'),output:n('output'),cacheRead:n('cacheRead'),cacheWrite:n('cacheWrite'),totalTokens:n('totalTokens'),cost:typeof c?.total==='number'?c.total:0,costSource:c?.totalFromProvider===true?'provider':'catalog'};
 }

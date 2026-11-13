@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "direct": {
+      "@earendil-works/pi-ai": "1.5.1",
+      "@earendil-works/pi-coding-agent": "1.5.1"
+    },
+    "resolved": {
+      "path": "D:\\OneDrive\\Project Files\\Pi\\cli\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_46363ec98625f1d639749413625da3f6\\node_modules\\@earendil-works\\pi-coding-agent\\package.json",
+      "version": "1.5.1"
+    }
+  },
+  "extensions": {
+    "direct": {
+      "@earendil-works/pi-agent-core": "1.5.1",
+      "@earendil-works/pi-ai": "1.5.1",
+      "@earendil-works/pi-coding-agent": "1.5.1"
+    },
+    "resolved": {
+      "path": "D:\\OneDrive\\Project Files\\Pi\\extensions\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_3aac47665bc449927166a74714318d14\\node_modules\\@earendil-works\\pi-coding-agent\\package.json",
+      "version": "1.5.1"
+    }
+  },
+  "electron-agent": {
+    "direct": {
+      "@earendil-works/pi-agent-core": "1.5.1",
+      "@earendil-works/pi-ai": "1.5.1",
+      "@earendil-works/pi-coding-agent": "1.5.1"
+    },
+    "resolved": {
+      "path": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\node_modules\\.pnpm\\@earendil-works+pi-coding-a_aaa0854c1a65a32aafaa5d1d855555e5\\node_modules\\@earendil-works\\pi-coding-agent\\package.json",
+      "version": "1.5.1"
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { MODEL_COMPACTION_KEY, modelBudgetKey, parseModelCompactionBudgets, patchModelBudget, validateBudgetPatch, type ModelCompactionBudgets, type ModelCompactionPatch } from '../../../extensions/_shared/model-compaction-budgets.js';
 
 function workspaceConfigSuffix(workspace: string): string {
   return workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -56,6 +57,12 @@ function withRuntimeFileLock(path: string, write: () => Promise<void>): Promise<
   });
 }
 
+async function withSettingsResultLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  let result!: T;
+  await withRuntimeFileLock(path, async () => { result = await operation(); });
+  return result;
+}
+
 export async function mergeRuntimeSettingsFile(path: string, patch: Record<string, string>): Promise<void> {
   await withRuntimeFileLock(path, async () => {
     await mkdir(dirname(path), { recursive: true });
@@ -86,6 +93,45 @@ export class SettingsService {
   }
 
   async replace(settings: Record<string, string>): Promise<void> {
+    return withRuntimeFileLock(this.settingsPath, async () => {
+      const latest = await this.getAll();
+      const next = { ...settings };
+      delete next[MODEL_COMPACTION_KEY];
+      if (latest[MODEL_COMPACTION_KEY] !== undefined) next[MODEL_COMPACTION_KEY] = latest[MODEL_COMPACTION_KEY];
+      await this.write(next);
+    });
+  }
+
+  async getModelCompactionBudgets(): Promise<ModelCompactionBudgets> {
+    return parseModelCompactionBudgets((await this.getAll())[MODEL_COMPACTION_KEY]);
+  }
+
+  async patchModelCompactionBudget(provider: string, modelId: string, patch: ModelCompactionPatch): Promise<ModelCompactionBudgets> {
+    const key = modelBudgetKey(provider, modelId);
+    validateBudgetPatch(patch);
+    return withSettingsResultLock(this.settingsPath, async () => {
+      const latest = await this.getAll();
+      const budgets = patchModelBudget(parseModelCompactionBudgets(latest[MODEL_COMPACTION_KEY]), key, patch);
+      await this.write({ ...latest, [MODEL_COMPACTION_KEY]: JSON.stringify(budgets) });
+      return budgets;
+    });
+  }
+
+  clearModelCompactionBudget(provider: string, modelId: string): Promise<ModelCompactionBudgets> {
+    return this.patchModelCompactionBudget(provider, modelId, { reserveTokens: null, keepRecentTokens: null });
+  }
+
+  async clearModelCompactionBudgetKey(key: string): Promise<ModelCompactionBudgets> {
+    return withSettingsResultLock(this.settingsPath, async () => {
+      const latest = await this.getAll();
+      const budgets = { ...parseModelCompactionBudgets(latest[MODEL_COMPACTION_KEY]) };
+      delete budgets[key];
+      await this.write({ ...latest, [MODEL_COMPACTION_KEY]: JSON.stringify(budgets) });
+      return budgets;
+    });
+  }
+
+  private async write(settings: Record<string, string>): Promise<void> {
     await mkdir(this.dataDir, { recursive: true });
     await writeAppStateSettings(this.appStatePath, settings);
     await writeJsonAtomically(this.settingsPath, settings);

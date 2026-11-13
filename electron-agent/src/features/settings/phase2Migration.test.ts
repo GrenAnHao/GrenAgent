@@ -8,7 +8,7 @@ describe('migratePhase2', () => {
     expect(r.nextSettings.IMAGE_PROVIDER).toBe('openai');
     expect(r.nextSettings.IMAGE_MODEL).toBe('gpt-image-1');
     expect(r.nextSettings.IMAGE_API_KEY).toBeUndefined();
-    expect(JSON.parse(r.authJson).openai.key).toBe('sk-a');
+    expect(r.apiKeys.openai).toBe('sk-a');
   });
 
   it('maps a preset baseUrl to its provider id', () => {
@@ -18,7 +18,7 @@ describe('migratePhase2', () => {
       '{}',
     );
     expect(r.nextSettings.TTS_PROVIDER).toBe('deepseek');
-    expect(JSON.parse(r.authJson).deepseek.key).toBe('k');
+    expect(r.apiKeys.deepseek).toBe('k');
   });
 
   it('ignores retired knowledge and memory capability settings', () => {

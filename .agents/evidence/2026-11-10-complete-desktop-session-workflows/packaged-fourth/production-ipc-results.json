@@ -1,0 +1,539 @@
+{
+  "hostEntry": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\agent-host.js",
+  "sourceFaultInjection": false,
+  "facts": [
+    "production typed tree route returns raw tree and current identity",
+    "SDK label persists without changing sidebar title",
+    "same-file user navigation returns original editor draft without new session",
+    "cold source host restores confirmed navigation before an explicit message",
+    "packaged native context edit succeeds through actual production RPC",
+    "timeline preserves raw original and marks native replacement",
+    "current branch export is strict reopenable native JSONL",
+    "SDK-compatible before fork has exact inclusion and independent identity",
+    "SDK-compatible at fork has exact inclusion and independent identity",
+    "candidate clone publishes new identity and leaves source byte-for-byte intact",
+    "A confirmation cannot mutate foreground B after candidate selection",
+    "candidate seeds canonical model/thinking/Fast/approval/mode",
+    "candidate constructor failure preserves source foreground",
+    "imported high permissions remain historical data 0",
+    "imported high permissions remain historical data 1",
+    "missing imported model retains unavailable canonical identity",
+    "import never writes file-provided machine/model configuration",
+    "repeat external imports publish independent managed identities",
+    "all local operations including imports generated zero provider requests",
+    "all inherited/imported history retains one canonical original charge",
+    "busy structural operation performs no extra session append",
+    "explicit import continuation reaches real SDK serializer exactly once",
+    "legacy source receives its original canonical t key",
+    "multi-level inherited targets resolve after first legacy reconciliation",
+    "forged source and duplicate responseId remain external-history",
+    "canonical usage report survives clone/import and reconcile without duplicate history",
+    "missing registry cold-open classifies copied/imported history as unverified, never new t keys",
+    "cold missing registry never adds duplicate target charges",
+    "cold-open and reconciliation still make no automatic provider request",
+    "new explicit request after missing registry is registered normally"
+  ],
+  "requestCount": 2,
+  "beforeReport": {
+    "totals": {
+      "input": 10,
+      "output": 5,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 15,
+      "cost": 0.015,
+      "sessions": 1,
+      "messages": 1,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "fixture",
+        "model": "fixture-model",
+        "tokens": 15,
+        "cost": 0.015,
+        "messages": 1
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "name": null,
+        "tokens": 15,
+        "cost": 0.015,
+        "sessions": 1
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\fixture\\2026-11-10T05-18-46-815Z_01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686.jsonl",
+        "timestamp": "2026-11-10T05:18:46.815Z",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": "physical",
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:46.818Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 10,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "warmingCalls": [],
+    "warmingTotals": {
+      "cost": 0,
+      "messages": 0,
+      "totalTokens": 0
+    },
+    "recordedCost": {
+      "assistantCost": 0.015,
+      "warmingCost": 0,
+      "totalCost": 0.015,
+      "sourceBreakdown": {
+        "provider": 0,
+        "catalog": 0.015,
+        "unknown": 0
+      }
+    }
+  },
+  "afterReport": {
+    "totals": {
+      "input": 17,
+      "output": 8,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 25,
+      "cost": 0.015009999999999999,
+      "sessions": 2,
+      "messages": 2,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 25,
+        "cost": 0.015009999999999999
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "fixture",
+        "model": "fixture-model",
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "messages": 2
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "name": null,
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "sessions": 2
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-session-workflow-ipc-rM3rSM-workspace--\\2026-11-10T05-18-55-423Z_b0712d4c-7f91-40a5-9baa-01ced3f9c083.jsonl",
+        "timestamp": "2026-11-10T05:18:55.423Z",
+        "tokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "id": "01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\fixture\\2026-11-10T05-18-46-815Z_01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686.jsonl",
+        "timestamp": "2026-11-10T05:18:46.815Z",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:56.102Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": "physical",
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:46.818Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 10,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "warmingCalls": [],
+    "warmingTotals": {
+      "cost": 0,
+      "messages": 0,
+      "totalTokens": 0
+    },
+    "recordedCost": {
+      "assistantCost": 0.015009999999999999,
+      "warmingCost": 0,
+      "totalCost": 0.015009999999999999,
+      "sourceBreakdown": {
+        "provider": 0,
+        "catalog": 0.015009999999999999,
+        "unknown": 0
+      }
+    }
+  },
+  "reconciled": {
+    "totals": {
+      "input": 17,
+      "output": 8,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 25,
+      "cost": 0.015009999999999999,
+      "sessions": 2,
+      "messages": 2,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 25,
+        "cost": 0.015009999999999999
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "fixture",
+        "model": "fixture-model",
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "messages": 2
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "name": null,
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "sessions": 2
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-session-workflow-ipc-rM3rSM-workspace--\\2026-11-10T05-18-55-423Z_b0712d4c-7f91-40a5-9baa-01ced3f9c083.jsonl",
+        "timestamp": "2026-11-10T05:18:55.423Z",
+        "tokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "id": "01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\fixture\\2026-11-10T05-18-46-815Z_01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686.jsonl",
+        "timestamp": "2026-11-10T05:18:46.815Z",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:56.102Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": "physical",
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:46.818Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 10,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "warmingCalls": [],
+    "warmingTotals": {
+      "cost": 0,
+      "messages": 0,
+      "totalTokens": 0
+    },
+    "recordedCost": {
+      "assistantCost": 0.015009999999999999,
+      "warmingCost": 0,
+      "totalCost": 0.015009999999999999,
+      "sourceBreakdown": {
+        "provider": 0,
+        "catalog": 0.015009999999999999,
+        "unknown": 0
+      }
+    }
+  },
+  "coldReport": {
+    "totals": {
+      "input": 17,
+      "output": 8,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 25,
+      "cost": 0.015009999999999999,
+      "sessions": 2,
+      "messages": 2,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 25,
+        "cost": 0.015009999999999999
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "fixture",
+        "model": "fixture-model",
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "messages": 2
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "name": null,
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "sessions": 2
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-session-workflow-ipc-rM3rSM-workspace--\\2026-11-10T05-18-55-423Z_b0712d4c-7f91-40a5-9baa-01ced3f9c083.jsonl",
+        "timestamp": "2026-11-10T05:18:55.423Z",
+        "tokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "id": "01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\fixture\\2026-11-10T05-18-46-815Z_01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686.jsonl",
+        "timestamp": "2026-11-10T05:18:46.815Z",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:56.102Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": "physical",
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:46.818Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 10,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "warmingCalls": [],
+    "warmingTotals": {
+      "cost": 0,
+      "messages": 0,
+      "totalTokens": 0
+    },
+    "recordedCost": {
+      "assistantCost": 0.015009999999999999,
+      "warmingCost": 0,
+      "totalCost": 0.015009999999999999,
+      "sourceBreakdown": {
+        "provider": 0,
+        "catalog": 0.015009999999999999,
+        "unknown": 0
+      }
+    }
+  },
+  "recoveredReport": {
+    "totals": {
+      "input": 24,
+      "output": 11,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 35,
+      "cost": 0.015019999999999999,
+      "sessions": 2,
+      "messages": 3,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 35,
+        "cost": 0.015019999999999999
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "fixture",
+        "model": "fixture-model",
+        "tokens": 35,
+        "cost": 0.015019999999999999,
+        "messages": 3
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "name": null,
+        "tokens": 35,
+        "cost": 0.015019999999999999,
+        "sessions": 2
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-session-workflow-ipc-rM3rSM-workspace--\\2026-11-10T05-18-55-423Z_b0712d4c-7f91-40a5-9baa-01ced3f9c083.jsonl",
+        "timestamp": "2026-11-10T05:18:55.423Z",
+        "tokens": 20,
+        "cost": 0.000019999999999999998
+      },
+      {
+        "id": "01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\fixture\\2026-11-10T05-18-46-815Z_01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686.jsonl",
+        "timestamp": "2026-11-10T05:18:46.815Z",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:19:00.465Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:56.102Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": "physical",
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:46.818Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 10,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "warmingCalls": [],
+    "warmingTotals": {
+      "cost": 0,
+      "messages": 0,
+      "totalTokens": 0
+    },
+    "recordedCost": {
+      "assistantCost": 0.015019999999999999,
+      "warmingCost": 0,
+      "totalCost": 0.015019999999999999,
+      "sourceBreakdown": {
+        "provider": 0,
+        "catalog": 0.015019999999999999,
+        "unknown": 0
+      }
+    }
+  },
+  "stderr": "(node:81188) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n(node:45816) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n[agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5815\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n[agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5904\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n[agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5987\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n(node:1568) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n"
+}

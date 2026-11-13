@@ -1,0 +1,2259 @@
+ M .agents/evidence/2026-10-30-single-workbench-theme/appearance-settings-dark.png
+ M .agents/notes/archived/manifest.json
+ M .agents/notes/implemented/bug-fix/2026-10-14-code-index-paged-files-and-virtual-source.md
+ M .agents/notes/implemented/bug-fix/2026-11-01-repo-wiki-token-budget-estimate.md
+ M .agents/notes/implemented/bug-fix/2026-11-03-repo-wiki-catalogue-failures.md
+ D .agents/notes/implemented/feature/2026-10-29-gpt-with-taste-as-pi-extension.md
+ M AGENTS.md
+ M README.md
+ M cli/package-lock.json
+ M cli/package.json
+ M cli/pnpm-lock.yaml
+ M cli/pnpm-workspace.yaml
+ M cli/src/agent-data-plugins.test.ts
+ M cli/src/extension-profile.ts
+ M cli/src/gren-runtime.test.ts
+ M cli/src/gren-runtime.ts
+ M cli/src/pi-sdk.ts
+ M cli/src/pi-worker.ts
+ M cli/src/probe-models.test.ts
+ M cli/src/probe-models.ts
+ M cli/src/runtime.ts
+ M docs/architecture.md
+ D docs/repo-wiki-native-manual.md
+ D docs/repo-wiki-qoder-reference.md
+ D docs/repo-wiki.md
+ M docs/third-party-dependencies.md
+ M docs/third-party-notices.md
+ M electron-agent/electron-builder.yml
+ M electron-agent/electron.vite.config.ts
+ M electron-agent/electron/agent/copyPiAdjacentAssets.test.ts
+ M electron-agent/electron/agent/copyPiAdjacentAssets.ts
+ D electron-agent/electron/agent/knowledgeModelTurn.test.ts
+ D electron-agent/electron/agent/knowledgeModelTurn.ts
+ D electron-agent/electron/agent/repoWikiHostBuild.test.ts
+ D electron-agent/electron/agent/repoWikiHostBuild.ts
+ D electron-agent/electron/agent/repoWikiLicenses.test.ts
+ D electron-agent/electron/agent/repoWikiWorkerEntry.test.ts
+ M electron-agent/electron/agent/workerEntry.ts
+ D electron-agent/electron/agentData/auditViewStore.test.ts
+ D electron-agent/electron/agentData/auditViewStore.ts
+ D electron-agent/electron/agentData/createAgentDataModelPort.test.ts
+ M electron-agent/electron/agentData/createAgentDataModelPort.ts
+ D electron-agent/electron/agentData/diagReport.test.ts
+ D electron-agent/electron/agentData/jobCleanup.test.ts
+ M electron-agent/electron/agentData/jobStore.test.ts
+ M electron-agent/electron/agentData/jobStore.ts
+ D electron-agent/electron/agentData/knowledgeCompletion.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/cardPipeline.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/cardPipeline.ts
+ D electron-agent/electron/agentData/knowledgeKernel/completionManifest.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/completionManifest.ts
+ D electron-agent/electron/agentData/knowledgeKernel/contracts.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/coordinator.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/coordinator.ts
+ D electron-agent/electron/agentData/knowledgeKernel/crash.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/crashFixture.ts
+ D electron-agent/electron/agentData/knowledgeKernel/currentItem.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/executionPolicy.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/executionPolicy.ts
+ D electron-agent/electron/agentData/knowledgeKernel/incremental.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/incremental.ts
+ D electron-agent/electron/agentData/knowledgeKernel/lease.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/markdownLinks.ts
+ D electron-agent/electron/agentData/knowledgeKernel/modelRequests.integration.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/modelRequests.ts
+ D electron-agent/electron/agentData/knowledgeKernel/pipeline.ts
+ D electron-agent/electron/agentData/knowledgeKernel/projection.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/projection.ts
+ D electron-agent/electron/agentData/knowledgeKernel/readyScheduler.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/readyScheduler.ts
+ D electron-agent/electron/agentData/knowledgeKernel/recovery.integration.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/recovery.ts
+ D electron-agent/electron/agentData/knowledgeKernel/repair.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/runtimeBridge.ts
+ D electron-agent/electron/agentData/knowledgeKernel/store.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/store.ts
+ D electron-agent/electron/agentData/knowledgeKernel/testFixture.ts
+ D electron-agent/electron/agentData/knowledgeKernel/validation.test.ts
+ D electron-agent/electron/agentData/knowledgeKernel/validation.ts
+ D electron-agent/electron/agentData/knowledgeKernel/wikiPipeline.test.ts
+ D electron-agent/electron/agentData/nativeWikiProjection.test.ts
+ D electron-agent/electron/agentData/nativeWikiProjection.ts
+ M electron-agent/electron/agentData/operationsContracts.ts
+ M electron-agent/electron/agentData/operationsProjection.ts
+ D electron-agent/electron/agentData/runtime.knowledgeKernel.test.ts
+ M electron-agent/electron/agentData/runtime.memoryRemoval.test.ts
+ D electron-agent/electron/agentData/runtime.operations.test.ts
+ D electron-agent/electron/agentData/runtime.orphanJobs.test.ts
+ D electron-agent/electron/agentData/runtime.repoWikiJobs.test.ts
+ M electron-agent/electron/agentData/runtime.test.ts
+ M electron-agent/electron/agentData/runtime.timing.test.ts
+ M electron-agent/electron/agentData/runtime.ts
+ M electron-agent/electron/agentData/storage.test.ts
+ M electron-agent/electron/agentData/storage.ts
+ D electron-agent/electron/agentData/taskViewStore.test.ts
+ D electron-agent/electron/agentData/taskViewStore.ts
+ D electron-agent/electron/agentData/wikiEngine/cascade.test.ts
+ D electron-agent/electron/agentData/wikiEngine/gates.test.ts
+ D electron-agent/electron/agentData/wikiEngine/graph.test.ts
+ D electron-agent/electron/agentData/wikiEngine/graph.ts
+ D electron-agent/electron/agentData/wikiEngine/indexDb.test.ts
+ D electron-agent/electron/agentData/wikiEngine/indexDb.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest.test.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/cascade.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/chunker.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/concurrency.test.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/concurrency.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/file-protocol.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/frontmatter.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/index-builder.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/index.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/log-writer.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/merge.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/overview.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/prompts.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/runIncremental.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/safe-path.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/slug.ts
+ D electron-agent/electron/agentData/wikiEngine/ingest/template.ts
+ D electron-agent/electron/agentData/wikiEngine/knowledgeModelSlot.test.ts
+ D electron-agent/electron/agentData/wikiEngine/llm.test.ts
+ D electron-agent/electron/agentData/wikiEngine/llm.ts
+ D electron-agent/electron/agentData/wikiEngine/logger.ts
+ D electron-agent/electron/agentData/wikiEngine/pageWrite.test.ts
+ D electron-agent/electron/agentData/wikiEngine/query.test.ts
+ D electron-agent/electron/agentData/wikiEngine/raw.test.ts
+ D electron-agent/electron/agentData/wikiEngine/runtime.test.ts
+ D electron-agent/electron/agentData/wikiEngine/search.test.ts
+ D electron-agent/electron/agentData/wikiEngine/service.create.test.ts
+ D electron-agent/electron/agentData/wikiEngine/service.ts
+ D electron-agent/electron/agentDataProcess/assemble.ts
+ D electron-agent/electron/agentDataProcess/codeGraphClient.ts
+ D electron-agent/electron/agentDataProcess/contract.ts
+ D electron-agent/electron/agentDataProcess/host.test.ts
+ D electron-agent/electron/agentDataProcess/host.ts
+ D electron-agent/electron/agentDataProcess/hostEntry.ts
+ D electron-agent/electron/agentDataProcess/mainBoundary.test.ts
+ D electron-agent/electron/agentDataProcess/modelPort.ts
+ D electron-agent/electron/agentDataProcess/pipePath.ts
+ M electron-agent/electron/app/agentDataService.test.ts
+ M electron-agent/electron/app/agentDataService.ts
+ M electron-agent/electron/app/codeGraph/codeGraphHostClient.ts
+ M electron-agent/electron/app/codeGraph/codeGraphRuntime.integration.test.ts
+ M electron-agent/electron/app/enhancePrompt.ts
+ D electron-agent/electron/app/nativeWikiController.test.ts
+ D electron-agent/electron/app/nativeWikiController.ts
+ D electron-agent/electron/app/nativeWikiModel.test.ts
+ D electron-agent/electron/app/nativeWikiModel.ts
+ M electron-agent/electron/app/piRuntimeService.test.ts
+ M electron-agent/electron/app/piRuntimeService.ts
+ M electron-agent/electron/app/plugin/builtinPlugins.ts
+ M electron-agent/electron/app/providerService.test.ts
+ M electron-agent/electron/app/providerService.ts
+ D electron-agent/electron/app/repoWikiDurable.integration.test.ts
+ D electron-agent/electron/app/repoWikiFlow.integration.test.ts
+ D electron-agent/electron/app/repoWikiHostProjects.integration.test.ts
+ D electron-agent/electron/app/repoWikiKnowledgeKernel.integration.fixture.ts
+ D electron-agent/electron/app/repoWikiKnowledgeKernel.integration.test.ts
+ D electron-agent/electron/app/repoWikiKnowledgeModel.test.ts
+ D electron-agent/electron/app/repoWikiKnowledgeModel.ts
+ D electron-agent/electron/app/repoWikiLazy.integration.test.ts
+ D electron-agent/electron/app/repoWikiLazyHost.test.ts
+ D electron-agent/electron/app/repoWikiRealModel.e2e.test.ts
+ D electron-agent/electron/app/repoWikiService.test.ts
+ D electron-agent/electron/app/repoWikiService.ts
+ D electron-agent/electron/app/repoWikiTasks.test.ts
+ D electron-agent/electron/app/repoWikiWorkflow.integration.fixture.ts
+ D electron-agent/electron/app/repoWikiWorkflow.integration.test.ts
+ D electron-agent/electron/app/taskViewService.test.ts
+ D electron-agent/electron/app/taskViewService.ts
+ M electron-agent/electron/app/thirdPartyLicenses.test.ts
+ M electron-agent/electron/ipc/commandCoverage.test.ts
+ M electron-agent/electron/ipc/contracts.ts
+ M electron-agent/electron/ipc/register.test.ts
+ M electron-agent/electron/ipc/register.ts
+ D electron-agent/electron/knowledgeProcess/host.integration.test.ts
+ D electron-agent/electron/knowledgeProcess/host.test.ts
+ D electron-agent/electron/knowledgeProcess/host.ts
+ D electron-agent/electron/knowledgeProcess/hostEntry.ts
+ D electron-agent/electron/knowledgeProcess/knowledgeContracts.test.ts
+ D electron-agent/electron/knowledgeProcess/pipelinePrompts.ts
+ D electron-agent/electron/knowledgeProcess/projectPort.test.ts
+ D electron-agent/electron/knowledgeProcess/projectPort.ts
+ D electron-agent/electron/knowledgeProcess/publication.integration.test.ts
+ D electron-agent/electron/knowledgeProcess/readTools.test.ts
+ D electron-agent/electron/knowledgeProcess/readTools.ts
+ D electron-agent/electron/knowledgeProcess/stageProtocol.ts
+ D electron-agent/electron/knowledgeProcess/stageRuntime.integration.test.ts
+ D electron-agent/electron/knowledgeProcess/stageRuntime.ts
+ M electron-agent/electron/main.ts
+ M electron-agent/electron/runtimeDiag.ts
+ D electron-agent/electron/wikiService/authorConfig.ts
+ D electron-agent/electron/wikiService/contracts.ts
+ D electron-agent/electron/wikiService/fixtures/catalogue-scalar-shapes.txt
+ D electron-agent/electron/wikiService/fixtures/catalogue-yaml-fence.txt
+ D electron-agent/electron/wikiService/fullGeneration.test.ts
+ D electron-agent/electron/wikiService/fullGeneration.ts
+ D electron-agent/electron/wikiService/host.test.ts
+ D electron-agent/electron/wikiService/host.ts
+ D electron-agent/electron/wikiService/incremental.test.ts
+ D electron-agent/electron/wikiService/incremental.ts
+ D electron-agent/electron/wikiService/nativeWorkflow.integration.test.ts
+ D electron-agent/electron/wikiService/projectAdapter.test.ts
+ D electron-agent/electron/wikiService/projectAdapter.ts
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/INVENTORY.md
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/jsonRepair.ts
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/jsonrepair-3.15.0/LICENSE.md
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/jsonrepair-3.15.0/regular/jsonrepair.ts
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/jsonrepair-3.15.0/utils/JSONRepairError.ts
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/jsonrepair-3.15.0/utils/stringUtils.ts
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/render-fixtures.json
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/templates.ts
+ D electron-agent/electron/wikiService/reference/qoder-0.5.1/wikiTools.ts
+ D electron-agent/electron/wikiService/referenceParsers.test.ts
+ D electron-agent/electron/wikiService/referenceParsers.ts
+ D electron-agent/electron/wikiService/referenceProfiles.ts
+ D electron-agent/electron/wikiService/referencePrompts.test.ts
+ D electron-agent/electron/wikiService/referencePrompts.ts
+ D electron-agent/electron/wikiService/repository.test.ts
+ D electron-agent/electron/wikiService/repository.ts
+ D electron-agent/electron/wikiService/repositoryTools.ts
+ D electron-agent/electron/wikiService/runner.ts
+ D electron-agent/electron/wikiService/service.test.ts
+ D electron-agent/electron/wikiService/service.ts
+ D electron-agent/electron/wikiService/sessionRuntime.test.ts
+ D electron-agent/electron/wikiService/sessionRuntime.ts
+ D electron-agent/electron/wikiService/store.test.ts
+ D electron-agent/electron/wikiService/store.ts
+ M electron-agent/package-lock.json
+ M electron-agent/package.json
+ M electron-agent/pnpm-lock.yaml
+ M electron-agent/pnpm-workspace.yaml
+ D electron-agent/scripts/agentdata-host-smoke.ts
+ M electron-agent/scripts/codegraph-auto-sync-smoke.mjs
+ M electron-agent/scripts/collect-third-party-licenses.cjs
+ D electron-agent/scripts/diag-agentdata-report.mjs
+ D electron-agent/scripts/fixtures/repoWikiWorkflowAgentDataHost.ts
+ D electron-agent/scripts/test-repo-wiki-flow.mjs
+ D electron-agent/scripts/test-repo-wiki.mjs
+ D electron-agent/scripts/verify-repo-wiki-catalogue.mjs
+ D electron-agent/shared/knowledgeKernelContracts.ts
+ D electron-agent/shared/wikiLinks.ts
+ D electron-agent/src/features/agentData/AgentDataCenter.navigation.test.tsx
+ D electron-agent/src/features/agentData/AgentDataCenter.test.tsx
+ D electron-agent/src/features/agentData/AgentDataCenter.tsx
+ D electron-agent/src/features/agentData/AgentDataTaskProvider.test.tsx
+ D electron-agent/src/features/agentData/AgentDataTaskProvider.tsx
+ D electron-agent/src/features/agentData/AuditDiagnosticsPanel.test.tsx
+ D electron-agent/src/features/agentData/AuditDiagnosticsPanel.tsx
+ M electron-agent/src/features/agentData/CodeProjectList.tsx
+ M electron-agent/src/features/agentData/CodeRelations.tsx
+ M electron-agent/src/features/agentData/CodeRetrievalPanel.navigation.test.tsx
+ D electron-agent/src/features/agentData/CodeRetrievalPanel.tasks.test.tsx
+ M electron-agent/src/features/agentData/CodeRetrievalPanel.test.tsx
+ M electron-agent/src/features/agentData/CodeRetrievalPanel.tsx
+ M electron-agent/src/features/agentData/CodeRetrievalPanel.workbench.test.tsx
+ M electron-agent/src/features/agentData/CodeSourceDetail.test.tsx
+ M electron-agent/src/features/agentData/CodeSourceDetail.tsx
+ M electron-agent/src/features/agentData/CodeSourceLines.test.tsx
+ M electron-agent/src/features/agentData/CodeSourceLines.tsx
+ D electron-agent/src/features/agentData/JobsPanel.operations.test.tsx
+ D electron-agent/src/features/agentData/JobsPanel.test.tsx
+ D electron-agent/src/features/agentData/JobsPanel.tsx
+ D electron-agent/src/features/agentData/OverviewPanel.test.tsx
+ D electron-agent/src/features/agentData/OverviewPanel.tsx
+ D electron-agent/src/features/agentData/TaskDetailDrawer.test.tsx
+ D electron-agent/src/features/agentData/TaskDetailDrawer.tsx
+ D electron-agent/src/features/agentData/WikiPanel.tsx
+ D electron-agent/src/features/agentData/agentDataViewTypes.ts
+ M electron-agent/src/features/agentData/codeIndexPresentation.ts
+ M electron-agent/src/features/agentData/codeStyles.ts
+ M electron-agent/src/features/agentData/listRowStyles.ts
+ M electron-agent/src/features/agentData/operationsPresentation.ts
+ D electron-agent/src/features/agentData/overviewStyles.ts
+ D electron-agent/src/features/agentData/wiki/WikiLibraryDialog.test.tsx
+ D electron-agent/src/features/agentData/wiki/WikiLibraryDialog.tsx
+ D electron-agent/src/features/agentData/wiki/WikiLibraryList.test.tsx
+ D electron-agent/src/features/agentData/wiki/WikiLibraryList.tsx
+ D electron-agent/src/features/agentData/wiki/WikiLibraryWorkspace.test.tsx
+ D electron-agent/src/features/agentData/wiki/WikiLibraryWorkspace.tsx
+ D electron-agent/src/features/agentData/wiki/WikiPageEditor.test.tsx
+ D electron-agent/src/features/agentData/wiki/WikiPageEditor.tsx
+ D electron-agent/src/features/agentData/wiki/WikiSourceDialog.test.tsx
+ D electron-agent/src/features/agentData/wiki/WikiSourceDialog.tsx
+ D electron-agent/src/features/agentData/wiki/wikiStyles.ts
+ D electron-agent/src/features/agentData/wiki/wikiTestData.ts
+ D electron-agent/src/features/agentData/wiki/wikiTestSupport.ts
+ M electron-agent/src/features/agentData/workbench/workbenchStyles.ts
+ M electron-agent/src/features/chat/ChatView.test.tsx
+ M electron-agent/src/features/chat/ChatView.tsx
+ M electron-agent/src/features/layout/ModuleRail.test.tsx
+ M electron-agent/src/features/layout/ModuleRail.tsx
+ D electron-agent/src/features/repoWiki/KnowledgeActiveItems.tsx
+ D electron-agent/src/features/repoWiki/RepoWikiWorkspace.knowledge.test.tsx
+ D electron-agent/src/features/repoWiki/RepoWikiWorkspace.test.tsx
+ D electron-agent/src/features/repoWiki/RepoWikiWorkspace.tsx
+ D electron-agent/src/features/repoWiki/knowledgeProjection.test.ts
+ D electron-agent/src/features/repoWiki/knowledgeProjection.ts
+ D electron-agent/src/features/repoWiki/repoWikiClient.test.ts
+ D electron-agent/src/features/repoWiki/testing/runtimeFixture.ts
+ M electron-agent/src/features/settings/ProviderModelCard.tsx
+ M electron-agent/src/features/settings/ProvidersSettings.test.tsx
+ M electron-agent/src/features/settings/ProvidersSettings.tsx
+ M electron-agent/src/features/settings/SettingsPanel.tsx
+ M electron-agent/src/features/settings/fastCapability.test.ts
+ M electron-agent/src/features/settings/modelCompatCatalog.ts
+ M electron-agent/src/features/settings/phase2Migration.test.ts
+ M electron-agent/src/features/settings/phase2Migration.ts
+ M electron-agent/src/features/settings/providerConfigAdapter.test.ts
+ M electron-agent/src/features/settings/providerConfigAdapter.ts
+ M electron-agent/src/features/settings/providerPresets.ts
+ M electron-agent/src/features/settings/settingsSchema.test.ts
+ M electron-agent/src/features/settings/settingsSchema.ts
+ M electron-agent/src/features/settings/useSettingsForm.test.ts
+ M electron-agent/src/features/settings/useSettingsForm.ts
+ M electron-agent/src/features/workspace/ModuleContainer.test.tsx
+ M electron-agent/src/features/workspace/ModuleContainer.tsx
+ M electron-agent/src/lib/agentData.test.ts
+ M electron-agent/src/lib/agentData.ts
+ M electron-agent/src/lib/pathUtils.ts
+ M electron-agent/src/lib/pi.ts
+ M electron-agent/src/stores/moduleStore.test.ts
+ M electron-agent/src/stores/moduleStore.ts
+ M electron-agent/src/stores/restoreRunningTurns.test.ts
+ M electron-agent/src/stores/restoreRunningTurns.ts
+ M electron-agent/src/stores/runningSessions.test.ts
+ M electron-agent/src/stores/runningSessions.ts
+ D electron-agent/tsconfig.knowledge-kernel.json
+ M electron-agent/tsconfig.node.json
+ D electron-agent/tsconfig.repo-wiki.json
+ M electron-agent/ui-harness/probes/code-index-sync.mjs
+ M electron-agent/ui-harness/probes/code-retrieval-panel.mjs
+ D electron-agent/ui-harness/probes/native-task-summary.mjs
+ D electron-agent/ui-harness/probes/repo-wiki-native.mjs
+ D electron-agent/ui-harness/probes/repo-wiki-primary.mjs
+ D electron-agent/ui-harness/probes/repo-wiki.mjs
+ D electron-agent/ui-harness/scenarios/agentdata-memory-retirement.tsx
+ D electron-agent/ui-harness/scenarios/agentdata-overview.tsx
+ M electron-agent/ui-harness/scenarios/code-index-sync.tsx
+ M electron-agent/ui-harness/scenarios/code-retrieval-panel.tsx
+ D electron-agent/ui-harness/scenarios/native-task-summary.tsx
+ D electron-agent/ui-harness/scenarios/repo-wiki-native.tsx
+ D electron-agent/ui-harness/scenarios/repo-wiki-primary.tsx
+ D electron-agent/ui-harness/scenarios/repo-wiki.tsx
+ M electron-agent/ui-harness/scenarios/ultra-mode.tsx
+ D electron-agent/vendor/repo-wiki/LICENSE
+ D electron-agent/vendor/repo-wiki/THIRD_PARTY_NOTICES.md
+ D electron-agent/vendor/repo-wiki/UPSTREAM.md
+ D electron-agent/vendor/repo-wiki/apps/web/src/App.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/RepoWikiPanel.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/components/MermaidDiagram.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/components/SettingsModal.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/components/WikiContent.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/components/WikiSidebar.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/demo.css
+ D electron-agent/vendor/repo-wiki/apps/web/src/index.css
+ D electron-agent/vendor/repo-wiki/apps/web/src/lib/api.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/main.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/pages/CardsView.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/pages/ChatView.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/pages/DiffView.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/pages/FileView.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/pages/Home.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/pages/MapView.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/pages/WikiView.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/stores/wiki.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/vite-env.d.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/App.test.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/GenerationOverview.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/Icons.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/KnowledgeCardList.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/KnowledgeRunStatus.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/Markdown.test.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/Markdown.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/Mermaid.css
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/NativeWikiPanel.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/PlanEditor.css
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/PlanEditor.test.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/PlanEditor.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/ProjectCollection.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/WikiTree.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/api.test.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/api.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/collection.css
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/collection.test.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/documentOutline.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/embedding.test.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/imports.test.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/imports.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/native-wiki.css
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/navigation.test.tsx
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/security.test.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/security.ts
+ D electron-agent/vendor/repo-wiki/apps/web/src/workspace/test-setup.ts
+ D electron-agent/vendor/repo-wiki/docs/GRENAGENT_INTEGRATION.md
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/README.md
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/src/api/routes.ts
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/src/domain/task-service.ts
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/src/domain/task.ts
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/src/events/event-bus.ts
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/src/index.ts
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/src/storage/task-store.ts
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/tests/tasks.test.ts
+ D electron-agent/vendor/repo-wiki/examples/atlas-service/wiki_plan.json
+ D electron-agent/vendor/repo-wiki/examples/grenagent/integration.ts
+ D electron-agent/vendor/repo-wiki/package.json
+ D electron-agent/vendor/repo-wiki/packages/contracts/src/host.ts
+ D electron-agent/vendor/repo-wiki/packages/contracts/src/index.ts
+ D electron-agent/vendor/repo-wiki/packages/contracts/src/native.test.ts
+ D electron-agent/vendor/repo-wiki/packages/contracts/src/native.ts
+ D electron-agent/vendor/repo-wiki/packages/core/src/engine.ts
+ D electron-agent/vendor/repo-wiki/packages/core/src/git-auth.ts
+ D electron-agent/vendor/repo-wiki/packages/core/src/migration.ts
+ D electron-agent/vendor/repo-wiki/packages/core/src/project-files.ts
+ D electron-agent/vendor/repo-wiki/packages/core/src/providers.ts
+ D electron-agent/vendor/repo-wiki/packages/core/src/scanner.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/cards.test.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/engine.test.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/git-auth.test.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/migration.test.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/project-files.test.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/providers.test.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/scanner-safe-directory.test.ts
+ D electron-agent/vendor/repo-wiki/packages/core/tests/scanner.test.ts
+ D electron-agent/vendor/repo-wiki/packages/electron/src/index.ts
+ D electron-agent/vendor/repo-wiki/packages/electron/src/preload.ts
+ D electron-agent/vendor/repo-wiki/packages/electron/tests/bridge.test.ts
+ D electron-agent/vendor/repo-wiki/packages/process/src/child.ts
+ D electron-agent/vendor/repo-wiki/packages/process/src/client.ts
+ D electron-agent/vendor/repo-wiki/packages/process/src/host-provider.ts
+ D electron-agent/vendor/repo-wiki/packages/process/src/legacy-snapshot.ts
+ D electron-agent/vendor/repo-wiki/packages/process/tests/client.test.ts
+ D electron-agent/vendor/repo-wiki/packages/process/tests/host-provider.test.ts
+ D electron-agent/vendor/repo-wiki/packages/process/tests/migration-worker.test.ts
+ D electron-agent/vendor/repo-wiki/packages/process/tests/scopes.test.ts
+ D electron-agent/vendor/repo-wiki/packages/process/tests/service-child.test.ts
+ D electron-agent/vendor/repo-wiki/packages/renderer/src/index.ts
+ D electron-agent/vendor/repo-wiki/packages/service/src/cli.ts
+ D electron-agent/vendor/repo-wiki/packages/service/src/http.ts
+ D electron-agent/vendor/repo-wiki/packages/service/src/service.ts
+ D electron-agent/vendor/repo-wiki/packages/service/tests/cards.test.ts
+ D electron-agent/vendor/repo-wiki/packages/service/tests/http.test.ts
+ D electron-agent/vendor/repo-wiki/packages/service/tests/lazy.test.ts
+ D electron-agent/vendor/repo-wiki/packages/service/tests/service.test.ts
+ D electron-agent/vendor/repo-wiki/scripts/build-electron.mjs
+ D electron-agent/vendor/repo-wiki/scripts/demo.ts
+ D electron-agent/vendor/repo-wiki/scripts/migrate.ts
+ D electron-agent/vendor/repo-wiki/scripts/package.ts
+ M electron-agent/vitest.config.ts
+ D electron-agent/vitest.repo-wiki-flow.config.ts
+ D electron-agent/vitest.repo-wiki.config.ts
+ M extensions/README.md
+ M extensions/_shared/desktop-control.ts
+ M extensions/_shared/pi-sdk-compat.integration.test.ts
+D  extensions/_shared/taste-scope.ts
+ M extensions/agent-data-manifests.ts
+ M extensions/fable-behavior/index.test.ts
+ M extensions/fable-behavior/index.ts
+D  extensions/gpt-with-taste/LICENSE
+D  extensions/gpt-with-taste/README.md
+D  extensions/gpt-with-taste/index.test.ts
+D  extensions/gpt-with-taste/index.ts
+D  extensions/gpt-with-taste/package.json
+D  extensions/gpt-with-taste/payload.ts
+D  extensions/gpt-with-taste/projection.ts
+D  extensions/gpt-with-taste/taste-live.real.test.ts
+D  extensions/gpt-with-taste/texts.ts
+D  extensions/gpt-with-taste/texts/agent-steer.md
+D  extensions/gpt-with-taste/texts/independent.md
+D  extensions/gpt-with-taste/texts/main.md
+D  extensions/gpt-with-taste/texts/sub-steer.md
+D  extensions/gpt-with-taste/texts/sub.md
+D  extensions/gpt-with-taste/texts/user-steer.md
+ M extensions/index.test.ts
+ M extensions/index.ts
+ M extensions/mcp/index.test.ts
+ M extensions/mcp/index.ts
+ M extensions/package-lock.json
+ M extensions/package.json
+ M extensions/pnpm-lock.yaml
+ M extensions/pnpm-workspace.yaml
+ M extensions/prompt-metadata.test.ts
+ M extensions/web-search/anysearch.test.ts
+ M extensions/web-search/anysearch.ts
+ M extensions/web-search/index.test.ts
+ M extensions/web-search/index.ts
+D  extensions/wiki-rag/chunker.ts
+D  extensions/wiki-rag/client.ts
+D  extensions/wiki-rag/index.test.ts
+D  extensions/wiki-rag/index.ts
+D  extensions/wiki-rag/llm.ts
+?? .agents/evidence/2026-11-03-agentdata-architecture-review/parametrise-jobstore.cjs
+?? .agents/evidence/2026-11-04-agentdata-data-retirement/
+?? .agents/evidence/2026-11-04-repo-wiki-real-run/
+?? .agents/evidence/2026-11-05-wiki-cards-naming/
+?? .agents/evidence/2026-11-08-code-index-codemirror-preview/
+?? .agents/evidence/2026-11-10-pi-sdk-1.5-feature-integration/
+?? .agents/evidence/2026-11-10-pi-sdk-1.5.1-upgrade/
+?? .agents/notes/archived/feature/
+?? .agents/notes/implemented/architecture/2026-11-04-stage-turn-budgets-and-diagnostics.md
+?? .agents/notes/implemented/architecture/2026-11-08-pi-native-provider-oauth-ownership.md
+?? .agents/notes/implemented/architecture/2026-11-10-pi-sdk-1.5.1-upgrade.md
+?? .agents/notes/implemented/bug-fix/2026-11-03-stuck-running-and-stop-without-effect.md
+?? .agents/notes/implemented/bug-fix/2026-11-04-model-output-shape-tolerance.md
+?? .agents/notes/implemented/bug-fix/2026-11-04-scan-excludes-tool-output.md
+?? .agents/notes/implemented/bug-fix/2026-11-05-repo-wiki-retired-task-import.md
+?? .agents/notes/implemented/bug-fix/2026-11-05-thread-rpc-text-validation.md
+?? .agents/notes/implemented/bug-fix/2026-11-07-mcp-preflight-retired.md
+?? .agents/notes/implemented/bug-fix/2026-11-08-code-index-sync-and-freshness.md
+?? .agents/notes/implemented/feature/2026-11-08-code-index-codemirror-preview.md
+?? .agents/notes/implemented/feature/2026-11-10-pi-sdk-1.5-feature-integration.md
+?? .agents/notes/implemented/simplification/2026-11-04-retire-agentdata-surface.md
+?? .agents/notes/implemented/simplification/2026-11-08-retire-repo-wiki-and-knowledge-cards.md
+?? cli/src/agent-data-plugins.test.d.ts
+?? cli/src/agent-data-plugins.test.js
+?? cli/src/bootstrap.d.ts
+?? cli/src/bootstrap.js
+?? cli/src/bootstrap.test.d.ts
+?? cli/src/bootstrap.test.js
+?? cli/src/cache-warming-control.test.ts
+?? cli/src/cache-warming-control.ts
+?? cli/src/extension-profile.d.ts
+?? cli/src/extension-profile.js
+?? cli/src/extension-profile.test.d.ts
+?? cli/src/extension-profile.test.js
+?? cli/src/gren-runtime.d.ts
+?? cli/src/gren-runtime.test.d.ts
+?? cli/src/gren-runtime.test.js
+?? cli/src/json-event.d.ts
+?? cli/src/json-event.js
+?? cli/src/json-event.test.d.ts
+?? cli/src/json-event.test.js
+?? cli/src/main.d.ts
+?? cli/src/main.js
+?? cli/src/official-package-dir.d.ts
+?? cli/src/official-package-dir.js
+?? cli/src/official-package-dir.test.d.ts
+?? cli/src/official-package-dir.test.js
+?? cli/src/pi-install-patches.test.d.ts
+?? cli/src/pi-install-patches.test.js
+?? cli/src/pi-node-providers.test.ts
+?? cli/src/pi-node-providers.ts
+?? cli/src/pi-sdk.d.ts
+?? cli/src/pi-worker.d.ts
+?? cli/src/pi-worker.test.d.ts
+?? cli/src/pi-worker.test.js
+?? cli/src/probe-models.d.ts
+?? cli/src/probe-models.js
+?? cli/src/probe-models.test.d.ts
+?? cli/src/probe-models.test.js
+?? cli/src/runtime.d.ts
+?? cli/src/runtime.test.d.ts
+?? cli/src/runtime.test.js
+?? electron-agent/electron.vite.config.d.ts
+?? electron-agent/electron/agent/agentHost.d.ts
+?? electron-agent/electron/agent/agentHost.js
+?? electron-agent/electron/agent/agentHost.test.d.ts
+?? electron-agent/electron/agent/agentHost.test.js
+?? electron-agent/electron/agent/askUserDraft.d.ts
+?? electron-agent/electron/agent/askUserDraft.js
+?? electron-agent/electron/agent/askUserDraft.test.d.ts
+?? electron-agent/electron/agent/askUserDraft.test.js
+?? electron-agent/electron/agent/codemodeWorkerBuild.d.ts
+?? electron-agent/electron/agent/codemodeWorkerBuild.js
+?? electron-agent/electron/agent/codemodeWorkerBuild.test.d.ts
+?? electron-agent/electron/agent/codemodeWorkerBuild.test.js
+?? electron-agent/electron/agent/completeAskUser.d.ts
+?? electron-agent/electron/agent/completeAskUser.js
+?? electron-agent/electron/agent/completeAskUser.test.d.ts
+?? electron-agent/electron/agent/completeAskUser.test.js
+?? electron-agent/electron/agent/completionJson.d.ts
+?? electron-agent/electron/agent/completionJson.js
+?? electron-agent/electron/agent/completionJson.test.d.ts
+?? electron-agent/electron/agent/completionJson.test.js
+?? electron-agent/electron/agent/copyPiAdjacentAssets.d.ts
+?? electron-agent/electron/agent/copyPiAdjacentAssets.js
+?? electron-agent/electron/agent/copyPiAdjacentAssets.test.d.ts
+?? electron-agent/electron/agent/copyPiAdjacentAssets.test.js
+?? electron-agent/electron/agent/createWorkspaceHandle.d.ts
+?? electron-agent/electron/agent/createWorkspaceHandle.js
+?? electron-agent/electron/agent/expandSkillCommand.d.ts
+?? electron-agent/electron/agent/expandSkillCommand.js
+?? electron-agent/electron/agent/expandSkillCommand.test.d.ts
+?? electron-agent/electron/agent/expandSkillCommand.test.js
+?? electron-agent/electron/agent/hostOneshotAdapter.d.ts
+?? electron-agent/electron/agent/hostOneshotAdapter.js
+?? electron-agent/electron/agent/hostOneshotAdapter.test.d.ts
+?? electron-agent/electron/agent/hostOneshotAdapter.test.js
+?? electron-agent/electron/agent/modelRuntimeHost.d.ts
+?? electron-agent/electron/agent/modelRuntimeHost.js
+?? electron-agent/electron/agent/modelRuntimeHost.test.d.ts
+?? electron-agent/electron/agent/modelRuntimeHost.test.js
+?? electron-agent/electron/agent/runtimeConfigBootstrap.d.ts
+?? electron-agent/electron/agent/runtimeConfigBootstrap.js
+?? electron-agent/electron/agent/runtimeConfigBootstrap.test.d.ts
+?? electron-agent/electron/agent/runtimeConfigBootstrap.test.js
+?? electron-agent/electron/agent/sessionUiAdapter.d.ts
+?? electron-agent/electron/agent/sessionUiAdapter.js
+?? electron-agent/electron/agent/sessionUiAdapter.test.d.ts
+?? electron-agent/electron/agent/sessionUiAdapter.test.js
+?? electron-agent/electron/agent/shortCall.d.ts
+?? electron-agent/electron/agent/shortCall.js
+?? electron-agent/electron/agent/shortCall.test.d.ts
+?? electron-agent/electron/agent/shortCall.test.js
+?? electron-agent/electron/agent/streamingEvent.d.ts
+?? electron-agent/electron/agent/streamingEvent.js
+?? electron-agent/electron/agent/streamingEvent.test.d.ts
+?? electron-agent/electron/agent/streamingEvent.test.js
+?? electron-agent/electron/agent/toolcallDeltaCoalescer.d.ts
+?? electron-agent/electron/agent/toolcallDeltaCoalescer.js
+?? electron-agent/electron/agent/toolcallDeltaCoalescer.test.d.ts
+?? electron-agent/electron/agent/toolcallDeltaCoalescer.test.js
+?? electron-agent/electron/agent/workerEntry.d.ts
+?? electron-agent/electron/agent/workerEntry.js
+?? electron-agent/electron/agent/workerEntry.test.d.ts
+?? electron-agent/electron/agent/workerEntry.test.js
+?? electron-agent/electron/agent/workspaceHandle.d.ts
+?? electron-agent/electron/agent/workspaceHandle.js
+?? electron-agent/electron/agent/workspaceHandle.test.d.ts
+?? electron-agent/electron/agent/workspaceHandle.test.js
+?? electron-agent/electron/agent/workspaceLease.d.ts
+?? electron-agent/electron/agent/workspaceLease.js
+?? electron-agent/electron/agent/workspaceLease.test.d.ts
+?? electron-agent/electron/agent/workspaceLease.test.js
+?? electron-agent/electron/agent/writeMainCjsPackageJson.d.ts
+?? electron-agent/electron/agent/writeMainCjsPackageJson.js
+?? electron-agent/electron/agentData/agentDataSettings.d.ts
+?? electron-agent/electron/agentData/agentDataSettings.js
+?? electron-agent/electron/agentData/agentDataSettings.test.d.ts
+?? electron-agent/electron/agentData/agentDataSettings.test.js
+?? electron-agent/electron/agentData/assemble.d.ts
+?? electron-agent/electron/agentData/assemble.js
+?? electron-agent/electron/agentData/assemble.ts
+?? electron-agent/electron/agentData/client.d.ts
+?? electron-agent/electron/agentData/client.js
+?? electron-agent/electron/agentData/client.test.d.ts
+?? electron-agent/electron/agentData/client.test.js
+?? electron-agent/electron/agentData/codeGraphClient.d.ts
+?? electron-agent/electron/agentData/codeGraphClient.js
+?? electron-agent/electron/agentData/codeGraphClient.ts
+?? electron-agent/electron/agentData/codeRetrievalProtocol.d.ts
+?? electron-agent/electron/agentData/codeRetrievalProtocol.js
+?? electron-agent/electron/agentData/codeRetrievalProtocol.test.d.ts
+?? electron-agent/electron/agentData/codeRetrievalProtocol.test.js
+?? electron-agent/electron/agentData/codeRetrievalResult.d.ts
+?? electron-agent/electron/agentData/codeRetrievalResult.js
+?? electron-agent/electron/agentData/codegraphTaskRouting.test.d.ts
+?? electron-agent/electron/agentData/codegraphTaskRouting.test.js
+?? electron-agent/electron/agentData/codegraphTaskRouting.test.ts
+?? electron-agent/electron/agentData/createAgentDataModelPort.d.ts
+?? electron-agent/electron/agentData/createAgentDataModelPort.js
+?? electron-agent/electron/agentData/hostChannels.d.ts
+?? electron-agent/electron/agentData/hostChannels.js
+?? electron-agent/electron/agentData/hostChannels.ts
+?? electron-agent/electron/agentData/jobStore.d.ts
+?? electron-agent/electron/agentData/jobStore.js
+?? electron-agent/electron/agentData/jobStore.test.d.ts
+?? electron-agent/electron/agentData/jobStore.test.js
+?? electron-agent/electron/agentData/methodTiming.d.ts
+?? electron-agent/electron/agentData/methodTiming.js
+?? electron-agent/electron/agentData/methodTiming.test.d.ts
+?? electron-agent/electron/agentData/methodTiming.test.js
+?? electron-agent/electron/agentData/minimalEndpoint.d.ts
+?? electron-agent/electron/agentData/minimalEndpoint.js
+?? electron-agent/electron/agentData/minimalEndpoint.test.d.ts
+?? electron-agent/electron/agentData/minimalEndpoint.test.js
+?? electron-agent/electron/agentData/minimalEndpoint.test.ts
+?? electron-agent/electron/agentData/minimalEndpoint.ts
+?? electron-agent/electron/agentData/modelPort.d.ts
+?? electron-agent/electron/agentData/modelPort.js
+?? electron-agent/electron/agentData/modelPort.ts
+?? electron-agent/electron/agentData/operationsContracts.d.ts
+?? electron-agent/electron/agentData/operationsContracts.js
+?? electron-agent/electron/agentData/operationsProjection.d.ts
+?? electron-agent/electron/agentData/operationsProjection.js
+?? electron-agent/electron/agentData/pipePath.d.ts
+?? electron-agent/electron/agentData/pipePath.js
+?? electron-agent/electron/agentData/pipePath.ts
+?? electron-agent/electron/agentData/protocol.d.ts
+?? electron-agent/electron/agentData/protocol.js
+?? electron-agent/electron/agentData/protocol.test.d.ts
+?? electron-agent/electron/agentData/protocol.test.js
+?? electron-agent/electron/agentData/requestFrames.d.ts
+?? electron-agent/electron/agentData/requestFrames.js
+?? electron-agent/electron/agentData/requestFrames.test.d.ts
+?? electron-agent/electron/agentData/requestFrames.test.js
+?? electron-agent/electron/agentData/runtime.d.ts
+?? electron-agent/electron/agentData/runtime.extensions.test.d.ts
+?? electron-agent/electron/agentData/runtime.extensions.test.js
+?? electron-agent/electron/agentData/runtime.js
+?? electron-agent/electron/agentData/runtime.memoryRemoval.test.d.ts
+?? electron-agent/electron/agentData/runtime.memoryRemoval.test.js
+?? electron-agent/electron/agentData/runtime.test.d.ts
+?? electron-agent/electron/agentData/runtime.test.js
+?? electron-agent/electron/agentData/runtime.timing.test.d.ts
+?? electron-agent/electron/agentData/runtime.timing.test.js
+?? electron-agent/electron/agentData/runtime.toolPermission.test.d.ts
+?? electron-agent/electron/agentData/runtime.toolPermission.test.js
+?? electron-agent/electron/agentData/smoke-check.mts
+?? electron-agent/electron/agentData/storage.d.ts
+?? electron-agent/electron/agentData/storage.js
+?? electron-agent/electron/agentData/storage.memoryRemoval.test.d.ts
+?? electron-agent/electron/agentData/storage.memoryRemoval.test.js
+?? electron-agent/electron/agentData/storage.test.d.ts
+?? electron-agent/electron/agentData/storage.test.js
+?? electron-agent/electron/agentData/storage.toolPermission.test.d.ts
+?? electron-agent/electron/agentData/storage.toolPermission.test.js
+?? electron-agent/electron/agentData/taskTestFixture.d.ts
+?? electron-agent/electron/agentData/taskTestFixture.js
+?? electron-agent/electron/agentData/threadRpc.test.d.ts
+?? electron-agent/electron/agentData/threadRpc.test.js
+?? electron-agent/electron/agentData/threadRpc.test.ts
+?? electron-agent/electron/agentData/threadStore.d.ts
+?? electron-agent/electron/agentData/threadStore.js
+?? electron-agent/electron/agentData/threadStore.test.d.ts
+?? electron-agent/electron/agentData/threadStore.test.js
+?? electron-agent/electron/agentProcess/agentProcessClient.d.ts
+?? electron-agent/electron/agentProcess/agentProcessClient.js
+?? electron-agent/electron/agentProcess/agentProcessClient.test.d.ts
+?? electron-agent/electron/agentProcess/agentProcessClient.test.js
+?? electron-agent/electron/agentProcess/contract.d.ts
+?? electron-agent/electron/agentProcess/contract.js
+?? electron-agent/electron/agentProcess/hostApi.d.ts
+?? electron-agent/electron/agentProcess/hostApi.js
+?? electron-agent/electron/agentProcess/hostEntry.d.ts
+?? electron-agent/electron/agentProcess/hostEntry.js
+?? electron-agent/electron/agentProcess/jobGuard.d.ts
+?? electron-agent/electron/agentProcess/jobGuard.js
+?? electron-agent/electron/agentProcess/jobGuard.test.d.ts
+?? electron-agent/electron/agentProcess/jobGuard.test.js
+?? electron-agent/electron/agentProcess/mainBindings.d.ts
+?? electron-agent/electron/agentProcess/mainBindings.js
+?? electron-agent/electron/agentProcess/mainBindings.test.d.ts
+?? electron-agent/electron/agentProcess/mainBindings.test.js
+?? electron-agent/electron/agentProcess/rpcPeer.d.ts
+?? electron-agent/electron/agentProcess/rpcPeer.js
+?? electron-agent/electron/agentProcess/rpcPeer.test.d.ts
+?? electron-agent/electron/agentProcess/rpcPeer.test.js
+?? electron-agent/electron/agentProcess/runtimeGraph.d.ts
+?? electron-agent/electron/agentProcess/runtimeGraph.js
+?? electron-agent/electron/app/agentDataDiagnostics.d.ts
+?? electron-agent/electron/app/agentDataDiagnostics.js
+?? electron-agent/electron/app/agentDataService.d.ts
+?? electron-agent/electron/app/agentDataService.js
+?? electron-agent/electron/app/agentDataService.test.d.ts
+?? electron-agent/electron/app/agentDataService.test.js
+?? electron-agent/electron/app/appServer/serviceTaskRegistry.d.ts
+?? electron-agent/electron/app/appServer/serviceTaskRegistry.js
+?? electron-agent/electron/app/appServer/serviceTaskRegistry.test.d.ts
+?? electron-agent/electron/app/appServer/serviceTaskRegistry.test.js
+?? electron-agent/electron/app/appServer/taskQueue.d.ts
+?? electron-agent/electron/app/appServer/taskQueue.js
+?? electron-agent/electron/app/appServer/taskQueue.test.d.ts
+?? electron-agent/electron/app/appServer/taskQueue.test.js
+?? electron-agent/electron/app/appServer/types.d.ts
+?? electron-agent/electron/app/appServer/types.js
+?? electron-agent/electron/app/attentionContract.d.ts
+?? electron-agent/electron/app/attentionContract.js
+?? electron-agent/electron/app/attentionService.d.ts
+?? electron-agent/electron/app/attentionService.js
+?? electron-agent/electron/app/attentionService.test.d.ts
+?? electron-agent/electron/app/attentionService.test.js
+?? electron-agent/electron/app/cacheWarmingSettings.test.ts
+?? electron-agent/electron/app/cacheWarmingSettings.ts
+?? electron-agent/electron/app/cancelQueuedSteer.d.ts
+?? electron-agent/electron/app/cancelQueuedSteer.js
+?? electron-agent/electron/app/cancelQueuedSteer.test.d.ts
+?? electron-agent/electron/app/cancelQueuedSteer.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphEngine.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphEngine.js
+?? electron-agent/electron/app/codeGraph/codeGraphEngine.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphEngine.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphHostClient.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphHostClient.js
+?? electron-agent/electron/app/codeGraph/codeGraphHostClient.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphHostClient.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphJobs.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphJobs.js
+?? electron-agent/electron/app/codeGraph/codeGraphJobs.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphJobs.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphQuery.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphQuery.js
+?? electron-agent/electron/app/codeGraph/codeGraphQuery.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphQuery.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphRuntime.integration.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphRuntime.integration.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphService.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphService.js
+?? electron-agent/electron/app/codeGraph/codeGraphService.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphService.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphThreads.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphThreads.js
+?? electron-agent/electron/app/codeGraph/codeGraphThreads.sdk.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphThreads.sdk.test.js
+?? electron-agent/electron/app/codeGraph/codeGraphThreads.test.d.ts
+?? electron-agent/electron/app/codeGraph/codeGraphThreads.test.js
+?? electron-agent/electron/app/codeGraph/gitHead.d.ts
+?? electron-agent/electron/app/codeGraph/gitHead.js
+?? electron-agent/electron/app/codeGraph/gitHead.test.d.ts
+?? electron-agent/electron/app/codeGraph/gitHead.test.js
+?? electron-agent/electron/app/codeGraph/hostContract.d.ts
+?? electron-agent/electron/app/codeGraph/hostContract.js
+?? electron-agent/electron/app/codeGraph/hostEntry.d.ts
+?? electron-agent/electron/app/codeGraph/hostEntry.js
+?? electron-agent/electron/app/codeGraph/hostLimits.d.ts
+?? electron-agent/electron/app/codeGraph/hostLimits.js
+?? electron-agent/electron/app/codeGraph/hostLimits.test.d.ts
+?? electron-agent/electron/app/codeGraph/hostLimits.test.js
+?? electron-agent/electron/app/codeGraph/hostMethods.d.ts
+?? electron-agent/electron/app/codeGraph/hostMethods.js
+?? electron-agent/electron/app/codeGraph/hostSupervisor.d.ts
+?? electron-agent/electron/app/codeGraph/hostSupervisor.js
+?? electron-agent/electron/app/codeGraph/hostSupervisor.test.d.ts
+?? electron-agent/electron/app/codeGraph/hostSupervisor.test.js
+?? electron-agent/electron/app/codeGraph/hostSupervisor.test.ts
+?? electron-agent/electron/app/codeGraph/hostSupervisor.ts
+?? electron-agent/electron/app/codeGraph/indexProbe.d.ts
+?? electron-agent/electron/app/codeGraph/indexProbe.js
+?? electron-agent/electron/app/codeGraph/indexProbe.test.d.ts
+?? electron-agent/electron/app/codeGraph/indexProbe.test.js
+?? electron-agent/electron/app/codeGraph/indexTaskStore.d.ts
+?? electron-agent/electron/app/codeGraph/indexTaskStore.js
+?? electron-agent/electron/app/codeGraph/indexTaskStore.test.d.ts
+?? electron-agent/electron/app/codeGraph/indexTaskStore.test.js
+?? electron-agent/electron/app/codeGraph/indexTaskStore.test.ts
+?? electron-agent/electron/app/codeGraph/indexTaskStore.ts
+?? electron-agent/electron/app/codeGraph/readAdmission.d.ts
+?? electron-agent/electron/app/codeGraph/readAdmission.js
+?? electron-agent/electron/app/codeGraph/readAdmission.test.d.ts
+?? electron-agent/electron/app/codeGraph/readAdmission.test.js
+?? electron-agent/electron/app/codeGraph/readConsistency.d.ts
+?? electron-agent/electron/app/codeGraph/readConsistency.js
+?? electron-agent/electron/app/codeGraph/readConsistency.test.d.ts
+?? electron-agent/electron/app/codeGraph/readConsistency.test.js
+?? electron-agent/electron/app/codeGraph/sdkPackaging.test.d.ts
+?? electron-agent/electron/app/codeGraph/sdkPackaging.test.js
+?? electron-agent/electron/app/codeGraph/syncScheduler.d.ts
+?? electron-agent/electron/app/codeGraph/syncScheduler.js
+?? electron-agent/electron/app/codeGraph/syncScheduler.test.d.ts
+?? electron-agent/electron/app/codeGraph/syncScheduler.test.js
+?? electron-agent/electron/app/codeGraph/workerEntry.d.ts
+?? electron-agent/electron/app/codeGraph/workerEntry.js
+?? electron-agent/electron/app/codeGraph/workerProtocol.d.ts
+?? electron-agent/electron/app/codeGraph/workerProtocol.js
+?? electron-agent/electron/app/codeGraph/workspaceRegistry.d.ts
+?? electron-agent/electron/app/codeGraph/workspaceRegistry.js
+?? electron-agent/electron/app/contextUsageEstimate.d.ts
+?? electron-agent/electron/app/contextUsageEstimate.js
+?? electron-agent/electron/app/contextUsageEstimate.test.d.ts
+?? electron-agent/electron/app/contextUsageEstimate.test.js
+?? electron-agent/electron/app/createService.d.ts
+?? electron-agent/electron/app/createService.js
+?? electron-agent/electron/app/createService.test.d.ts
+?? electron-agent/electron/app/createService.test.js
+?? electron-agent/electron/app/devService.d.ts
+?? electron-agent/electron/app/devService.js
+?? electron-agent/electron/app/enhancePrompt.d.ts
+?? electron-agent/electron/app/enhancePrompt.test.d.ts
+?? electron-agent/electron/app/enhancePrompt.test.js
+?? electron-agent/electron/app/fastMode.integration.test.d.ts
+?? electron-agent/electron/app/fastMode.integration.test.js
+?? electron-agent/electron/app/fileService.d.ts
+?? electron-agent/electron/app/fileService.js
+?? electron-agent/electron/app/fileService.test.d.ts
+?? electron-agent/electron/app/fileService.test.js
+?? electron-agent/electron/app/fileWatchService.d.ts
+?? electron-agent/electron/app/fileWatchService.js
+?? electron-agent/electron/app/fileWatchService.test.d.ts
+?? electron-agent/electron/app/fileWatchService.test.js
+?? electron-agent/electron/app/gitService.d.ts
+?? electron-agent/electron/app/gitService.js
+?? electron-agent/electron/app/gitService.test.d.ts
+?? electron-agent/electron/app/gitService.test.js
+?? electron-agent/electron/app/isolatedWorkspaceService.d.ts
+?? electron-agent/electron/app/isolatedWorkspaceService.js
+?? electron-agent/electron/app/isolatedWorkspaceService.test.d.ts
+?? electron-agent/electron/app/isolatedWorkspaceService.test.js
+?? electron-agent/electron/app/jobsBridge.d.ts
+?? electron-agent/electron/app/jobsBridge.js
+?? electron-agent/electron/app/jobsBridge.test.d.ts
+?? electron-agent/electron/app/jobsBridge.test.js
+?? electron-agent/electron/app/mcpConfigService.d.ts
+?? electron-agent/electron/app/mcpConfigService.js
+?? electron-agent/electron/app/mcpConfigService.test.d.ts
+?? electron-agent/electron/app/mcpConfigService.test.js
+?? electron-agent/electron/app/mcpPolicyService.d.ts
+?? electron-agent/electron/app/mcpPolicyService.js
+?? electron-agent/electron/app/mcpPolicyService.test.d.ts
+?? electron-agent/electron/app/mcpPolicyService.test.js
+?? electron-agent/electron/app/messagesWithEntryIds.d.ts
+?? electron-agent/electron/app/messagesWithEntryIds.js
+?? electron-agent/electron/app/messagesWithEntryIds.test.d.ts
+?? electron-agent/electron/app/messagesWithEntryIds.test.js
+?? electron-agent/electron/app/modelCompat.integration.test.ts
+?? electron-agent/electron/app/permissionManager.d.ts
+?? electron-agent/electron/app/permissionManager.js
+?? electron-agent/electron/app/permissionManager.test.d.ts
+?? electron-agent/electron/app/permissionManager.test.js
+?? electron-agent/electron/app/piPackageModel.d.ts
+?? electron-agent/electron/app/piPackageModel.js
+?? electron-agent/electron/app/piPackageModel.test.d.ts
+?? electron-agent/electron/app/piPackageModel.test.js
+?? electron-agent/electron/app/piPackageService.d.ts
+?? electron-agent/electron/app/piPackageService.js
+?? electron-agent/electron/app/piPackageService.test.d.ts
+?? electron-agent/electron/app/piPackageService.test.js
+?? electron-agent/electron/app/piRuntimeService.d.ts
+?? electron-agent/electron/app/piRuntimeService.js
+?? electron-agent/electron/app/piRuntimeService.test.d.ts
+?? electron-agent/electron/app/piRuntimeService.test.js
+?? electron-agent/electron/app/plugin/builtinPlugins.d.ts
+?? electron-agent/electron/app/plugin/builtinPlugins.js
+?? electron-agent/electron/app/plugin/pluginManager.d.ts
+?? electron-agent/electron/app/plugin/pluginManager.js
+?? electron-agent/electron/app/plugin/pluginManager.test.d.ts
+?? electron-agent/electron/app/plugin/pluginManager.test.js
+?? electron-agent/electron/app/plugin/pluginStateStore.d.ts
+?? electron-agent/electron/app/plugin/pluginStateStore.js
+?? electron-agent/electron/app/processRegistry.d.ts
+?? electron-agent/electron/app/processRegistry.js
+?? electron-agent/electron/app/processRegistry.test.d.ts
+?? electron-agent/electron/app/processRegistry.test.js
+?? electron-agent/electron/app/productIcon.test.d.ts
+?? electron-agent/electron/app/productIcon.test.js
+?? electron-agent/electron/app/promptLibraryService.d.ts
+?? electron-agent/electron/app/promptLibraryService.js
+?? electron-agent/electron/app/promptLibraryService.test.d.ts
+?? electron-agent/electron/app/promptLibraryService.test.js
+?? electron-agent/electron/app/providerService.d.ts
+?? electron-agent/electron/app/providerService.js
+?? electron-agent/electron/app/providerService.test.d.ts
+?? electron-agent/electron/app/providerService.test.js
+?? electron-agent/electron/app/rawFs.d.ts
+?? electron-agent/electron/app/rawFs.js
+?? electron-agent/electron/app/rawFs.test.d.ts
+?? electron-agent/electron/app/rawFs.test.js
+?? electron-agent/electron/app/sandbox/sandboxManager.d.ts
+?? electron-agent/electron/app/sandbox/sandboxManager.js
+?? electron-agent/electron/app/sandbox/sandboxManager.test.d.ts
+?? electron-agent/electron/app/sandbox/sandboxManager.test.js
+?? electron-agent/electron/app/sessionIdentity.d.ts
+?? electron-agent/electron/app/sessionIdentity.js
+?? electron-agent/electron/app/sessionIdentity.test.d.ts
+?? electron-agent/electron/app/sessionIdentity.test.js
+?? electron-agent/electron/app/sessionLineScan.d.ts
+?? electron-agent/electron/app/sessionLineScan.js
+?? electron-agent/electron/app/sessionLineScan.test.d.ts
+?? electron-agent/electron/app/sessionLineScan.test.js
+?? electron-agent/electron/app/sessionPreferences.integration.test.d.ts
+?? electron-agent/electron/app/sessionPreferences.integration.test.js
+?? electron-agent/electron/app/sessionTitle.d.ts
+?? electron-agent/electron/app/sessionTitle.js
+?? electron-agent/electron/app/sessionTitle.test.d.ts
+?? electron-agent/electron/app/sessionTitle.test.js
+?? electron-agent/electron/app/settingsService.d.ts
+?? electron-agent/electron/app/settingsService.js
+?? electron-agent/electron/app/settingsService.test.d.ts
+?? electron-agent/electron/app/settingsService.test.js
+?? electron-agent/electron/app/shellService.d.ts
+?? electron-agent/electron/app/shellService.js
+?? electron-agent/electron/app/shellService.test.d.ts
+?? electron-agent/electron/app/shellService.test.js
+?? electron-agent/electron/app/shutdown.d.ts
+?? electron-agent/electron/app/shutdown.js
+?? electron-agent/electron/app/shutdown.test.d.ts
+?? electron-agent/electron/app/shutdown.test.js
+?? electron-agent/electron/app/singleInstance.d.ts
+?? electron-agent/electron/app/singleInstance.js
+?? electron-agent/electron/app/singleInstance.test.d.ts
+?? electron-agent/electron/app/singleInstance.test.js
+?? electron-agent/electron/app/singleInstance.test.ts
+?? electron-agent/electron/app/singleInstance.ts
+?? electron-agent/electron/app/skillService.d.ts
+?? electron-agent/electron/app/skillService.js
+?? electron-agent/electron/app/skillService.test.d.ts
+?? electron-agent/electron/app/skillService.test.js
+?? electron-agent/electron/app/sourceCodeProtection.test.d.ts
+?? electron-agent/electron/app/sourceCodeProtection.test.js
+?? electron-agent/electron/app/subagentService.d.ts
+?? electron-agent/electron/app/subagentService.js
+?? electron-agent/electron/app/subagentService.test.d.ts
+?? electron-agent/electron/app/subagentService.test.js
+?? electron-agent/electron/app/subagentSession.d.ts
+?? electron-agent/electron/app/subagentSession.js
+?? electron-agent/electron/app/subagentSession.test.d.ts
+?? electron-agent/electron/app/subagentSession.test.js
+?? electron-agent/electron/app/syncSessionFromDisk.d.ts
+?? electron-agent/electron/app/syncSessionFromDisk.js
+?? electron-agent/electron/app/syncSessionFromDisk.test.d.ts
+?? electron-agent/electron/app/syncSessionFromDisk.test.js
+?? electron-agent/electron/app/systemWorkerSession.d.ts
+?? electron-agent/electron/app/systemWorkerSession.js
+?? electron-agent/electron/app/systemWorkerSession.test.d.ts
+?? electron-agent/electron/app/systemWorkerSession.test.js
+?? electron-agent/electron/app/tempHtmlService.d.ts
+?? electron-agent/electron/app/tempHtmlService.js
+?? electron-agent/electron/app/tempHtmlService.test.d.ts
+?? electron-agent/electron/app/tempHtmlService.test.js
+?? electron-agent/electron/app/terminalService.d.ts
+?? electron-agent/electron/app/terminalService.js
+?? electron-agent/electron/app/terminalService.test.d.ts
+?? electron-agent/electron/app/terminalService.test.js
+?? electron-agent/electron/app/thirdPartyLicenses.test.d.ts
+?? electron-agent/electron/app/thirdPartyLicenses.test.js
+?? electron-agent/electron/app/toolPermission/argsDigest.d.ts
+?? electron-agent/electron/app/toolPermission/argsDigest.js
+?? electron-agent/electron/app/toolPermission/argsDigest.test.d.ts
+?? electron-agent/electron/app/toolPermission/argsDigest.test.js
+?? electron-agent/electron/app/toolPermission/auditStore.d.ts
+?? electron-agent/electron/app/toolPermission/auditStore.js
+?? electron-agent/electron/app/toolPermission/auditStore.test.d.ts
+?? electron-agent/electron/app/toolPermission/auditStore.test.js
+?? electron-agent/electron/app/toolPermission/builtinRules.d.ts
+?? electron-agent/electron/app/toolPermission/builtinRules.js
+?? electron-agent/electron/app/toolPermission/builtinRules.test.d.ts
+?? electron-agent/electron/app/toolPermission/builtinRules.test.js
+?? electron-agent/electron/app/toolPermission/effectRank.d.ts
+?? electron-agent/electron/app/toolPermission/effectRank.js
+?? electron-agent/electron/app/toolPermission/paths.d.ts
+?? electron-agent/electron/app/toolPermission/paths.js
+?? electron-agent/electron/app/toolPermission/rpc.d.ts
+?? electron-agent/electron/app/toolPermission/rpc.js
+?? electron-agent/electron/app/toolPermission/rpc.test.d.ts
+?? electron-agent/electron/app/toolPermission/rpc.test.js
+?? electron-agent/electron/app/toolPermission/ruleStore.d.ts
+?? electron-agent/electron/app/toolPermission/ruleStore.js
+?? electron-agent/electron/app/toolPermission/ruleStore.test.d.ts
+?? electron-agent/electron/app/toolPermission/ruleStore.test.js
+?? electron-agent/electron/app/toolPermission/rules.d.ts
+?? electron-agent/electron/app/toolPermission/rules.js
+?? electron-agent/electron/app/toolPermission/rules.test.d.ts
+?? electron-agent/electron/app/toolPermission/rules.test.js
+?? electron-agent/electron/app/toolPermission/toolDecisionService.d.ts
+?? electron-agent/electron/app/toolPermission/toolDecisionService.js
+?? electron-agent/electron/app/toolPermission/toolDecisionService.test.d.ts
+?? electron-agent/electron/app/toolPermission/toolDecisionService.test.js
+?? electron-agent/electron/app/toolPermission/types.d.ts
+?? electron-agent/electron/app/toolPermission/types.js
+?? electron-agent/electron/app/truncateSession.d.ts
+?? electron-agent/electron/app/truncateSession.js
+?? electron-agent/electron/app/truncateSession.test.d.ts
+?? electron-agent/electron/app/truncateSession.test.js
+?? electron-agent/electron/app/uiHistoryService.d.ts
+?? electron-agent/electron/app/uiHistoryService.js
+?? electron-agent/electron/app/uiHistoryService.ordering.test.d.ts
+?? electron-agent/electron/app/uiHistoryService.ordering.test.js
+?? electron-agent/electron/app/uiHistoryService.test.d.ts
+?? electron-agent/electron/app/uiHistoryService.test.js
+?? electron-agent/electron/app/usageService.d.ts
+?? electron-agent/electron/app/usageService.js
+?? electron-agent/electron/app/usageService.test.d.ts
+?? electron-agent/electron/app/usageService.test.js
+?? electron-agent/electron/app/windowBackground.d.ts
+?? electron-agent/electron/app/windowBackground.js
+?? electron-agent/electron/app/windowBackground.test.d.ts
+?? electron-agent/electron/app/windowBackground.test.js
+?? electron-agent/electron/app/workspaceApprovalService.d.ts
+?? electron-agent/electron/app/workspaceApprovalService.js
+?? electron-agent/electron/app/workspaceApprovalService.test.d.ts
+?? electron-agent/electron/app/workspaceApprovalService.test.js
+?? electron-agent/electron/app/workspaceService.d.ts
+?? electron-agent/electron/app/workspaceService.js
+?? electron-agent/electron/app/workspaceService.test.d.ts
+?? electron-agent/electron/app/workspaceService.test.js
+?? electron-agent/electron/browser/attachEmbeddedWebview.d.ts
+?? electron-agent/electron/browser/attachEmbeddedWebview.js
+?? electron-agent/electron/browser/attachEmbeddedWebview.test.d.ts
+?? electron-agent/electron/browser/attachEmbeddedWebview.test.js
+?? electron-agent/electron/browser/brokenPipe.d.ts
+?? electron-agent/electron/browser/brokenPipe.js
+?? electron-agent/electron/browser/brokenPipe.test.d.ts
+?? electron-agent/electron/browser/brokenPipe.test.js
+?? electron-agent/electron/browser/webviewContextMenu.d.ts
+?? electron-agent/electron/browser/webviewContextMenu.js
+?? electron-agent/electron/browser/webviewGuestRegistry.d.ts
+?? electron-agent/electron/browser/webviewGuestRegistry.js
+?? electron-agent/electron/browser/webviewGuestRegistry.test.d.ts
+?? electron-agent/electron/browser/webviewGuestRegistry.test.js
+?? electron-agent/electron/browser/webviewPolicy.d.ts
+?? electron-agent/electron/browser/webviewPolicy.js
+?? electron-agent/electron/browser/webviewPolicy.test.d.ts
+?? electron-agent/electron/browser/webviewPolicy.test.js
+?? electron-agent/electron/browser/webviewPopup.d.ts
+?? electron-agent/electron/browser/webviewPopup.js
+?? electron-agent/electron/browser/webviewPopup.test.d.ts
+?? electron-agent/electron/browser/webviewPopup.test.js
+?? electron-agent/electron/browser/webviewPreload.d.ts
+?? electron-agent/electron/browser/webviewPreload.js
+?? electron-agent/electron/dev/frontendWatch.d.ts
+?? electron-agent/electron/dev/frontendWatch.js
+?? electron-agent/electron/dev/frontendWatch.test.d.ts
+?? electron-agent/electron/dev/frontendWatch.test.js
+?? electron-agent/electron/devtoolsShortcut.d.ts
+?? electron-agent/electron/devtoolsShortcut.js
+?? electron-agent/electron/devtoolsShortcut.test.d.ts
+?? electron-agent/electron/devtoolsShortcut.test.js
+?? electron-agent/electron/fastRealpath.d.ts
+?? electron-agent/electron/fastRealpath.js
+?? electron-agent/electron/fastRealpath.test.d.ts
+?? electron-agent/electron/fastRealpath.test.js
+?? electron-agent/electron/ipc/cacheWarming.test.ts
+?? electron-agent/electron/ipc/commandCoverage.test.d.ts
+?? electron-agent/electron/ipc/commandCoverage.test.js
+?? electron-agent/electron/ipc/contracts.d.ts
+?? electron-agent/electron/ipc/contracts.js
+?? electron-agent/electron/ipc/contracts.test.d.ts
+?? electron-agent/electron/ipc/contracts.test.js
+?? electron-agent/electron/ipc/filePicker.d.ts
+?? electron-agent/electron/ipc/filePicker.js
+?? electron-agent/electron/ipc/register.d.ts
+?? electron-agent/electron/ipc/register.dispose.test.d.ts
+?? electron-agent/electron/ipc/register.dispose.test.js
+?? electron-agent/electron/ipc/register.test.d.ts
+?? electron-agent/electron/ipc/register.test.js
+?? electron-agent/electron/main.config.test.d.ts
+?? electron-agent/electron/main.config.test.js
+?? electron-agent/electron/main.d.ts
+?? electron-agent/electron/mainConfig.d.ts
+?? electron-agent/electron/mainConfig.js
+?? electron-agent/electron/mainHeap.d.ts
+?? electron-agent/electron/mainHeap.js
+?? electron-agent/electron/mainHeap.test.d.ts
+?? electron-agent/electron/mainHeap.test.js
+?? electron-agent/electron/mainWindowNavigation.d.ts
+?? electron-agent/electron/mainWindowNavigation.js
+?? electron-agent/electron/mainWindowNavigation.test.d.ts
+?? electron-agent/electron/mainWindowNavigation.test.js
+?? electron-agent/electron/pi-worker-entry.d.ts
+?? electron-agent/electron/pi-worker-entry.js
+?? electron-agent/electron/pi/eventAdapter.d.ts
+?? electron-agent/electron/pi/eventAdapter.js
+?? electron-agent/electron/pi/eventAdapter.test.d.ts
+?? electron-agent/electron/pi/eventAdapter.test.js
+?? electron-agent/electron/pi/systemWorkerManager.d.ts
+?? electron-agent/electron/pi/systemWorkerManager.js
+?? electron-agent/electron/pi/systemWorkerManager.test.d.ts
+?? electron-agent/electron/pi/systemWorkerManager.test.js
+?? electron-agent/electron/preload.d.ts
+?? electron-agent/electron/preload.js
+?? electron-agent/electron/preload.test.d.ts
+?? electron-agent/electron/preload.test.js
+?? electron-agent/electron/runtimeDiag.d.ts
+?? electron-agent/electron/runtimeDiag.js
+?? electron-agent/electron/runtimeDiag.test.d.ts
+?? electron-agent/electron/runtimeDiag.test.js
+?? electron-agent/electron/tencentdb/parentGuard.d.ts
+?? electron-agent/electron/tencentdb/parentGuard.js
+?? electron-agent/electron/tencentdb/runtime.test.d.ts
+?? electron-agent/electron/tencentdb/runtime.test.js
+?? electron-agent/electron/tencentdbRemoval.test.d.ts
+?? electron-agent/electron/tencentdbRemoval.test.js
+?? electron-agent/native-tasks.sqlite
+?? electron-agent/scripts/cleanup-agentdata.bat
+?? electron-agent/scripts/drop-retired-tables.mjs
+?? electron-agent/scripts/smoke-pi-node-providers.mjs
+?? electron-agent/src/features/agentData/codeIndexFreshness.test.ts
+?? electron-agent/src/features/agentData/codeSourceLinesStub.tsx
+?? electron-agent/src/features/chat/pendingAskUser.d.ts
+?? electron-agent/src/features/chat/pendingAskUser.js
+?? electron-agent/src/features/chat/skillCommandText.d.ts
+?? electron-agent/src/features/chat/skillCommandText.js
+?? electron-agent/src/features/codeIndex/
+?? electron-agent/src/features/settings/ProviderOAuthLoginModal.tsx
+?? electron-agent/src/lib/usageReport.d.ts
+?? electron-agent/src/lib/usageReport.js
+?? electron-agent/ui-harness/probes/cache-warming.mjs
+?? electron-agent/ui-harness/probes/model-compat.mjs
+?? electron-agent/ui-harness/probes/provider-oauth-login.mjs
+?? electron-agent/ui-harness/scenarios/cache-warming.tsx
+?? electron-agent/ui-harness/scenarios/model-compat.tsx
+?? electron-agent/ui-harness/scenarios/provider-oauth-login.tsx
+?? electron-agent/write-gate.sqlite
+?? extensions/_shared/agent-data-client.d.ts
+?? extensions/_shared/agent-data-client.js
+?? extensions/_shared/agent-data-client.test.d.ts
+?? extensions/_shared/agent-data-client.test.js
+?? extensions/_shared/approval-route.d.ts
+?? extensions/_shared/approval-route.js
+?? extensions/_shared/approval-route.test.d.ts
+?? extensions/_shared/approval-route.test.js
+?? extensions/_shared/approval.d.ts
+?? extensions/_shared/approval.js
+?? extensions/_shared/approval.test.d.ts
+?? extensions/_shared/approval.test.js
+?? extensions/_shared/ask.d.ts
+?? extensions/_shared/ask.js
+?? extensions/_shared/delegation-scope.d.ts
+?? extensions/_shared/delegation-scope.js
+?? extensions/_shared/delegation-scope.test.d.ts
+?? extensions/_shared/delegation-scope.test.js
+?? extensions/_shared/desktop-control.d.ts
+?? extensions/_shared/desktop-control.js
+?? extensions/_shared/desktop-control.test.d.ts
+?? extensions/_shared/desktop-control.test.js
+?? extensions/_shared/fast-mode-preferences.d.ts
+?? extensions/_shared/fast-mode-preferences.js
+?? extensions/_shared/fast-mode.d.ts
+?? extensions/_shared/fast-mode.js
+?? extensions/_shared/fs-walk.d.ts
+?? extensions/_shared/fs-walk.js
+?? extensions/_shared/git-safe.d.ts
+?? extensions/_shared/git-safe.js
+?? extensions/_shared/git-safe.test.d.ts
+?? extensions/_shared/git-safe.test.js
+?? extensions/_shared/guard-listener.d.ts
+?? extensions/_shared/guard-listener.js
+?? extensions/_shared/guard-listener.real.test.d.ts
+?? extensions/_shared/guard-listener.real.test.js
+?? extensions/_shared/guard-listener.test.d.ts
+?? extensions/_shared/guard-listener.test.js
+?? extensions/_shared/header-placeholders.d.ts
+?? extensions/_shared/header-placeholders.js
+?? extensions/_shared/header-placeholders.test.d.ts
+?? extensions/_shared/header-placeholders.test.js
+?? extensions/_shared/im-binding.d.ts
+?? extensions/_shared/im-binding.js
+?? extensions/_shared/im-binding.test.d.ts
+?? extensions/_shared/im-binding.test.js
+?? extensions/_shared/isolated-workspace.d.ts
+?? extensions/_shared/isolated-workspace.js
+?? extensions/_shared/isolated-workspace.test.d.ts
+?? extensions/_shared/isolated-workspace.test.js
+?? extensions/_shared/jsonrpc-stdio.d.ts
+?? extensions/_shared/jsonrpc-stdio.js
+?? extensions/_shared/jsonrpc-stdio.test.d.ts
+?? extensions/_shared/jsonrpc-stdio.test.js
+?? extensions/_shared/leak-owner.d.ts
+?? extensions/_shared/leak-owner.js
+?? extensions/_shared/leak-owner.test.d.ts
+?? extensions/_shared/leak-owner.test.js
+?? extensions/_shared/llm.d.ts
+?? extensions/_shared/llm.js
+?? extensions/_shared/oneshot.d.ts
+?? extensions/_shared/oneshot.js
+?? extensions/_shared/oneshot.test.d.ts
+?? extensions/_shared/oneshot.test.js
+?? extensions/_shared/output-retention.d.ts
+?? extensions/_shared/output-retention.js
+?? extensions/_shared/output-retention.test.d.ts
+?? extensions/_shared/output-retention.test.js
+?? extensions/_shared/pi-sdk-compat.integration.test.d.ts
+?? extensions/_shared/promptDisposition.d.ts
+?? extensions/_shared/promptDisposition.js
+?? extensions/_shared/promptDisposition.test.d.ts
+?? extensions/_shared/promptDisposition.test.js
+?? extensions/_shared/protected-paths.d.ts
+?? extensions/_shared/protected-paths.js
+?? extensions/_shared/protected-paths.test.d.ts
+?? extensions/_shared/protected-paths.test.js
+?? extensions/_shared/provider-endpoint.d.ts
+?? extensions/_shared/provider-endpoint.js
+?? extensions/_shared/provider-endpoint.test.d.ts
+?? extensions/_shared/provider-endpoint.test.js
+?? extensions/_shared/question-constants.d.ts
+?? extensions/_shared/question-constants.js
+?? extensions/_shared/request-frames.d.ts
+?? extensions/_shared/request-frames.js
+?? extensions/_shared/resource-reload.d.ts
+?? extensions/_shared/resource-reload.js
+?? extensions/_shared/resource-reload.test.d.ts
+?? extensions/_shared/resource-reload.test.js
+?? extensions/_shared/ripgrep.d.ts
+?? extensions/_shared/ripgrep.js
+?? extensions/_shared/ripgrep.live.test.d.ts
+?? extensions/_shared/ripgrep.live.test.js
+?? extensions/_shared/ripgrep.test.d.ts
+?? extensions/_shared/ripgrep.test.js
+?? extensions/_shared/rpc-peer.d.ts
+?? extensions/_shared/rpc-peer.js
+?? extensions/_shared/runtime-config.d.ts
+?? extensions/_shared/runtime-config.js
+?? extensions/_shared/runtime-config.test.d.ts
+?? extensions/_shared/runtime-config.test.js
+?? extensions/_shared/sandbox/attribute.d.ts
+?? extensions/_shared/sandbox/attribute.js
+?? extensions/_shared/sandbox/attribute.test.d.ts
+?? extensions/_shared/sandbox/attribute.test.js
+?? extensions/_shared/sandbox/darwin/seatbelt.d.ts
+?? extensions/_shared/sandbox/darwin/seatbelt.js
+?? extensions/_shared/sandbox/darwin/seatbelt.test.d.ts
+?? extensions/_shared/sandbox/darwin/seatbelt.test.js
+?? extensions/_shared/sandbox/decodeSpawnChunk.d.ts
+?? extensions/_shared/sandbox/decodeSpawnChunk.js
+?? extensions/_shared/sandbox/decodeSpawnChunk.test.d.ts
+?? extensions/_shared/sandbox/decodeSpawnChunk.test.js
+?? extensions/_shared/sandbox/env.d.ts
+?? extensions/_shared/sandbox/env.js
+?? extensions/_shared/sandbox/env.test.d.ts
+?? extensions/_shared/sandbox/env.test.js
+?? extensions/_shared/sandbox/errors.d.ts
+?? extensions/_shared/sandbox/errors.js
+?? extensions/_shared/sandbox/escalate.d.ts
+?? extensions/_shared/sandbox/escalate.js
+?? extensions/_shared/sandbox/escalate.test.d.ts
+?? extensions/_shared/sandbox/escalate.test.js
+?? extensions/_shared/sandbox/escalationGrant.d.ts
+?? extensions/_shared/sandbox/escalationGrant.js
+?? extensions/_shared/sandbox/escalationGrant.test.d.ts
+?? extensions/_shared/sandbox/escalationGrant.test.js
+?? extensions/_shared/sandbox/facts.d.ts
+?? extensions/_shared/sandbox/facts.js
+?? extensions/_shared/sandbox/facts.test.d.ts
+?? extensions/_shared/sandbox/facts.test.js
+?? extensions/_shared/sandbox/index.d.ts
+?? extensions/_shared/sandbox/index.js
+?? extensions/_shared/sandbox/isolation.live.test.d.ts
+?? extensions/_shared/sandbox/isolation.live.test.js
+?? extensions/_shared/sandbox/linux/bwrap.d.ts
+?? extensions/_shared/sandbox/linux/bwrap.js
+?? extensions/_shared/sandbox/linux/bwrap.test.d.ts
+?? extensions/_shared/sandbox/linux/bwrap.test.js
+?? extensions/_shared/sandbox/operations.d.ts
+?? extensions/_shared/sandbox/operations.js
+?? extensions/_shared/sandbox/operations.test.d.ts
+?? extensions/_shared/sandbox/operations.test.js
+?? extensions/_shared/sandbox/provider.d.ts
+?? extensions/_shared/sandbox/provider.js
+?? extensions/_shared/sandbox/provider.test.d.ts
+?? extensions/_shared/sandbox/provider.test.js
+?? extensions/_shared/sandbox/resolvePreset.d.ts
+?? extensions/_shared/sandbox/resolvePreset.js
+?? extensions/_shared/sandbox/resolvePreset.test.d.ts
+?? extensions/_shared/sandbox/resolvePreset.test.js
+?? extensions/_shared/sandbox/scope.test.d.ts
+?? extensions/_shared/sandbox/scope.test.js
+?? extensions/_shared/sandbox/shellPath.d.ts
+?? extensions/_shared/sandbox/shellPath.js
+?? extensions/_shared/sandbox/shellPath.test.d.ts
+?? extensions/_shared/sandbox/shellPath.test.js
+?? extensions/_shared/sandbox/tempDirs.d.ts
+?? extensions/_shared/sandbox/tempDirs.js
+?? extensions/_shared/sandbox/tempDirs.test.d.ts
+?? extensions/_shared/sandbox/tempDirs.test.js
+?? extensions/_shared/sandbox/types.d.ts
+?? extensions/_shared/sandbox/types.js
+?? extensions/_shared/sandbox/userBash.d.ts
+?? extensions/_shared/sandbox/userBash.js
+?? extensions/_shared/sandbox/userBash.test.d.ts
+?? extensions/_shared/sandbox/userBash.test.js
+?? extensions/_shared/sandbox/windows/account.d.ts
+?? extensions/_shared/sandbox/windows/account.js
+?? extensions/_shared/sandbox/windows/account.test.d.ts
+?? extensions/_shared/sandbox/windows/account.test.js
+?? extensions/_shared/sandbox/windows/ambient.d.ts
+?? extensions/_shared/sandbox/windows/ambient.js
+?? extensions/_shared/sandbox/windows/ambient.test.d.ts
+?? extensions/_shared/sandbox/windows/ambient.test.js
+?? extensions/_shared/sandbox/windows/deleteSemantics.test.d.ts
+?? extensions/_shared/sandbox/windows/deleteSemantics.test.js
+?? extensions/_shared/sandbox/windows/elevate.d.ts
+?? extensions/_shared/sandbox/windows/elevate.js
+?? extensions/_shared/sandbox/windows/elevate.test.d.ts
+?? extensions/_shared/sandbox/windows/elevate.test.js
+?? extensions/_shared/sandbox/windows/protect.d.ts
+?? extensions/_shared/sandbox/windows/protect.js
+?? extensions/_shared/sandbox/windows/protect.test.d.ts
+?? extensions/_shared/sandbox/windows/protect.test.js
+?? extensions/_shared/sandbox/windows/reclaim.d.ts
+?? extensions/_shared/sandbox/windows/reclaim.js
+?? extensions/_shared/sandbox/windows/reclaim.test.d.ts
+?? extensions/_shared/sandbox/windows/reclaim.test.js
+?? extensions/_shared/sandbox/windows/runner.d.ts
+?? extensions/_shared/sandbox/windows/runner.js
+?? extensions/_shared/sandbox/windows/runner.test.d.ts
+?? extensions/_shared/sandbox/windows/runner.test.js
+?? extensions/_shared/sandbox/windows/sids.d.ts
+?? extensions/_shared/sandbox/windows/sids.js
+?? extensions/_shared/sandbox/windows/sids.test.d.ts
+?? extensions/_shared/sandbox/windows/sids.test.js
+?? extensions/_shared/seed-agents.d.ts
+?? extensions/_shared/seed-agents.js
+?? extensions/_shared/seed-agents.test.d.ts
+?? extensions/_shared/seed-agents.test.js
+?? extensions/_shared/session-cwd.d.ts
+?? extensions/_shared/session-cwd.js
+?? extensions/_shared/session-cwd.test.d.ts
+?? extensions/_shared/session-cwd.test.js
+?? extensions/_shared/session-preferences.d.ts
+?? extensions/_shared/session-preferences.js
+?? extensions/_shared/session-preferences.test.d.ts
+?? extensions/_shared/session-preferences.test.js
+?? extensions/_shared/session-title.d.ts
+?? extensions/_shared/session-title.js
+?? extensions/_shared/session-title.test.d.ts
+?? extensions/_shared/session-title.test.js
+?? extensions/_shared/shared-model-runtime.d.ts
+?? extensions/_shared/shared-model-runtime.js
+?? extensions/_shared/sqlite.d.ts
+?? extensions/_shared/sqlite.js
+?? extensions/_shared/summarize.d.ts
+?? extensions/_shared/summarize.js
+?? extensions/_shared/todo-model.d.ts
+?? extensions/_shared/todo-model.js
+?? extensions/_shared/todo-model.test.d.ts
+?? extensions/_shared/todo-model.test.js
+?? extensions/_shared/tool-groups.d.ts
+?? extensions/_shared/tool-groups.js
+?? extensions/_shared/tool-groups.test.d.ts
+?? extensions/_shared/tool-groups.test.js
+?? extensions/_shared/tool-refresh-batch.d.ts
+?? extensions/_shared/tool-refresh-batch.js
+?? extensions/_shared/tool-refresh-batch.test.d.ts
+?? extensions/_shared/tool-refresh-batch.test.js
+?? extensions/_shared/toolPrompt.d.ts
+?? extensions/_shared/toolPrompt.js
+?? extensions/_shared/transcript.d.ts
+?? extensions/_shared/transcript.js
+?? extensions/_shared/ultra-context.d.ts
+?? extensions/_shared/ultra-context.js
+?? extensions/_shared/ultra-context.test.d.ts
+?? extensions/_shared/ultra-context.test.js
+?? extensions/_shared/watch-config-unsubscribe.test.d.ts
+?? extensions/_shared/watch-config-unsubscribe.test.js
+?? extensions/_shared/workspace-context.d.ts
+?? extensions/_shared/workspace-context.js
+?? extensions/_shared/workspace-context.test.d.ts
+?? extensions/_shared/workspace-context.test.js
+?? extensions/_shared/workspace-isolation.test.d.ts
+?? extensions/_shared/workspace-isolation.test.js
+?? extensions/after-tool-feedback/index.d.ts
+?? extensions/after-tool-feedback/index.js
+?? extensions/after-tool-feedback/index.test.d.ts
+?? extensions/after-tool-feedback/index.test.js
+?? extensions/after-tool-feedback/render.d.ts
+?? extensions/after-tool-feedback/render.js
+?? extensions/after-tool-feedback/render.test.d.ts
+?? extensions/after-tool-feedback/render.test.js
+?? extensions/after-tool-feedback/select.d.ts
+?? extensions/after-tool-feedback/select.js
+?? extensions/after-tool-feedback/select.test.d.ts
+?? extensions/after-tool-feedback/select.test.js
+?? extensions/agent-data-manifests.d.ts
+?? extensions/agent-data-manifests.js
+?? extensions/agent-mode/index.d.ts
+?? extensions/agent-mode/index.js
+?? extensions/agent-mode/index.test.d.ts
+?? extensions/agent-mode/index.test.js
+?? extensions/agent-mode/modes.d.ts
+?? extensions/agent-mode/modes.js
+?? extensions/agent-mode/modes.test.d.ts
+?? extensions/agent-mode/modes.test.js
+?? extensions/agent-mode/plan.d.ts
+?? extensions/agent-mode/plan.js
+?? extensions/agent-mode/plan.test.d.ts
+?? extensions/agent-mode/plan.test.js
+?? extensions/agent-mode/planFlow.test.d.ts
+?? extensions/agent-mode/planFlow.test.js
+?? extensions/agent-mode/planState.d.ts
+?? extensions/agent-mode/planState.js
+?? extensions/agent-mode/planState.test.d.ts
+?? extensions/agent-mode/planState.test.js
+?? extensions/agent-mode/questions.d.ts
+?? extensions/agent-mode/questions.js
+?? extensions/agent-mode/questions.test.d.ts
+?? extensions/agent-mode/questions.test.js
+?? extensions/agent-mode/ultra-rules.d.ts
+?? extensions/agent-mode/ultra-rules.js
+?? extensions/agent-mode/ultra-rules.test.d.ts
+?? extensions/agent-mode/ultra-rules.test.js
+?? extensions/agent-mode/ultraRulesInjection.test.d.ts
+?? extensions/agent-mode/ultraRulesInjection.test.js
+?? extensions/agent-mode/utils.d.ts
+?? extensions/agent-mode/utils.js
+?? extensions/agent-mode/utils.test.d.ts
+?? extensions/agent-mode/utils.test.js
+?? extensions/approval/index.d.ts
+?? extensions/approval/index.js
+?? extensions/approval/index.test.d.ts
+?? extensions/approval/index.test.js
+?? extensions/ast-tools/edit.d.ts
+?? extensions/ast-tools/edit.js
+?? extensions/ast-tools/edit.test.d.ts
+?? extensions/ast-tools/edit.test.js
+?? extensions/ast-tools/grep.d.ts
+?? extensions/ast-tools/grep.js
+?? extensions/ast-tools/grep.test.d.ts
+?? extensions/ast-tools/grep.test.js
+?? extensions/ast-tools/index.d.ts
+?? extensions/ast-tools/index.js
+?? extensions/ast-tools/index.test.d.ts
+?? extensions/ast-tools/index.test.js
+?? extensions/ast-tools/lang.d.ts
+?? extensions/ast-tools/lang.js
+?? extensions/ast-tools/lang.test.d.ts
+?? extensions/ast-tools/lang.test.js
+?? extensions/ast-tools/rewrite.d.ts
+?? extensions/ast-tools/rewrite.js
+?? extensions/ast-tools/rewrite.test.d.ts
+?? extensions/ast-tools/rewrite.test.js
+?? extensions/auto-title/auto-title-live.real.test.d.ts
+?? extensions/auto-title/auto-title-live.real.test.js
+?? extensions/auto-title/index.d.ts
+?? extensions/auto-title/index.js
+?? extensions/auto-title/index.test.d.ts
+?? extensions/auto-title/index.test.js
+?? extensions/auto-title/notify.d.ts
+?? extensions/auto-title/notify.js
+?? extensions/auto-title/title.d.ts
+?? extensions/auto-title/title.js
+?? extensions/auto-title/title.test.d.ts
+?? extensions/auto-title/title.test.js
+?? extensions/batch-tools/format.d.ts
+?? extensions/batch-tools/format.js
+?? extensions/batch-tools/format.test.d.ts
+?? extensions/batch-tools/format.test.js
+?? extensions/batch-tools/index.d.ts
+?? extensions/batch-tools/index.js
+?? extensions/batch-tools/index.test.d.ts
+?? extensions/batch-tools/index.test.js
+?? extensions/batch-tools/read-files.d.ts
+?? extensions/batch-tools/read-files.js
+?? extensions/batch-tools/read-files.test.d.ts
+?? extensions/batch-tools/read-files.test.js
+?? extensions/batch-tools/search.d.ts
+?? extensions/batch-tools/search.js
+?? extensions/batch-tools/search.test.d.ts
+?? extensions/batch-tools/search.test.js
+?? extensions/batch-tools/walk.d.ts
+?? extensions/batch-tools/walk.js
+?? extensions/batch-tools/walk.test.d.ts
+?? extensions/batch-tools/walk.test.js
+?? extensions/code-exec/base-kernel.d.ts
+?? extensions/code-exec/base-kernel.js
+?? extensions/code-exec/index.d.ts
+?? extensions/code-exec/index.js
+?? extensions/code-exec/index.test.d.ts
+?? extensions/code-exec/index.test.js
+?? extensions/code-exec/js-kernel.d.ts
+?? extensions/code-exec/js-kernel.js
+?? extensions/code-exec/js-kernel.test.d.ts
+?? extensions/code-exec/js-kernel.test.js
+?? extensions/code-exec/kernel.d.ts
+?? extensions/code-exec/kernel.js
+?? extensions/code-exec/protocol.d.ts
+?? extensions/code-exec/protocol.js
+?? extensions/code-exec/protocol.test.d.ts
+?? extensions/code-exec/protocol.test.js
+?? extensions/code-retrieval/index.d.ts
+?? extensions/code-retrieval/index.js
+?? extensions/code-retrieval/index.test.d.ts
+?? extensions/code-retrieval/index.test.js
+?? extensions/code-retrieval/mcpClient.d.ts
+?? extensions/code-retrieval/mcpClient.js
+?? extensions/code-retrieval/mcpClient.test.d.ts
+?? extensions/code-retrieval/mcpClient.test.js
+?? extensions/code-retrieval/prompt.d.ts
+?? extensions/code-retrieval/prompt.js
+?? extensions/code-retrieval/prompt.test.d.ts
+?? extensions/code-retrieval/prompt.test.js
+?? extensions/code-retrieval/tools.d.ts
+?? extensions/code-retrieval/tools.js
+?? extensions/compaction-policy/cache-warmth.d.ts
+?? extensions/compaction-policy/cache-warmth.js
+?? extensions/compaction-policy/cache-warmth.test.d.ts
+?? extensions/compaction-policy/cache-warmth.test.js
+?? extensions/compaction-policy/exclusion.d.ts
+?? extensions/compaction-policy/exclusion.js
+?? extensions/compaction-policy/exclusion.test.d.ts
+?? extensions/compaction-policy/exclusion.test.js
+?? extensions/compaction-policy/index.d.ts
+?? extensions/compaction-policy/index.js
+?? extensions/compaction-policy/index.test.d.ts
+?? extensions/compaction-policy/index.test.js
+?? extensions/compaction-policy/pressure-prune.d.ts
+?? extensions/compaction-policy/pressure-prune.js
+?? extensions/compaction-policy/pressure-prune.test.d.ts
+?? extensions/compaction-policy/pressure-prune.test.js
+?? extensions/compaction-policy/pressure.d.ts
+?? extensions/compaction-policy/pressure.js
+?? extensions/compaction-policy/pressure.test.d.ts
+?? extensions/compaction-policy/pressure.test.js
+?? extensions/compaction-policy/prune.d.ts
+?? extensions/compaction-policy/prune.js
+?? extensions/compaction-policy/prune.test.d.ts
+?? extensions/compaction-policy/prune.test.js
+?? extensions/compaction-policy/resume.d.ts
+?? extensions/compaction-policy/resume.js
+?? extensions/compaction-policy/resume.test.d.ts
+?? extensions/compaction-policy/resume.test.js
+?? extensions/compaction-policy/threshold.d.ts
+?? extensions/compaction-policy/threshold.js
+?? extensions/compaction-policy/threshold.test.d.ts
+?? extensions/compaction-policy/threshold.test.js
+?? extensions/context-rules/index.d.ts
+?? extensions/context-rules/index.js
+?? extensions/context-rules/index.test.d.ts
+?? extensions/context-rules/index.test.js
+?? extensions/context-rules/rules.d.ts
+?? extensions/context-rules/rules.js
+?? extensions/context-rules/rules.test.d.ts
+?? extensions/context-rules/rules.test.js
+?? extensions/dap/adapters.d.ts
+?? extensions/dap/adapters.js
+?? extensions/dap/client.d.ts
+?? extensions/dap/client.js
+?? extensions/dap/index.d.ts
+?? extensions/dap/index.js
+?? extensions/dap/protocol.d.ts
+?? extensions/dap/protocol.js
+?? extensions/dap/protocol.test.d.ts
+?? extensions/dap/protocol.test.js
+?? extensions/debug-tools/index.d.ts
+?? extensions/debug-tools/index.js
+?? extensions/debug-tools/instrument.d.ts
+?? extensions/debug-tools/instrument.js
+?? extensions/debug-tools/instrument.test.d.ts
+?? extensions/debug-tools/instrument.test.js
+?? extensions/debug-tools/logstore.d.ts
+?? extensions/debug-tools/logstore.js
+?? extensions/debug-tools/logstore.test.d.ts
+?? extensions/debug-tools/logstore.test.js
+?? extensions/debug-tools/server.d.ts
+?? extensions/debug-tools/server.js
+?? extensions/debug-tools/server.test.d.ts
+?? extensions/debug-tools/server.test.js
+?? extensions/deferred-manifest.d.ts
+?? extensions/deferred-manifest.js
+?? extensions/diagnostics/config.d.ts
+?? extensions/diagnostics/config.js
+?? extensions/diagnostics/config.test.d.ts
+?? extensions/diagnostics/config.test.js
+?? extensions/diagnostics/index.d.ts
+?? extensions/diagnostics/index.js
+?? extensions/diagnostics/index.test.d.ts
+?? extensions/diagnostics/index.test.js
+?? extensions/diagnostics/parsers.d.ts
+?? extensions/diagnostics/parsers.js
+?? extensions/diagnostics/parsers.test.d.ts
+?? extensions/diagnostics/parsers.test.js
+?? extensions/diagnostics/runner.d.ts
+?? extensions/diagnostics/runner.js
+?? extensions/diagnostics/runner.test.d.ts
+?? extensions/diagnostics/runner.test.js
+?? extensions/diagram-hint/index.d.ts
+?? extensions/diagram-hint/index.js
+?? extensions/diagram-hint/index.test.d.ts
+?? extensions/diagram-hint/index.test.js
+?? extensions/fable-behavior/default-agents.d.ts
+?? extensions/fable-behavior/default-agents.js
+?? extensions/fable-behavior/index.d.ts
+?? extensions/fable-behavior/index.test.d.ts
+?? extensions/fable-behavior/index.test.js
+?? extensions/fable-behavior/integration.test.d.ts
+?? extensions/fable-behavior/integration.test.js
+?? extensions/fable-behavior/loader.d.ts
+?? extensions/fable-behavior/loader.js
+?? extensions/fable-behavior/loader.test.d.ts
+?? extensions/fable-behavior/loader.test.js
+?? extensions/fable-behavior/seed.d.ts
+?? extensions/fable-behavior/seed.js
+?? extensions/fable-behavior/seed.test.d.ts
+?? extensions/fable-behavior/seed.test.js
+?? extensions/fast-mode/index.d.ts
+?? extensions/fast-mode/index.js
+?? extensions/github/args.d.ts
+?? extensions/github/args.js
+?? extensions/github/args.test.d.ts
+?? extensions/github/args.test.js
+?? extensions/github/format.d.ts
+?? extensions/github/format.js
+?? extensions/github/format.test.d.ts
+?? extensions/github/format.test.js
+?? extensions/github/gh.d.ts
+?? extensions/github/gh.js
+?? extensions/github/gh.test.d.ts
+?? extensions/github/gh.test.js
+?? extensions/github/index.d.ts
+?? extensions/github/index.js
+?? extensions/github/index.test.d.ts
+?? extensions/github/index.test.js
+?? extensions/goal/auth.d.ts
+?? extensions/goal/auth.js
+?? extensions/goal/auth.test.d.ts
+?? extensions/goal/auth.test.js
+?? extensions/goal/config.d.ts
+?? extensions/goal/config.js
+?? extensions/goal/config.test.d.ts
+?? extensions/goal/config.test.js
+?? extensions/goal/continue.d.ts
+?? extensions/goal/continue.js
+?? extensions/goal/continue.test.d.ts
+?? extensions/goal/continue.test.js
+?? extensions/goal/fold.d.ts
+?? extensions/goal/fold.js
+?? extensions/goal/fold.test.d.ts
+?? extensions/goal/fold.test.js
+?? extensions/goal/goal-live.real.test.d.ts
+?? extensions/goal/goal-live.real.test.js
+?? extensions/goal/history.d.ts
+?? extensions/goal/history.js
+?? extensions/goal/history.test.d.ts
+?? extensions/goal/history.test.js
+?? extensions/goal/index.d.ts
+?? extensions/goal/index.js
+?? extensions/goal/index.test.d.ts
+?? extensions/goal/index.test.js
+?? extensions/goal/parse.d.ts
+?? extensions/goal/parse.js
+?? extensions/goal/parse.test.d.ts
+?? extensions/goal/parse.test.js
+?? extensions/goal/prompt.d.ts
+?? extensions/goal/prompt.js
+?? extensions/goal/prompt.test.d.ts
+?? extensions/goal/prompt.test.js
+?? extensions/goal/receipt.d.ts
+?? extensions/goal/receipt.js
+?? extensions/goal/receipt.test.d.ts
+?? extensions/goal/receipt.test.js
+?? extensions/goal/session.d.ts
+?? extensions/goal/session.js
+?? extensions/goal/status.d.ts
+?? extensions/goal/status.js
+?? extensions/goal/tools.d.ts
+?? extensions/goal/tools.js
+?? extensions/goal/tools.test.d.ts
+?? extensions/goal/tools.test.js
+?? extensions/goal/types.d.ts
+?? extensions/goal/types.js
+?? extensions/hashline/apply.d.ts
+?? extensions/hashline/apply.js
+?? extensions/hashline/hashline.test.d.ts
+?? extensions/hashline/hashline.test.js
+?? extensions/hashline/index.d.ts
+?? extensions/hashline/index.js
+?? extensions/hashline/index.test.d.ts
+?? extensions/hashline/index.test.js
+?? extensions/hashline/parser.d.ts
+?? extensions/hashline/parser.js
+?? extensions/hashline/prompt.d.ts
+?? extensions/hashline/prompt.js
+?? extensions/hashline/recovery.d.ts
+?? extensions/hashline/recovery.js
+?? extensions/hashline/recovery.test.d.ts
+?? extensions/hashline/recovery.test.js
+?? extensions/hashline/snapshot-store.d.ts
+?? extensions/hashline/snapshot-store.js
+?? extensions/hashline/snapshot-store.test.d.ts
+?? extensions/hashline/snapshot-store.test.js
+?? extensions/hashline/snapshots.d.ts
+?? extensions/hashline/snapshots.js
+?? extensions/header-placeholders/index.d.ts
+?? extensions/header-placeholders/index.js
+?? extensions/header-placeholders/index.test.d.ts
+?? extensions/header-placeholders/index.test.js
+?? extensions/im-gateway/gateway.d.ts
+?? extensions/im-gateway/gateway.js
+?? extensions/im-gateway/index.d.ts
+?? extensions/im-gateway/index.js
+?? extensions/im-gateway/index.test.d.ts
+?? extensions/im-gateway/index.test.js
+?? extensions/im-platforms/context.d.ts
+?? extensions/im-platforms/context.js
+?? extensions/im-platforms/context.test.d.ts
+?? extensions/im-platforms/context.test.js
+?? extensions/im-platforms/index.d.ts
+?? extensions/im-platforms/index.js
+?? extensions/im-platforms/index.test.d.ts
+?? extensions/im-platforms/index.test.js
+?? extensions/im-platforms/lock.d.ts
+?? extensions/im-platforms/lock.js
+?? extensions/im-platforms/lock.test.d.ts
+?? extensions/im-platforms/lock.test.js
+?? extensions/im-platforms/pi-process.d.ts
+?? extensions/im-platforms/pi-process.js
+?? extensions/im-platforms/pi-process.test.d.ts
+?? extensions/im-platforms/pi-process.test.js
+?? extensions/im-platforms/wechat.d.ts
+?? extensions/im-platforms/wechat.js
+?? extensions/im-platforms/wechat.test.d.ts
+?? extensions/im-platforms/wechat.test.js
+?? extensions/image-gen/image.d.ts
+?? extensions/image-gen/image.js
+?? extensions/image-gen/image.test.d.ts
+?? extensions/image-gen/image.test.js
+?? extensions/image-gen/index.d.ts
+?? extensions/image-gen/index.js
+?? extensions/image-limits/image-limits-live.real.test.d.ts
+?? extensions/image-limits/image-limits-live.real.test.js
+?? extensions/image-limits/index.d.ts
+?? extensions/image-limits/index.js
+?? extensions/image-limits/limits.d.ts
+?? extensions/image-limits/limits.js
+?? extensions/image-limits/limits.test.d.ts
+?? extensions/image-limits/limits.test.js
+?? extensions/image-limits/scan-session.d.ts
+?? extensions/image-limits/scan-session.js
+?? extensions/index.d.ts
+?? extensions/index.js
+?? extensions/index.test.d.ts
+?? extensions/index.test.js
+?? extensions/jobs/index.d.ts
+?? extensions/jobs/index.js
+?? extensions/jobs/index.test.d.ts
+?? extensions/jobs/index.test.js
+?? extensions/jobs/notice.d.ts
+?? extensions/jobs/notice.js
+?? extensions/jobs/notice.test.d.ts
+?? extensions/jobs/notice.test.js
+?? extensions/jobs/observer.d.ts
+?? extensions/jobs/observer.js
+?? extensions/jobs/observer.test.d.ts
+?? extensions/jobs/observer.test.js
+?? extensions/jobs/pump.d.ts
+?? extensions/jobs/pump.js
+?? extensions/jobs/pump.test.d.ts
+?? extensions/jobs/pump.test.js
+?? extensions/jobs/render.d.ts
+?? extensions/jobs/render.js
+?? extensions/jobs/ring.d.ts
+?? extensions/jobs/ring.js
+?? extensions/jobs/ring.test.d.ts
+?? extensions/jobs/ring.test.js
+?? extensions/jobs/service.d.ts
+?? extensions/jobs/service.js
+?? extensions/jobs/service.test.d.ts
+?? extensions/jobs/service.test.js
+?? extensions/jobs/types.d.ts
+?? extensions/jobs/types.js
+?? extensions/loop-guard/chain.d.ts
+?? extensions/loop-guard/chain.js
+?? extensions/loop-guard/index.d.ts
+?? extensions/loop-guard/index.js
+?? extensions/loop-guard/index.test.d.ts
+?? extensions/loop-guard/index.test.js
+?? extensions/lsp/client.d.ts
+?? extensions/lsp/client.js
+?? extensions/lsp/convert.d.ts
+?? extensions/lsp/convert.js
+?? extensions/lsp/convert.test.d.ts
+?? extensions/lsp/convert.test.js
+?? extensions/lsp/index.d.ts
+?? extensions/lsp/index.js
+?? extensions/lsp/servers.d.ts
+?? extensions/lsp/servers.js
+?? extensions/mcp-policy/index.d.ts
+?? extensions/mcp-policy/index.js
+?? extensions/mcp-policy/index.test.d.ts
+?? extensions/mcp-policy/index.test.js
+?? extensions/mcp-policy/policy.d.ts
+?? extensions/mcp-policy/policy.js
+?? extensions/mcp-policy/policy.test.d.ts
+?? extensions/mcp-policy/policy.test.js
+?? extensions/mcp/config.d.ts
+?? extensions/mcp/config.js
+?? extensions/mcp/config.test.d.ts
+?? extensions/mcp/config.test.js
+?? extensions/mcp/diff.d.ts
+?? extensions/mcp/diff.js
+?? extensions/mcp/diff.test.d.ts
+?? extensions/mcp/diff.test.js
+?? extensions/mcp/index.d.ts
+?? extensions/mcp/index.js
+?? extensions/mcp/index.test.d.ts
+?? extensions/mcp/index.test.js
+?? extensions/mcp/legacyServersMessage.d.ts
+?? extensions/mcp/legacyServersMessage.js
+?? extensions/mcp/legacyServersMessage.real.test.d.ts
+?? extensions/mcp/legacyServersMessage.real.test.js
+?? extensions/mcp/logRotate.d.ts
+?? extensions/mcp/logRotate.js
+?? extensions/mcp/logRotate.test.d.ts
+?? extensions/mcp/logRotate.test.js
+?? extensions/mcp/manager.d.ts
+?? extensions/mcp/manager.js
+?? extensions/mcp/manager.test.d.ts
+?? extensions/mcp/manager.test.js
+?? extensions/mcp/merge.d.ts
+?? extensions/mcp/merge.js
+?? extensions/mcp/merge.test.d.ts
+?? extensions/mcp/merge.test.js
+?? extensions/mcp/naming.d.ts
+?? extensions/mcp/naming.js
+?? extensions/mcp/naming.test.d.ts
+?? extensions/mcp/naming.test.js
+?? extensions/mcp/oauthRules.d.ts
+?? extensions/mcp/oauthRules.js
+?? extensions/mcp/oauthRules.test.d.ts
+?? extensions/mcp/oauthRules.test.js
+?? extensions/mcp/probe.d.ts
+?? extensions/mcp/probe.js
+?? extensions/mcp/probe.test.d.ts
+?? extensions/mcp/probe.test.js
+?? extensions/mcp/reach.d.ts
+?? extensions/mcp/reach.js
+?? extensions/mcp/reach.real.test.d.ts
+?? extensions/mcp/reach.real.test.js
+?? extensions/mcp/reach.test.d.ts
+?? extensions/mcp/reach.test.js
+?? extensions/mcp/resultShape.d.ts
+?? extensions/mcp/resultShape.js
+?? extensions/mcp/resultShape.test.d.ts
+?? extensions/mcp/resultShape.test.js
+?? extensions/mcp/summary.d.ts
+?? extensions/mcp/summary.js
+?? extensions/mcp/toolsCache.d.ts
+?? extensions/mcp/toolsCache.js
+?? extensions/mcp/toolsCache.test.d.ts
+?? extensions/mcp/toolsCache.test.js
+?? extensions/mcp/transport.d.ts
+?? extensions/mcp/transport.js
+?? extensions/mcp/transport.test.d.ts
+?? extensions/mcp/transport.test.js
+?? extensions/mcp/wait.d.ts
+?? extensions/mcp/wait.js
+?? extensions/mcp/wait.test.d.ts
+?? extensions/mcp/wait.test.js
+?? extensions/multi-agent/activation.d.ts
+?? extensions/multi-agent/activation.js
+?? extensions/multi-agent/activation.test.d.ts
+?? extensions/multi-agent/activation.test.js
+?? extensions/multi-agent/active-runs.d.ts
+?? extensions/multi-agent/active-runs.js
+?? extensions/multi-agent/active-runs.test.d.ts
+?? extensions/multi-agent/active-runs.test.js
+?? extensions/multi-agent/adjacent-tools.d.ts
+?? extensions/multi-agent/adjacent-tools.js
+?? extensions/multi-agent/adjacent-tools.test.d.ts
+?? extensions/multi-agent/adjacent-tools.test.js
+?? extensions/multi-agent/agents.d.ts
+?? extensions/multi-agent/agents.js
+?? extensions/multi-agent/agents.test.d.ts
+?? extensions/multi-agent/agents.test.js
+?? extensions/multi-agent/approval-top.d.ts
+?? extensions/multi-agent/approval-top.js
+?? extensions/multi-agent/approval-top.test.d.ts
+?? extensions/multi-agent/approval-top.test.js
+?? extensions/multi-agent/assistant-output.d.ts
+?? extensions/multi-agent/assistant-output.js
+?? extensions/multi-agent/assistant-output.test.d.ts
+?? extensions/multi-agent/assistant-output.test.js
+?? extensions/multi-agent/backends.d.ts
+?? extensions/multi-agent/backends.js
+?? extensions/multi-agent/cancel.d.ts
+?? extensions/multi-agent/cancel.js
+?? extensions/multi-agent/cancel.test.d.ts
+?? extensions/multi-agent/cancel.test.js
+?? extensions/multi-agent/capability.d.ts
+?? extensions/multi-agent/capability.js
+?? extensions/multi-agent/capability.test.d.ts
+?? extensions/multi-agent/capability.test.js
+?? extensions/multi-agent/catalog-events.d.ts
+?? extensions/multi-agent/catalog-events.js
+?? extensions/multi-agent/catalog-events.test.d.ts
+?? extensions/multi-agent/catalog-events.test.js
+?? extensions/multi-agent/catalog-sample.d.ts
+?? extensions/multi-agent/catalog-sample.js
+?? extensions/multi-agent/catalog-sample.test.d.ts
+?? extensions/multi-agent/catalog-sample.test.js
+?? extensions/multi-agent/catalog.d.ts
+?? extensions/multi-agent/catalog.js
+?? extensions/multi-agent/catalog.test.d.ts
+?? extensions/multi-agent/catalog.test.js
+?? extensions/multi-agent/child-runs.d.ts
+?? extensions/multi-agent/child-runs.js
+?? extensions/multi-agent/codemode-deadline.d.ts
+?? extensions/multi-agent/codemode-deadline.js
+?? extensions/multi-agent/codemode-deadline.test.d.ts
+?? extensions/multi-agent/codemode-deadline.test.js
+?? extensions/multi-agent/controlPlane.d.ts
+?? extensions/multi-agent/controlPlane.js
+?? extensions/multi-agent/controlPlane.test.d.ts
+?? extensions/multi-agent/controlPlane.test.js
+?? extensions/multi-agent/depth.d.ts
+?? extensions/multi-agent/depth.js
+?? extensions/multi-agent/depth.test.d.ts
+?? extensions/multi-agent/depth.test.js
+?? extensions/multi-agent/detach.d.ts
+?? extensions/multi-agent/detach.js
+?? extensions/multi-agent/detach.test.d.ts
+?? extensions/multi-agent/detach.test.js
+?? extensions/multi-agent/embedded-events.d.ts
+?? extensions/multi-agent/embedded-events.js
+?? extensions/multi-agent/embedded-events.test.d.ts
+?? extensions/multi-agent/embedded-events.test.js
+?? extensions/multi-agent/embedded-runner.d.ts
+?? extensions/multi-agent/embedded-runner.js
+?? extensions/multi-agent/embedded-runner.run.test.d.ts
+?? extensions/multi-agent/embedded-runner.run.test.js
+?? extensions/multi-agent/fork-seed.d.ts
+?? extensions/multi-agent/fork-seed.js
+?? extensions/multi-agent/fork-seed.test.d.ts
+?? extensions/multi-agent/fork-seed.test.js
+?? extensions/multi-agent/inbox.d.ts
+?? extensions/multi-agent/inbox.js
+?? extensions/multi-agent/inbox.test.d.ts
+?? extensions/multi-agent/inbox.test.js
+?? extensions/multi-agent/index.d.ts
+?? extensions/multi-agent/index.js
+?? extensions/multi-agent/index.test.d.ts
+?? extensions/multi-agent/index.test.js
+?? extensions/multi-agent/list-agents.d.ts
+?? extensions/multi-agent/list-agents.js
+?? extensions/multi-agent/list-agents.test.d.ts
+?? extensions/multi-agent/list-agents.test.js
+?? extensions/multi-agent/list-models-tool.d.ts
+?? extensions/multi-agent/list-models-tool.js
+?? extensions/multi-agent/list-models-tool.test.d.ts
+?? extensions/multi-agent/list-models-tool.test.js
+?? extensions/multi-agent/manager.d.ts
+?? extensions/multi-agent/manager.js
+?? extensions/multi-agent/manager.test.d.ts
+?? extensions/multi-agent/manager.test.js
+?? extensions/multi-agent/model-selection.d.ts
+?? extensions/multi-agent/model-selection.js
+?? extensions/multi-agent/model-selection.test.d.ts
+?? extensions/multi-agent/model-selection.test.js
+?? extensions/multi-agent/parent-host.d.ts
+?? extensions/multi-agent/parent-host.js
+?? extensions/multi-agent/parent-host.test.d.ts
+?? extensions/multi-agent/parent-host.test.js
+?? extensions/multi-agent/reap-continuable.test.d.ts
+?? extensions/multi-agent/reap-continuable.test.js
+?? extensions/multi-agent/registry.d.ts
+?? extensions/multi-agent/registry.js
+?? extensions/multi-agent/registry.test.d.ts
+?? extensions/multi-agent/registry.test.js
+?? extensions/multi-agent/restart-reap.test.d.ts
+?? extensions/multi-agent/restart-reap.test.js
+?? extensions/multi-agent/routing.d.ts
+?? extensions/multi-agent/routing.js
+?? extensions/multi-agent/routing.test.d.ts
+?? extensions/multi-agent/routing.test.js
+?? extensions/multi-agent/runner.d.ts
+?? extensions/multi-agent/runner.js
+?? extensions/multi-agent/runner.test.d.ts
+?? extensions/multi-agent/runner.test.js
+?? extensions/multi-agent/settlement-notice.d.ts
+?? extensions/multi-agent/settlement-notice.js
+?? extensions/multi-agent/settlement-notice.test.d.ts
+?? extensions/multi-agent/settlement-notice.test.js
+?? extensions/multi-agent/structured-output.d.ts
+?? extensions/multi-agent/structured-output.js
+?? extensions/multi-agent/subagent-enforcement.integration.test.d.ts
+?? extensions/multi-agent/subagent-enforcement.integration.test.js
+?? extensions/multi-agent/subagent-meta.d.ts
+?? extensions/multi-agent/subagent-meta.js
+?? extensions/multi-agent/subagentProcessRegistry.d.ts
+?? extensions/multi-agent/subagentProcessRegistry.js
+?? extensions/multi-agent/subagentProcessRegistry.test.d.ts
+?? extensions/multi-agent/subagentProcessRegistry.test.js
+?? extensions/multi-agent/tasks.d.ts
+?? extensions/multi-agent/tasks.js
+?? extensions/multi-agent/tasks.test.d.ts
+?? extensions/multi-agent/tasks.test.js
+?? extensions/multi-agent/teardown.d.ts
+?? extensions/multi-agent/teardown.js
+?? extensions/multi-agent/transcript-tail.d.ts
+?? extensions/multi-agent/transcript-tail.js
+?? extensions/multi-agent/transcript-tail.test.d.ts
+?? extensions/multi-agent/transcript-tail.test.js
+?? extensions/multi-agent/ultra-routing-spawn.test.d.ts
+?? extensions/multi-agent/ultra-routing-spawn.test.js
+?? extensions/multi-agent/ultra-sdk.integration.test.d.ts
+?? extensions/multi-agent/ultra-sdk.integration.test.js
+?? extensions/multi-agent/wait-agent.d.ts
+?? extensions/multi-agent/wait-agent.js
+?? extensions/multi-agent/wait-agent.test.d.ts
+?? extensions/multi-agent/wait-agent.test.js
+?? extensions/multi-agent/worker-host.d.ts
+?? extensions/multi-agent/worker-host.js
+?? extensions/multi-agent/worker-protocol.d.ts
+?? extensions/multi-agent/worker-protocol.js
+?? extensions/multi-agent/worker-session.d.ts
+?? extensions/multi-agent/worker-session.js
+?? extensions/multi-agent/worker-session.test.d.ts
+?? extensions/multi-agent/worker-session.test.js
+?? extensions/multi-agent/workflows.d.ts
+?? extensions/multi-agent/workflows.js
+?? extensions/present/index.d.ts
+?? extensions/present/index.js
+?? extensions/present/present.d.ts
+?? extensions/present/present.js
+?? extensions/present/present.test.d.ts
+?? extensions/present/present.test.js
+?? extensions/prompt-commands/expand.d.ts
+?? extensions/prompt-commands/expand.js
+?? extensions/prompt-commands/expand.test.d.ts
+?? extensions/prompt-commands/expand.test.js
+?? extensions/prompt-commands/index.d.ts
+?? extensions/prompt-commands/index.js
+?? extensions/prompt-commands/index.test.d.ts
+?? extensions/prompt-commands/index.test.js
+?? extensions/prompt-commands/syntax.d.ts
+?? extensions/prompt-commands/syntax.js
+?? extensions/prompt-commands/syntax.test.d.ts
+?? extensions/prompt-commands/syntax.test.js
+?? extensions/prompt-commands/templates.d.ts
+?? extensions/prompt-commands/templates.js
+?? extensions/prompt-metadata.test.d.ts
+?? extensions/prompt-metadata.test.js
+?? extensions/resource-manager/index.d.ts
+?? extensions/resource-manager/index.js
+?? extensions/resource-manager/mcp-store.d.ts
+?? extensions/resource-manager/mcp-store.js
+?? extensions/resource-manager/mcp-store.test.d.ts
+?? extensions/resource-manager/mcp-store.test.js
+?? extensions/resource-manager/resource-store.test.d.ts
+?? extensions/resource-manager/resource-store.test.js
+?? extensions/resource-manager/schema.test.d.ts
+?? extensions/resource-manager/schema.test.js
+?? extensions/resource-manager/skill-store.d.ts
+?? extensions/resource-manager/skill-store.js
+?? extensions/resource-manager/validation.d.ts
+?? extensions/resource-manager/validation.js
+?? extensions/resource-manager/validation.test.d.ts
+?? extensions/resource-manager/validation.test.js
+?? extensions/rulebook/index.d.ts
+?? extensions/rulebook/index.js
+?? extensions/rulebook/match.d.ts
+?? extensions/rulebook/match.js
+?? extensions/rulebook/rulebook.test.d.ts
+?? extensions/rulebook/rulebook.test.js
+?? extensions/rulebook/rules.d.ts
+?? extensions/rulebook/rules.js
+?? extensions/safety/index.d.ts
+?? extensions/safety/index.js
+?? extensions/safety/index.test.d.ts
+?? extensions/safety/index.test.js
+?? extensions/safety/rules.d.ts
+?? extensions/safety/rules.js
+?? extensions/safety/rules.test.d.ts
+?? extensions/safety/rules.test.js
+?? extensions/safety/toolAuthorization.test.d.ts
+?? extensions/safety/toolAuthorization.test.js
+?? extensions/sandbox/bashJob.d.ts
+?? extensions/sandbox/bashJob.js
+?? extensions/sandbox/bashOutput.d.ts
+?? extensions/sandbox/bashOutput.js
+?? extensions/sandbox/bashOutput.test.d.ts
+?? extensions/sandbox/bashOutput.test.js
+?? extensions/sandbox/bashTool.d.ts
+?? extensions/sandbox/bashTool.js
+?? extensions/sandbox/bashTool.test.d.ts
+?? extensions/sandbox/bashTool.test.js
+?? extensions/sandbox/bashUiDescription.d.ts
+?? extensions/sandbox/bashUiDescription.js
+?? extensions/sandbox/bashUiDescription.live.test.d.ts
+?? extensions/sandbox/bashUiDescription.live.test.js
+?? extensions/sandbox/bashUiDescription.test.d.ts
+?? extensions/sandbox/bashUiDescription.test.js
+?? extensions/sandbox/escalation.d.ts
+?? extensions/sandbox/escalation.js
+?? extensions/sandbox/escalation.test.d.ts
+?? extensions/sandbox/escalation.test.js
+?? extensions/sandbox/index.d.ts
+?? extensions/sandbox/index.js
+?? extensions/sandbox/index.test.d.ts
+?? extensions/sandbox/index.test.js
+?? extensions/session-memory/compaction.d.ts
+?? extensions/session-memory/compaction.js
+?? extensions/session-memory/compaction.test.d.ts
+?? extensions/session-memory/compaction.test.js
+?? extensions/session-memory/index.d.ts
+?? extensions/session-memory/index.js
+?? extensions/session-memory/index.test.d.ts
+?? extensions/session-memory/index.test.js
+?? extensions/session-memory/injector.d.ts
+?? extensions/session-memory/injector.js
+?? extensions/session-memory/injector.test.d.ts
+?? extensions/session-memory/injector.test.js
+?? extensions/session-memory/llm.d.ts
+?? extensions/session-memory/llm.js
+?? extensions/session-memory/serialize.d.ts
+?? extensions/session-memory/serialize.js
+?? extensions/session-memory/serialize.test.d.ts
+?? extensions/session-memory/serialize.test.js
+?? extensions/session-memory/store.d.ts
+?? extensions/session-memory/store.js
+?? extensions/session-memory/store.test.d.ts
+?? extensions/session-memory/store.test.js
+?? extensions/session-memory/transcript.d.ts
+?? extensions/session-memory/transcript.js
+?? extensions/session-memory/transcript.test.d.ts
+?? extensions/session-memory/transcript.test.js
+?? extensions/session-memory/writer.d.ts
+?? extensions/session-memory/writer.js
+?? extensions/session-memory/writer.test.d.ts
+?? extensions/session-memory/writer.test.js
+?? extensions/todo/index.d.ts
+?? extensions/todo/index.js
+?? extensions/todo/index.test.d.ts
+?? extensions/todo/index.test.js
+?? extensions/todo/todo.d.ts
+?? extensions/todo/todo.js
+?? extensions/todo/todo.test.d.ts
+?? extensions/todo/todo.test.js
+?? extensions/tts/index.d.ts
+?? extensions/tts/index.js
+?? extensions/tts/tts.d.ts
+?? extensions/tts/tts.js
+?? extensions/tts/tts.test.d.ts
+?? extensions/tts/tts.test.js
+?? extensions/usage-ledger/index.d.ts
+?? extensions/usage-ledger/index.js
+?? extensions/usage-ledger/ledger.d.ts
+?? extensions/usage-ledger/ledger.js
+?? extensions/usage-ledger/ledger.test.d.ts
+?? extensions/usage-ledger/ledger.test.js
+?? extensions/usage-ledger/usage-ledger-live.real.test.d.ts
+?? extensions/usage-ledger/usage-ledger-live.real.test.js
+?? extensions/visual-companion/autoMode.d.ts
+?? extensions/visual-companion/autoMode.js
+?? extensions/visual-companion/autoMode.test.d.ts
+?? extensions/visual-companion/autoMode.test.js
+?? extensions/visual-companion/index.d.ts
+?? extensions/visual-companion/index.js
+?? extensions/visual-companion/resolveVisualFile.d.ts
+?? extensions/visual-companion/resolveVisualFile.js
+?? extensions/visual-companion/resolveVisualFile.test.d.ts
+?? extensions/visual-companion/resolveVisualFile.test.js
+?? extensions/web-crawler/crawler.d.ts
+?? extensions/web-crawler/crawler.js
+?? extensions/web-crawler/index.d.ts
+?? extensions/web-crawler/index.js
+?? extensions/web-crawler/urlRules.d.ts
+?? extensions/web-crawler/urlRules.js
+?? extensions/web-crawler/urlRules.test.d.ts
+?? extensions/web-crawler/urlRules.test.js
+?? extensions/web-fetch/fetcher.d.ts
+?? extensions/web-fetch/fetcher.js
+?? extensions/web-fetch/fetcher.test.d.ts
+?? extensions/web-fetch/fetcher.test.js
+?? extensions/web-fetch/html.d.ts
+?? extensions/web-fetch/html.js
+?? extensions/web-fetch/index.d.ts
+?? extensions/web-fetch/index.js
+?? extensions/web-fetch/index.test.d.ts
+?? extensions/web-fetch/index.test.js
+?? extensions/web-fetch/truncate.d.ts
+?? extensions/web-fetch/truncate.js
+?? extensions/web-fetch/truncate.test.d.ts
+?? extensions/web-fetch/truncate.test.js
+?? extensions/web-search/anysearch.d.ts
+?? extensions/web-search/anysearch.js
+?? extensions/web-search/anysearch.test.d.ts
+?? extensions/web-search/anysearch.test.js
+?? extensions/web-search/engines.test.d.ts
+?? extensions/web-search/engines.test.js
+?? extensions/web-search/engines/baidu.d.ts
+?? extensions/web-search/engines/baidu.js
+?? extensions/web-search/engines/index.d.ts
+?? extensions/web-search/engines/index.js
+?? extensions/web-search/index.d.ts
+?? extensions/web-search/index.js
+?? extensions/web-search/index.test.d.ts
+?? extensions/web-search/index.test.js
+?? extensions/web-search/provider.d.ts
+?? extensions/web-search/provider.js
+?? extensions/web-search/provider.test.d.ts
+?? extensions/web-search/provider.test.js
+?? extensions/working-directory/index.d.ts
+?? extensions/working-directory/index.js
+?? extensions/working-directory/index.test.d.ts
+?? extensions/working-directory/index.test.js
+?? extensions/working-directory/worktree.d.ts
+?? extensions/working-directory/worktree.js
+?? extensions/working-directory/worktree.test.d.ts
+?? extensions/working-directory/worktree.test.js

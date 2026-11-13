@@ -1,6 +1,9 @@
 // 自有 bash 的契约测试：对外格式钉在 pi 1.0.2（dist/core/tools/bash.js），执行模型按 DSH tool-bash。
 // 升级 pi 后这里红了，说明官方改了对外格式，要决定是否跟进。
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { validateToolArguments } from "@earendil-works/pi-ai";
+import { makeStrictJsonSchema } from "@earendil-works/pi-ai/api/constrained-sampling";
+import { Check } from "typebox/value";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +20,7 @@ import type { JobDoneInfo } from "../jobs/types.js";
 import { jobLabel, processOutcome, type ExecFn } from "./bashJob.js";
 import { BASH_PROMPT_SNIPPET, createGrenBashTool, type GrenBashDeps } from "./bashTool.js";
 import { ESCALATION_GUIDELINE, type SandboxGate } from "./escalation.js";
+import { withBashUiDescription } from "./bashUiDescription.js";
 
 const tempDir = mkdtempSync(join(tmpdir(), "pi-bash-tool-test-"));
 
@@ -107,6 +111,23 @@ describe("bash · schema and prompt (pi 1.0.2 contract)", () => {
     const sp = params.properties.sandbox_permissions as { anyOf?: Array<{ const?: string }> };
     expect(sp.anyOf?.map((s) => s.const)).toEqual(["workspace-write", "danger-full-access"]);
     expect(t.description).toContain("Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file.");
+  });
+
+  it("strict sampling rejects an escalation with the empty reason from the reported call", () => {
+    const t = withBashUiDescription(tool(scriptedExec()));
+    const strict = { ...t, parameters: makeStrictJsonSchema(t.parameters) as typeof t.parameters };
+    const call = {
+      type: "toolCall" as const, id: "strict-bash", name: "bash",
+      arguments: {
+        description: "Check local build cache paths", command: "printf 'ok\\n'",
+        timeout: 20, run_in_background: false,
+        sandbox_permissions: "workspace-write", justification: "",
+      },
+    };
+    // Wire constraints must be checked without coercion: SDK argument parsing can turn "" into null.
+    expect(Check(strict.parameters, call.arguments)).toBe(false);
+    expect(Check(strict.parameters, { ...call.arguments, justification: "需要写构建产物" })).toBe(true);
+    expect(Check(strict.parameters, { ...call.arguments, sandbox_permissions: null, justification: null })).toBe(true);
   });
 
   it("rejects an invalid timeout with pi's message", async () => {
@@ -802,6 +823,24 @@ describe("bash on a real shell", () => {
     expect(all.match(/first/g)).toHaveLength(1);
     expect(all.match(/second/g)).toHaveLength(1);
     expect(all.indexOf("first")).toBeLessThan(all.indexOf("second"));
+  }, 30_000);
+
+  it("ordinary strict calls with null placeholders execute like codemode calls that omit escalation", async () => {
+    const t = withBashUiDescription(real());
+    const base = { description: "Check ordinary bash execution", command: "printf 'ordinary-call\\n'" };
+    const strictArgs = { ...base, timeout: null, run_in_background: null, sandbox_permissions: null, justification: null };
+    const call = { type: "toolCall" as const, id: "ordinary-bash", name: "bash", arguments: strictArgs };
+    const wireTool = { ...t, parameters: makeStrictJsonSchema(t.parameters) as typeof t.parameters };
+    const wireArgs = validateToolArguments(wireTool, call);
+    const params = validateToolArguments(t, { ...call, arguments: wireArgs });
+    expect(params).toEqual(base);
+    expect(call.arguments).toEqual(strictArgs);
+    for (const args of [base, params]) {
+      const result = await run(t, args);
+      expect(result.isError).toBeUndefined();
+      expect(result.structuredContent).toMatchObject({ output: expect.stringMatching(/^ordinary-call\r?\n$/), exit_code: 0 });
+      expect(jobs.list("s1")).toEqual([]);
+    }
   }, 30_000);
 
   it("a fast command returns in the foreground with exit code and output", async () => {

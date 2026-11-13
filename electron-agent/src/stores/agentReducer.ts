@@ -35,6 +35,10 @@ export type ChatMessage =
     }
   | {
       kind: 'assistant';
+      model?:string;
+      responseModel?:string;
+      costSource?:'provider'|'catalog'|'unknown';
+      costTotal?:number;
       id: string;
       text: string;
       thinking: string;
@@ -79,6 +83,8 @@ export type ChatMessage =
   | { kind: 'compaction'; id: string };
 
 export interface AgentState {
+  contextEdits?: Set<string>;
+  sessionNeedsReload?: boolean;
   messages: ChatMessage[];
   /** 被用户「移出上下文」的消息 timestamp 集合（对模型不可见，不删盘，可恢复）。UI 据此灰显。 */
   excluded: Set<number>;
@@ -826,6 +832,16 @@ function parentToolLink(parentToolCallId: string | undefined): { parentToolCallI
   return typeof parentToolCallId === 'string' && parentToolCallId ? { parentToolCallId } : {};
 }
 
+function assistantUsageMetadata(message:AgentMessage,historical=false):Partial<Extract<ChatMessage,{kind:'assistant'}>> {
+  const cost=(message.usage as {cost?:{total?:unknown;totalFromProvider?:unknown}}|undefined)?.cost;
+  return {
+    ...(typeof message.model==='string'?{model:message.model}:{}),
+    ...(typeof message.responseModel==='string'?{responseModel:message.responseModel}:{}),
+    ...(typeof cost?.total==='number'?{costTotal:cost.total}:{}),
+    ...(cost?{costSource:cost.totalFromProvider===true?'provider':historical&&typeof cost.totalFromProvider!=='boolean'&&typeof message.responseModel!=='string'?'unknown':'catalog'}:{}),
+  };
+}
+
 export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case 'agent_start':
@@ -929,6 +945,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           ...cur,
           text: nextText,
           thinking: nextThinking,
+          ...assistantUsageMetadata(ev.message),
           timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
           ...thinkingTiming(cur, nextThinking, nextText),
         };
@@ -939,6 +956,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           text,
           thinking,
           streaming: true,
+          ...assistantUsageMetadata(ev.message),
           timestamp: messageTimestamp(ev.message),
           ...thinkingTiming({}, thinking, text),
         });
@@ -977,7 +995,8 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             text,
             thinking,
             streaming: false,
-            timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
+            ...assistantUsageMetadata(ev.message),
+          timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
             ...thinkingTiming(cur, thinking, text, true),
           };
         } else if (text || thinking) {
@@ -987,7 +1006,8 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             text,
             thinking,
             streaming: false,
-            timestamp: messageTimestamp(ev.message),
+            ...assistantUsageMetadata(ev.message),
+          timestamp: messageTimestamp(ev.message),
             ...thinkingTiming({}, thinking, text, true),
           });
         }
@@ -1006,7 +1026,8 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             text: finalText,
             thinking: finalThinking,
             streaming: false,
-            timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
+            ...assistantUsageMetadata(ev.message),
+          timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
             ...thinkingTiming(cur, finalThinking, finalText, true),
           };
         }
@@ -1348,6 +1369,7 @@ export function messagesFromAgent(
           text,
           thinking,
           streaming: false,
+          ...assistantUsageMetadata(msg,true),
           ...(typeof msg.stopReason === 'string' ? { stopReason: msg.stopReason } : {}),
           timestamp,
           thinkingDuration: thinking.trim() ? getDuration?.(timestamp) : undefined,
@@ -1440,6 +1462,7 @@ export function interruptPendingToolCards(messages: ChatMessage[], keep?: Readon
 export function excludedFromAgent(msgs: AgentMessage[]): Set<number> {
   const set = new Set<number>();
   for (const msg of msgs) {
+    if (msg.legacyExcluded === true && typeof msg.timestamp === 'number') set.add(msg.timestamp);
     const m = msg as { customType?: unknown; data?: unknown };
     if (m.customType !== 'context_exclusion') continue;
     const raw = (m.data && typeof m.data === 'object' ? m.data : msg) as { op?: unknown; ts?: unknown };

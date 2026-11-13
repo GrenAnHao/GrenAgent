@@ -1,4 +1,5 @@
-import { Type, type AssistantMessage, type Message, type Tool } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Message, Tool } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import type { ModelRuntimeHost, ShortCallInput } from '../agent/modelRuntimeHost.js';
 import type { AgentDataService } from './agentDataService.js';
 

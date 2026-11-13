@@ -1,37 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { JobStore } from './jobStore';
-import { AuditViewStore } from './auditViewStore';
 
 describe('JobStore', () => {
-  it.each(['fail', 'complete', 'cancel'] as const)('retains resource snapshots for %s and removal after the task is deleted', (finish) => {
-    const db = new DatabaseSync(':memory:'); const store = new JobStore(db); const audit = new AuditViewStore(db);
-    try {
-      const job = store.create({ kind: 'wiki.ingest', workspace: '', metadata: { target: { type: 'wiki', id: 'original-kb' }, resourceName: '原始库名' } });
-      if (finish === 'fail') store.fail(job.id, 'fixture failure'); else store[finish](job.id);
-      store.remove(job.id);
-      const events = audit.query({ resource: { type: 'wiki', id: 'original-kb' } }).items;
-      expect(events.map((event) => event.action)).toEqual(expect.arrayContaining(['job.create', `job.${finish}`, 'job.remove']));
-      expect(events.every((event) => event.resourceName === '原始库名')).toBe(true);
-      expect(store.get(job.id)).toBeUndefined();
-    } finally { db.close(); }
-  });
-
-  it('snapshots every cleared resource independently without assigning one name to multiple resources', () => {
-    const db = new DatabaseSync(':memory:'); const store = new JobStore(db); const audit = new AuditViewStore(db);
-    try {
-      const ids = ['first', 'second'].map((id) => {
-        const job = store.create({ kind: 'wiki.ingest', workspace: '', metadata: { target: { type: 'wiki', id }, resourceName: `${id} 原名` } });
-        store.complete(job.id); return job.id;
-      });
-      store.clear(ids);
-      for (const id of ['first', 'second']) {
-        const cleanup = audit.query({ resource: { type: 'wiki', id } }).items.find((event) => event.action === 'job.remove' || event.action === 'job.clear');
-        expect(cleanup).toMatchObject({ resource: { type: 'wiki', id }, resourceName: `${id} 原名` });
-      }
-    } finally { db.close(); }
-  });
-
   it('keeps cancellation requested distinct from confirmed cancellation and records only changed active stages', () => {
     const db = new DatabaseSync(':memory:'); const store = new JobStore(db);
     try {

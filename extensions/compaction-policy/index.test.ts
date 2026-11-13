@@ -298,3 +298,18 @@ describe("compaction-policy context 钩子按压力裁剪", () => {
     expect(textAt(res, msgs.length - 1)).toMatch(/truncated tool output: bash, 100000 chars/);
   });
 });
+
+describe('managed snapshot pulse boundary',()=>{
+ it('acknowledges the host snapshot pulse while preserving later pulses and full-log exclusion',async()=>{
+  const handlers:Record<string,(event:any,ctx:any)=>any>={};const appended:any[]=[];
+  factory({on:(name:string,fn:any)=>{handlers[name]=fn;},appendEntry:(_name:string,data:any)=>appended.push(data),registerCommand:()=>{}} as never);
+  let pulse={op:'remove',ts:1,rev:10};vi.mocked(getConfig).mockImplementation(key=>key===contextExclusionConfigKey('D:/fixture')?JSON.stringify(pulse):key==='CONTEXT_PRUNE_ENABLED'?'0':undefined);
+  const entries=[{type:'custom',customType:'context_exclusion',data:{op:'add',ts:1}},{type:'custom',customType:'context_exclusion_snapshot',data:{version:1,pulseRev:999999}},{type:'custom',customType:'context_exclusion_snapshot',data:{version:1,pulseRev:10}}];
+  const ctx={cwd:'D:/fixture',sessionManager:{getCwd:()=> 'D:/fixture',getEntries:()=>entries},getContextUsage:()=>undefined};
+  await handlers.session_start({},ctx);
+  const result=await handlers.context({messages:[{role:'user',content:'M',timestamp:1},{role:'user',content:'B',timestamp:2}]},ctx);
+  expect(result.messages.map((m:any)=>m.content)).toEqual(['B']);expect(appended).toEqual([]);
+  pulse={op:'remove',ts:1,rev:11};const next=await handlers.context({messages:[{role:'user',content:'M',timestamp:1}]},ctx);
+  expect(next).toBeUndefined();expect(appended).toEqual([{op:'remove',ts:1}]);
+ });
+});

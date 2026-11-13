@@ -1,6 +1,6 @@
 # 第三方依赖清单
 
-本文件由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 pnpm 安装的生产依赖图（`electron-agent/pnpm-lock.yaml`）及 `vendor/repo-wiki` 生成，不要手改。
+本文件由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 pnpm 安装的生产依赖图（`electron-agent/pnpm-lock.yaml`）生成，不要手改。
 只列随安装包分发的生产依赖；开发依赖（vitest、electron-builder、sharp、lightningcss 等）不进包，不在此列。
 每个包的许可原文随安装包放在 `resources/licenses/<包名>/`，多版本包放在 `<包名>/<版本>/`，索引在 `resources/licenses/INDEX.md`。
 
@@ -115,13 +115,13 @@
 - @dnd-kit/modifiers@9.0.0
 - @dnd-kit/sortable@10.0.0
 - @dnd-kit/utilities@3.2.2
-- @earendil-works/pi-agent-core@1.3.0
-- @earendil-works/pi-ai@1.3.0
-- @earendil-works/pi-codemode@1.3.0
-- @earendil-works/pi-coding-agent@1.3.0
-- @earendil-works/pi-mcp@1.3.0
-- @earendil-works/pi-telemetry@1.3.0
-- @earendil-works/pi-tui@1.3.0
+- @earendil-works/pi-agent-core@1.4.0
+- @earendil-works/pi-ai@1.4.0
+- @earendil-works/pi-codemode@1.4.0
+- @earendil-works/pi-coding-agent@1.4.0
+- @earendil-works/pi-mcp@1.4.0
+- @earendil-works/pi-telemetry@1.4.0
+- @earendil-works/pi-tui@1.4.0
 - @emoji-mart/data@1.2.1
 - @emoji-mart/react@1.1.1
 - @emotion/babel-plugin@11.13.5
@@ -541,6 +541,7 @@
 - markdown-table@3.0.4
 - marked@16.4.2
 - marked@18.0.11
+- marked-cjk-friendly@0.1.2
 - math-intrinsics@1.1.0
 - mdast-util-find-and-replace@3.0.2
 - mdast-util-from-markdown@2.0.3
@@ -711,7 +712,6 @@
 - remark-rehype@11.1.2
 - remark-stringify@11.0.0
 - remark-supersub@1.0.0
-- repo-wiki@2.0.0
 - require-from-string@2.0.2
 - reselect@5.3.0
 - resize-observer-polyfill@1.5.1

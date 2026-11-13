@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// codegraph-host 自动同步冒烟：扮演 agentdata-host，经真实的 codegraph-host.js 子进程（多线程、真实 SDK）验证：
+// codegraph-host 自动同步冒烟：扮演持有 codegraph 端口的主进程，经真实的 codegraph-host.js 子进程（多线程、真实 SDK）验证：
 //   ① 已建索引的工作区被查询后挂上文件监听；新增文件里的符号在几秒内可查，期间没有用户可见的任务（不调 runSync）；
 //   ② 删除文件后符号消失；
 //   ③ 一次改动几百个文件时，同工作区的查询在增量同步期间照常应答（不报 busy），结果带 servingStale 标记；

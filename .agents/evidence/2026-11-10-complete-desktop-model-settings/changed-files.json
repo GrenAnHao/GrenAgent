@@ -1,0 +1,208 @@
+[
+  {
+    "path": "cli/src/model-input-limits.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "cli/src/model-compaction-control.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "cli/src/gren-runtime.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "cli/src/probe-models.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "cli/src/probe-models.test.ts",
+    "existingJsSiblings": [
+      "cli/src/probe-models.test.js"
+    ]
+  },
+  {
+    "path": "electron-agent/electron/app/settingsService.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/settingsService.test.ts",
+    "existingJsSiblings": [
+      "electron-agent/electron/app/settingsService.test.js"
+    ]
+  },
+  {
+    "path": "electron-agent/electron/app/providerService.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/providerService.test.ts",
+    "existingJsSiblings": [
+      "electron-agent/electron/app/providerService.test.js"
+    ]
+  },
+  {
+    "path": "electron-agent/electron/app/modelCompactionSettings.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/modelCompactionSettings.test.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/modelCompactionControl.test.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/modelCompactionPreparation.integration.test.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/modelAdvanced.integration.test.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/modelInputLimits.integration.test.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/piRuntimeService.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/agent/modelRuntimeHost.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/agentProcess/contract.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/agentProcess/mainBindings.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/agentProcess/mainBindings.test.ts",
+    "existingJsSiblings": [
+      "electron-agent/electron/agentProcess/mainBindings.test.js"
+    ]
+  },
+  {
+    "path": "electron-agent/electron/agentProcess/runtimeGraph.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/main.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/ipc/register.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/ipc/contracts.ts",
+    "existingJsSiblings": [
+      "electron-agent/electron/ipc/contracts.js"
+    ]
+  },
+  {
+    "path": "electron-agent/src/lib/pi.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/ModelAdvancedOptionsEditor.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/ModelCompactionBudgetsSettings.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/ModelCompactionBudgetsSettings.test.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/providerConfigAdapter.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/providerConfigAdapter.test.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/ProviderModelCard.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/ProvidersSettings.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/ProvidersSettings.test.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/src/features/settings/SettingsPanel.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "extensions/_shared/model-compaction-budgets.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "extensions/_shared/provider-model-options.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "extensions/_shared/model-input-limit-policy.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "extensions/_shared/oneshot.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "extensions/multi-agent/embedded-runner.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "extensions/multi-agent/activation.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/scripts/smoke-model-settings.mjs",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/ui-harness/scenarios/model-advanced-settings.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/ui-harness/scenarios/model-compaction-budgets.tsx",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/ui-harness/probes/model-advanced-settings.mjs",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/ui-harness/probes/model-compaction-budgets.mjs",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "electron-agent/electron/app/providerInlineAuthentication.integration.test.ts",
+    "existingJsSiblings": []
+  },
+  {
+    "path": "extensions/multi-agent/embedded-runner.run.test.ts",
+    "existingJsSiblings": [
+      "extensions/multi-agent/embedded-runner.run.test.js"
+    ]
+  },
+  {
+    "path": "extensions/multi-agent/activation.test.ts",
+    "existingJsSiblings": [
+      "extensions/multi-agent/activation.test.js"
+    ]
+  }
+]

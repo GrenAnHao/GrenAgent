@@ -12,6 +12,11 @@ export function pathsEquivalent(a: string, b: string): boolean {
   return normalizePath(a) === normalizePath(b);
 }
 
+/** 归一化后的路径键，给按会话记录状态的 Map / Set 用（与 pathsEquivalent 同一套规则）。 */
+export function pathKey(p: string): string {
+  return normalizePath(p);
+}
+
 /** Whether `cwd` is the same as, or located under, `root` (Windows-friendly). */
 export function isUnder(cwd: string, root: string): boolean {
   if (!cwd || !root) return false;

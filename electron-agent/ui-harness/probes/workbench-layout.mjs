@@ -134,6 +134,10 @@ async function surfaceHierarchy(t, label, dark) {
 export default async function (t) {
   const data = await t.data();
   t.ok('真实输入卡就绪', await t.waitFor(SURFACE));
+  const inspectionPanels = await t.js(`({ request: !!document.querySelector('[data-testid="current-request-details"]'), tree: [...document.querySelectorAll(${q(MAIN)} + ' button')].some(button => button.textContent.includes('会话树与本地文件')) })`);
+  t.ok('聊天区不显示请求与缓存预热入口', !inspectionPanels.request);
+  t.ok('聊天区不显示会话树入口', !inspectionPanels.tree);
+  if (inspectionPanels.request || inspectionPanels.tree) return;
   t.ok('真实空态标题就绪', await t.waitFor(`${PROMPT} h1`));
   t.ok('真实标题栏与模块栏就绪', await t.waitFor('[data-testid="sidebar-toggle"]') && await t.waitFor('[data-testid="module-rail"]'));
   await t.sleep(450);

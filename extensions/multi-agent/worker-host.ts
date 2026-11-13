@@ -1,3 +1,6 @@
+import {syncLocalModelCompactionBudgets} from "../../cli/src/model-compaction-control.js";
+import {requestObservations} from '../_shared/requestObservation.js';
+import {RequestObservationService,warmingSnapshot} from '../_shared/requestObservationService.js';
 // 子代理 worker 进程这一侧（`pi-worker --mode subagent`）：一个进程托管一个子会话，经 IPC RPC 听宿主指挥。
 // 会话就是进程内后端的同一份代码建的（openEmbeddedChildSession / openResumedChildSession），这里只把
 // 会话操作（prompt / abort / waitForIdle / dispose …）暴露成 RPC 方法，把会话事件和状态推回宿主。
@@ -137,7 +140,11 @@ export async function runSubagentWorker(): Promise<void> {
     };
   };
 
+  const observations=new RequestObservationService({warming:()=>warmingSnapshot(hosted?.session)});
+  const stopObservations=requestObservations.subscribe(event=>peer.emit("request-observation",event));
   peer.handleAll({
+    observations:params=>observations.command(params),
+    "modelCompaction.sync":()=>syncLocalModelCompactionBudgets(),
     open: async (params) => {
       const { opts, prepared } = params as unknown as WorkerOpenRequest;
       ctx = {
@@ -228,6 +235,7 @@ export async function runSubagentWorker(): Promise<void> {
     },
     dispose: () => {
       stopForwarding?.();
+      stopObservations();observations.clear();
       const h = hosted;
       hosted = undefined;
       try {

@@ -59,11 +59,11 @@ describe('ModuleRail', () => {
     expect(useModuleStore.getState().activeModule).toBe('usage');
   });
 
-  it('groups Repo Wiki under Agent Data instead of a separate navigation entry', () => {
+  it('gives the code index its own entry now that Agent Data is retired', () => {
     render(<ModuleRail />);
-    expect(screen.queryByRole('button', { name: 'Repo Wiki' })).toBeNull();
-    fireEvent.click(screen.getByTestId('module-agentData'));
-    expect(useModuleStore.getState().activeModule).toBe('agentData');
+    expect(screen.queryByTestId('module-agentData')).toBeNull();
+    fireEvent.click(screen.getByTestId('module-codeIndex'));
+    expect(useModuleStore.getState().activeModule).toBe('codeIndex');
   });
 
   it('marks the active module with aria-pressed', () => {

@@ -1,0 +1,22 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "references": [],
+  "compilerOptions": {
+    "types": ["vite/client"],
+    "typeRoots": ["../../../electron-agent/node_modules/@types", "../../../electron-agent/node_modules"]
+  },
+  "include": [
+    "../../../electron-agent/src/vite-env.d.ts",
+    "../../../electron-agent/src/stores/modelVisibilityStore.ts",
+    "../../../electron-agent/src/features/settings/BuiltinModelEditor.tsx",
+    "../../../electron-agent/src/features/settings/providerModelData.ts",
+    "../../../electron-agent/src/features/settings/ModelSelectField.tsx",
+    "../../../electron-agent/src/features/settings/ModelListField.tsx",
+    "../../../electron-agent/src/features/settings/CapabilityModelField.tsx",
+    "../../../electron-agent/src/features/settings/ProviderDiagnostics.tsx",
+    "../../../electron-agent/src/features/chat/input/actions/ModelThinkingAction.tsx",
+    "../../../electron-agent/src/features/chat/input/actions/ModelAction.tsx",
+    "../../../electron-agent/ui-harness/scenarios/builtin-model-settings.tsx",
+    "../../../electron-agent/ui-harness/scenarios/model-visibility.tsx"
+  ]
+}

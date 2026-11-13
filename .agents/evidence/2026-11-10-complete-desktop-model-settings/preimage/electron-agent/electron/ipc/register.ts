@@ -1,0 +1,831 @@
+import { BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
+import type { FilePickerOptions } from './filePicker';
+import type { SettingsService } from '../app/settingsService';
+import type { McpPolicyService } from '../app/mcpPolicyService';
+import type { McpConfigService } from '../app/mcpConfigService';
+import { isListingSkippedName, type FileService } from '../app/fileService';
+import { FileWatchService } from '../app/fileWatchService';
+import type { SkillService } from '../app/skillService';
+import type { PromptLibraryService } from '../app/promptLibraryService';
+import type { UsageReport } from '../../src/lib/usageReport';
+import type { DiagnoseChunk, ProviderLoginUiEvent, ProviderService } from '../app/providerService';
+import type { WorkspaceService } from '../app/workspaceService';
+import type { UiHistoryService } from '../app/uiHistoryService';
+import type { WorkspaceApprovalService } from '../app/workspaceApprovalService';
+import type { GitService } from '../app/gitService';
+import type { IsolatedWorkspaceService } from '../app/isolatedWorkspaceService';
+import type { TerminalService } from '../app/terminalService';
+import type { CreateService } from '../app/createService';
+import type { TempHtmlService } from '../app/tempHtmlService';
+import type { ShellService } from '../app/shellService';
+import type { AgentDataService } from '../app/agentDataService';
+import type { PermissionManager } from '../app/permissionManager';
+import type { PluginManager } from '../app/plugin/pluginManager';
+import type { DevService } from '../app/devService';
+import type { PiPackageService } from '../app/piPackageService';
+import { isHexColor, type WindowBackgroundStore } from '../app/windowBackground';
+import type { AttentionService } from '../app/attentionService';
+import { isAttentionKind, type AttentionNotifyInput } from '../app/attentionContract';
+import { recordIpc } from '../runtimeDiag';
+
+type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
+
+/**
+ * 运行时命令的三组接口。实现在 agent-host 子进程里，主进程注入的是经 RPC 转发的薄封装；
+ * 单测可以直接塞进程内的 PiRuntimeService / SubagentService / JobsBridge。
+ */
+export interface PiCommandsPort {
+  openWorkspace(workspace: string): unknown;
+  listRunningTurns(): unknown;
+  warmWorkspace(workspace: string): unknown;
+  closeWorkspace(workspace: string): unknown;
+  respondUi(workspace: string, response: Record<string, unknown>): unknown;
+  send(workspace: string, command: string, args: Record<string, unknown>): unknown;
+}
+
+export interface SubagentPort {
+  list(workspace: string, sessionPath?: string): unknown;
+  transcript(workspace: string, agentId: string): unknown;
+  sessionMessages(sessionPath: string): unknown[] | Promise<unknown[]>;
+  cancel(workspace: string, agentId: string): unknown;
+  catalog(parentSessionPath: string): unknown;
+  catalogRowSample(sessionPath: string): unknown;
+  promptChild(workspace: string, parentSessionPath: string, sessionPath: string, message: string, delivery: 'followUp' | 'steer'): unknown;
+  interruptChild(workspace: string, parentSessionPath: string, sessionPath: string): unknown;
+}
+
+/** 后台 job 的界面通道：快照与用户停止（实时帧走 pi://jobs 广播）。 */
+export interface JobsPort {
+  snapshot(jobId: string, startedAt: number): unknown;
+  kill(jobId: string, startedAt: number): unknown;
+}
+
+export interface IpcServices {
+  cacheWarming?: { get(): string; set(mode: unknown): Promise<void> };
+  settings?: SettingsService;
+  mcpPolicy?: McpPolicyService;
+  mcpConfig?: McpConfigService;
+  subagent?: SubagentPort;
+  files?: FileService;
+  skills?: SkillService;
+  promptLibrary?: PromptLibraryService;
+  /** 用量账本（在 agent-host 里查）。 */
+  usage?: {
+    report(): Promise<UsageReport>;
+    reconcile(): Promise<{ files: number; added: number }>;
+  };
+  pi?: PiCommandsPort;
+  provider?: ProviderService;
+  enhancePrompt?: {
+    run(input: { workspace: string; text: string; goalText?: string; recentTurn?: string }, emit: (chunk: string) => void, onStatus?: (text: string) => void): Promise<unknown>;
+    abort(workspace: string): void;
+  };
+  workspace?: WorkspaceService;
+  /** Await child permission revocation after removing a trusted project record. */
+  workspaceProjectsChanged?: () => Promise<void>;
+  /** 会话菜单「重新生成标题」：按会话文件的第一条用户消息起名，只返回标题，写回走 set_session_display_name。 */
+  sessionTitle?: { generate(sessionPath: string): Promise<string> };
+  uiHistory?: UiHistoryService;
+  workspaceApproval?: WorkspaceApprovalService;
+  git?: GitService;
+  isolatedWorkspace?: Pick<IsolatedWorkspaceService, 'create' | 'list' | 'syncBack' | 'state' | 'remove' | 'probe'>;
+  terminal?: TerminalService;
+  create?: CreateService;
+  tempHtml?: TempHtmlService;
+  shell?: ShellService;
+  agentData?: AgentDataService;
+  permissions?: PermissionManager;
+  plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
+  piPackages?: PiPackageService;
+  jobs?: JobsPort;
+  /** 会话注意状态的系统通知、任务栏闪烁与角标。 */
+  attention?: Pick<AttentionService, 'notify' | 'badge' | 'isFocused' | 'clear'>;
+  /** 记住原生窗口底色，供下次启动建窗口时使用。 */
+  windowBackground?: Pick<WindowBackgroundStore, 'save'>;
+  /** 仅开发期注入（见 main.ts）：未注入则 dev_* 诊断命令不注册。 */
+  dev?: DevService;
+}
+
+const commandHandlers = new Map<string, CommandHandler>();
+
+export function registerCommand(command: string, handler: CommandHandler): () => void {
+  commandHandlers.set(command, handler);
+  return () => {
+    if (commandHandlers.get(command) === handler) commandHandlers.delete(command);
+  };
+}
+
+export function getRegisteredCommands(): string[] {
+  return [...commandHandlers.keys()].sort();
+}
+
+export function registerIpcHandlers(services: IpcServices = {}): void {
+  ipcMain.handle(IPC_CHANNELS.invoke, async (event, request: InvokeRequest) => {
+    if (!isInvokeRequest(request)) throw new Error('Invalid Electron invoke request');
+    const handler = commandHandlers.get(request.command);
+    if (!handler) throw new Error(`Electron command is not registered: ${request.command}`);
+    const started = performance.now();
+    try {
+      return await handler(event, request.args ?? {});
+    } finally {
+      recordIpc(request.command, performance.now() - started);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.pickDirectory, async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  ipcMain.handle(IPC_CHANNELS.pickFile, async (_event, options?: FilePickerOptions) => {
+    const result = await dialog.showOpenDialog({ properties: ['openFile'], filters: options?.filters });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  ipcMain.handle(IPC_CHANNELS.openUrl, (_event, url: string) => shell.openExternal(url));
+  ipcMain.handle(IPC_CHANNELS.openPath, async (_event, path: string) => {
+    const error = await shell.openPath(path);
+    if (error) throw new Error(error);
+  });
+  ipcMain.handle(IPC_CHANNELS.revealItem, (_event, path: string) => shell.showItemInFolder(path));
+
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  ipcMain.handle(IPC_CHANNELS.windowToggleMaximize, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window?.isMaximized()) window.unmaximize();
+    else window?.maximize();
+  });
+  ipcMain.handle(IPC_CHANNELS.windowIsMaximized, (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false);
+  ipcMain.handle(IPC_CHANNELS.windowClose, (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  ipcMain.handle(IPC_CHANNELS.windowSetBackground, async (event, color: unknown) => {
+    if (!isHexColor(color)) throw new Error('backgroundColor must be a hex color');
+    BrowserWindow.fromWebContents(event.sender)?.setBackgroundColor(color);
+    await services.windowBackground?.save(color);
+  });
+
+  if (services.settings) registerSettingsCommands(services.settings);
+  if (services.cacheWarming) {
+    registerCommand('get_cache_warming', () => services.cacheWarming!.get());
+    registerCommand('set_cache_warming', (_event, args) => services.cacheWarming!.set(args.mode));
+  }
+  if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
+  if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
+  if (services.permissions) registerPermissionCommands(services.permissions);
+  if (services.plugins) registerPluginCommands(services.plugins);
+  if (services.piPackages) registerPiPackageCommands(services.piPackages);
+  if (services.subagent) registerSubagentCommands(services.subagent);
+  if (services.jobs) registerJobCommands(services.jobs);
+  if (services.attention) registerAttentionCommands(services.attention);
+  if (services.files) registerFileCommands(services.files);
+  if (services.skills) registerSkillCommands(services.skills);
+  if (services.promptLibrary) registerPromptLibraryCommands(services.promptLibrary);
+  if (services.usage) {
+    const usage = services.usage;
+    registerCommand('usage_report', () => usage.report());
+    registerCommand('usage_reconcile', () => usage.reconcile());
+  }
+  if (services.pi) registerPiCommands(services.pi);
+  if (services.provider) registerProviderCommands(services.provider);
+  if (services.enhancePrompt) {
+    registerCommand('enhance_prompt', (event, args) => {
+      const channel = args.onChunk;
+      const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
+        ? (chunk: string) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, chunk)
+        : () => {};
+      const statusChannel = args.onStatus;
+      const onStatus = statusChannel && typeof statusChannel === 'object' && typeof (statusChannel as Record<string, unknown>).__grenChannelId === 'string'
+        ? (text: string) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(statusChannel as Record<string, string>).__grenChannelId}`, text)
+        : () => {};
+      const goalText = typeof args.goalText === 'string' ? args.goalText : '';
+      const recentTurn = typeof args.recentTurn === 'string' ? args.recentTurn : '';
+      return services.enhancePrompt!.run(
+        { workspace: readString(args, 'workspace'), text: readText(args, 'text'), goalText, recentTurn },
+        emit,
+        onStatus,
+      );
+    });
+    registerCommand('enhance_prompt_abort', (_event, args) => {
+      services.enhancePrompt!.abort(readString(args, 'workspace'));
+    });
+  }
+  if (services.workspace) registerWorkspaceCommands(services.workspace, services.workspaceProjectsChanged);
+  if (services.sessionTitle) {
+    const sessionTitle = services.sessionTitle;
+    registerCommand('generate_session_title', (_event, args) => sessionTitle.generate(readString(args, 'sessionPath')));
+  }
+  if (services.uiHistory) registerUiHistoryCommands(services.uiHistory);
+  if (services.workspaceApproval) registerWorkspaceApprovalCommands(services.workspaceApproval);
+  if (services.git) registerGitCommands(services.git);
+  if (services.isolatedWorkspace) registerIsolatedWorkspaceCommands(services.isolatedWorkspace, services.pi, services.workspace);
+  if (services.terminal) registerTerminalCommands(services.terminal);
+  if (services.create) registerCreateCommands(services.create);
+  if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
+  if (services.shell) registerShellCommands(services.shell);
+  if (services.dev) registerDevCommands(services.dev);
+  if (services.agentData) {
+    registerCommand('thread_create', (_event, args) => services.agentData!.createThread({
+      id: readString(args, 'id'), projectId: readString(args, 'projectId'), workspace: readString(args, 'workspace'),
+      ...(args.title === undefined ? {} : { title: readText(args, 'title') }),
+    }));
+    registerCommand('thread_list', () => services.agentData!.listThreads());
+    registerCommand('thread_read', (_event, args) => services.agentData!.readThread(readString(args, 'id')));
+    registerCommand('turn_create', (_event, args) => services.agentData!.createTurn({
+      id: readString(args, 'id'), threadId: readString(args, 'threadId'), input: readText(args, 'input'),
+      permissionProfile: readString(args, 'permissionProfile'), ...(args.mode === undefined ? {} : { mode: args.mode as 'interactive' | 'non-interactive' }),
+    }));
+    registerCommand('turn_update', (_event, args) => services.agentData!.updateTurn(readString(args, 'id'), {
+      ...(args.status === undefined ? {} : { status: args.status as never }),
+      ...(args.startedAt === undefined ? {} : { startedAt: args.startedAt as number }),
+      ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt as number }),
+      ...(args.error === undefined ? {} : { error: readText(args, 'error') }),
+    }));
+    registerCommand('item_upsert', (_event, args) => services.agentData!.upsertItem(args as never));
+    registerCommand('item_list', (_event, args) => services.agentData!.listItems(readString(args, 'threadId'), args.turnId === undefined ? undefined : readString(args, 'turnId')));
+    registerCommand('agentData_status', () => services.agentData!.status());
+    registerCommand('agentData_start', () => services.agentData!.start());
+    registerCommand('agentData_stop', () => services.agentData!.stop());
+    registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
+      workspace: readString(args, 'workspace'),
+    }));
+    registerCommand('agentData_code_projects', () => services.agentData!.request('codeRetrieval.admin.projects', {}));
+    registerCommand('agentData_jobs_create', (_event, args) => services.agentData!.request('admin.jobs.create', {
+      kind: readString(args, 'kind'),
+      workspace: readString(args, 'workspace'),
+    }));
+    registerCommand('agentData_code_search', (_event, args) => services.agentData!.request('codeRetrieval.search', {
+      workspace: readString(args, 'workspace'),
+      query: readString(args, 'query'),
+      limit: readPositiveInteger(args, 'limit', 20),
+    }));
+    registerCommand('agentData_code_call', (_event, args) => services.agentData!.request('codeRetrieval.call', {
+      workspace: readString(args, 'workspace'), tool: readString(args, 'tool'), args: readRecord(args, 'args'),
+    }));
+  }
+}
+
+function registerPluginCommands(service: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>): void {
+  registerCommand('plugin_list', () => service.list());
+  registerCommand('plugin_start', (_event, args) => service.start(readString(args, 'id')));
+  registerCommand('plugin_stop', (_event, args) => service.stop(readString(args, 'id')));
+  registerCommand('plugin_allowed_list', () => service.allowedPluginIds());
+}
+
+function registerPiPackageCommands(service: PiPackageService): void {
+  registerCommand('package_list', (_event, args) => service.list(readOptionalWorkspace(args)));
+  registerCommand('package_search', (_event, args) => service.search(readText(args, 'query')));
+  registerCommand('package_install', (_event, args) => service.install(
+    readOptionalWorkspace(args),
+    readString(args, 'name'),
+    readString(args, 'version'),
+    readPackageScope(args),
+  ));
+  registerCommand('package_remove', (_event, args) => service.remove(
+    readOptionalWorkspace(args),
+    readString(args, 'source'),
+    readPackageScope(args),
+  ));
+  registerCommand('package_set_enabled', (_event, args) => service.setEnabled(
+    readOptionalWorkspace(args),
+    readString(args, 'source'),
+    readPackageScope(args),
+    readBoolean(args, 'enabled'),
+  ));
+}
+
+function readOptionalWorkspace(args: Record<string, unknown>): string {
+  const value = args.workspace;
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw new Error('workspace must be a string');
+  return value;
+}
+
+function readPackageScope(args: Record<string, unknown>): 'user' | 'project' {
+  const value = args.scope;
+  if (value !== 'user' && value !== 'project') throw new Error('scope must be user or project');
+  return value;
+}
+
+function registerMcpPolicyCommands(service: McpPolicyService): void {
+  registerCommand('read_mcp_policy', () => service.readPolicy());
+  registerCommand('write_mcp_policy', (_event, args) => service.writePolicy(readText(args, 'content')));
+  registerCommand('read_mcp_audit', () => service.readAudit());
+  registerCommand('read_mcp_tools_cache', () => service.readToolsCache());
+  registerCommand('probe_mcp_server', (_event, args) => service.probe(readString(args, 'configJson')));
+}
+
+function registerMcpConfigCommands(service: McpConfigService): void {
+  registerCommand('list_mcp_configs', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('effective_mcp_configs', (_event, args) => service.effective(readString(args, 'workspace')));
+  registerCommand('upsert_mcp_config', (_event, args) => {
+    if (typeof args.config !== 'object' || !args.config || Array.isArray(args.config)) throw new Error('config must be an object');
+    if (typeof args.enabled !== 'boolean') throw new Error('enabled must be a boolean');
+    return service.upsert(readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'), args.config, args.enabled);
+  });
+  registerCommand('remove_mcp_config', (_event, args) => service.remove(
+    readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'),
+  ));
+  registerCommand('reload_mcp_server', (_event, args) =>
+    service.reload(readString(args, 'workspace'), readString(args, 'name')));
+}
+
+function registerPermissionCommands(service: PermissionManager): void {
+  registerCommand('permission_evaluate', (_event, args) => {
+    const operation = readRecord(args, 'operation');
+    return service.authorize(
+      { ...operation, kind: typeof operation.kind === 'string' ? operation.kind : 'unknown' },
+      readString(args, 'profile'),
+    );
+  });
+  registerCommand('permission_resolve', (_event, args) => service.resolve(
+    readString(args, 'requestId'), args.resolution === 'allow' ? 'allow' : 'deny',
+  ));
+}
+
+function registerJobCommands(service: JobsPort): void {
+  registerCommand('job_snapshot', (_event, args) => service.snapshot(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
+  registerCommand('job_kill', (_event, args) => service.kill(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
+}
+
+function registerAttentionCommands(service: NonNullable<IpcServices['attention']>): void {
+  registerCommand('attention_notify', (_event, args) => service.notify(readAttentionNotifyInput(args)));
+  registerCommand('attention_badge', (_event, args) => {
+    const count = args.count;
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) throw new Error('count must be a non-negative integer');
+    const overlayDataUrl = typeof args.overlayDataUrl === 'string' && args.overlayDataUrl ? args.overlayDataUrl : undefined;
+    return service.badge({ count, overlayDataUrl });
+  });
+  registerCommand('attention_window_focused', () => service.isFocused());
+  registerCommand('attention_clear', (_event, args) => service.clear(readString(args, 'sessionPath')));
+}
+
+function readAttentionNotifyInput(args: Record<string, unknown>): AttentionNotifyInput {
+  if (!isAttentionKind(args.kind)) throw new Error('kind must be approval, choice, failed, blocked or done');
+  return {
+    kind: args.kind,
+    workspace: readString(args, 'workspace'),
+    sessionPath: readString(args, 'sessionPath'),
+    title: readText(args, 'title'),
+    body: readText(args, 'body'),
+  };
+}
+
+function readFiniteNumber(args: Record<string, unknown>, key: string): number {
+  const value = args[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${key} must be a finite number`);
+  return value;
+}
+
+function registerSubagentCommands(service: SubagentPort): void {
+  registerCommand('subagent_list', (_event, args) => service.list(
+    readString(args, 'workspace'),
+    typeof args.sessionPath === 'string' && args.sessionPath.trim() ? args.sessionPath : undefined,
+  ));
+  registerCommand('subagent_get_transcript', (_event, args) => service.transcript(
+    readString(args, 'workspace'), readString(args, 'agentId'),
+  ));
+  registerCommand('subagent_get_session_messages', async (_event, args) => ({
+    messages: await service.sessionMessages(readString(args, 'sessionPath')),
+  }));
+  registerCommand('subagent_cancel', (_event, args) => service.cancel(
+    readString(args, 'workspace'), readString(args, 'agentId'),
+  ));
+  registerCommand('subagent_catalog', (_event, args) => service.catalog(readString(args, 'parentSessionPath')));
+  registerCommand('subagent_catalog_row', (_event, args) => service.catalogRowSample(readString(args, 'sessionPath')));
+  registerCommand('subagent_prompt', (_event, args) => service.promptChild(
+    readString(args, 'workspace'),
+    readString(args, 'parentSessionPath'),
+    readString(args, 'sessionPath'),
+    readText(args, 'message'),
+    readDelivery(args, 'delivery'),
+  ));
+  registerCommand('subagent_interrupt', (_event, args) => service.interruptChild(
+    readString(args, 'workspace'),
+    readString(args, 'parentSessionPath'),
+    readString(args, 'sessionPath'),
+  ));
+}
+
+function registerFileCommands(service: FileService): void {
+  registerCommand('get_file_tree', (_event, args) => service.tree(readString(args, 'workspace'), args.includeGitStatus === true));
+  registerCommand('read_file', (_event, args) => service.read(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('read_file_binary', (_event, args) => service.readBinary(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('register_dropped_files', (_event, args) => {
+    if (!Array.isArray(args.paths) || !args.paths.every((path) => typeof path === 'string')) throw new Error('paths must be a string array');
+    return service.registerDropped(args.paths);
+  });
+  registerCommand('read_dropped_file', (_event, args) => service.readDropped(readString(args, 'path')));
+  registerCommand('import_dropped_file', (_event, args) => service.importDropped(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('write_file', (_event, args) => service.write(
+    readString(args, 'workspace'), readString(args, 'path'), readText(args, 'content'),
+  ));
+  registerCommand('list_dir', (_event, args) => service.listDir(readString(args, 'workspace'), readText(args, 'dir')));
+  registerCommand('read_file_view', (_event, args) => service.readForView(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('open_workspace_file', async (_event, args) => {
+    const target = await service.resolveExisting(readString(args, 'workspace'), readString(args, 'path'));
+    const error = await shell.openPath(target);
+    if (error) throw new Error(error);
+  });
+  registerFileWatchCommands(service);
+}
+
+/** 文件浏览器标签的目录监听。key 带上 webContents id，窗口销毁时一并关掉。 */
+function registerFileWatchCommands(service: FileService): void {
+  const watcher = new FileWatchService((workspace, dir) => service.resolveExisting(workspace, dir), isListingSkippedName);
+  const trackedSenders = new Set<number>();
+  registerCommand('watch_workspace_dirs', async (event, args) => {
+    const workspace = readString(args, 'workspace');
+    const watchId = readString(args, 'watchId');
+    const dirs = readStringArray(args, 'dirs');
+    const sender = event.sender;
+    if (!trackedSenders.has(sender.id)) {
+      trackedSenders.add(sender.id);
+      const senderId = sender.id;
+      sender.once('destroyed', () => {
+        trackedSenders.delete(senderId);
+        watcher.clearPrefix(`${senderId}:`);
+      });
+    }
+    await watcher.setDirs(`${sender.id}:${watchId}`, workspace, dirs, (batch) => {
+      if (!sender.isDestroyed()) sender.send(`${IPC_CHANNELS.eventPrefix}files://changed`, { watchId, ...batch });
+    });
+  });
+  registerCommand('unwatch_workspace_dirs', (event, args) => {
+    watcher.clear(`${event.sender.id}:${readString(args, 'watchId')}`);
+  });
+}
+
+function registerSkillCommands(service: SkillService): void {
+  registerCommand('list_skills', () => service.list());
+  registerCommand('create_skill', (_event, args) => service.create(readString(args, 'name'), readText(args, 'description'), readText(args, 'body')));
+  registerCommand('delete_skill', (_event, args) => service.remove(readString(args, 'path')));
+  registerCommand('import_skill_from_dir', (_event, args) => service.importDirectory(readString(args, 'src')));
+  registerCommand('import_skill_from_file', (_event, args) => service.importFile(readString(args, 'src')));
+  registerCommand('install_skill_from_zip', (_event, args) => service.installZip(readString(args, 'src')));
+  registerCommand('open_skills_dir', async () => {
+    const directory = await service.openDirectory();
+    const error = await shell.openPath(directory);
+    if (error) throw new Error(error);
+    return directory;
+  });
+}
+
+function readRuleScope(args: Record<string, unknown>, key: string): 'global' | 'project' {
+  const value = args[key];
+  if (value !== 'global' && value !== 'project') throw new Error(`${key} must be "global" or "project"`);
+  return value;
+}
+
+/** 规则的模式范围：省略 / null 表示所有模式；给了就必须是字符串数组。 */
+function readOptionalRuleModes(args: Record<string, unknown>): string[] | undefined {
+  const value = args.modes;
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new Error('modes must be a string array');
+  }
+  return value as string[];
+}
+
+function registerPromptLibraryCommands(service: PromptLibraryService): void {
+  registerCommand('list_prompt_commands', () => service.listCommands());
+  registerCommand('save_prompt_command', (_event, args) => service.saveCommand({
+    originalName: typeof args.originalName === 'string' && args.originalName ? args.originalName : undefined,
+    name: readString(args, 'name'),
+    description: readText(args, 'description'),
+    body: readText(args, 'body'),
+    reserved: Array.isArray(args.reserved) ? args.reserved.filter((item): item is string => typeof item === 'string') : [],
+  }));
+  registerCommand('delete_prompt_command', (_event, args) => service.deleteCommand(readString(args, 'name')));
+  registerCommand('list_context_rules', (_event, args) => service.listRules(readOptionalWorkspace(args)));
+  registerCommand('save_context_rule', (_event, args) => {
+    const original = args.original && typeof args.original === 'object' ? (args.original as Record<string, unknown>) : undefined;
+    return service.saveRule({
+      workspace: readOptionalWorkspace(args),
+      scope: readRuleScope(args, 'scope'),
+      original: original ? { scope: readRuleScope(original, 'scope'), id: readString(original, 'id') } : undefined,
+      title: readText(args, 'title'),
+      enabled: readBoolean(args, 'enabled'),
+      body: readText(args, 'body'),
+      // 模式范围可选；服务端校验已知模式并去重，空数组等同所有模式。
+      modes: readOptionalRuleModes(args),
+    });
+  });
+  registerCommand('set_context_rule_enabled', (_event, args) => service.setRuleEnabled(
+    { scope: readRuleScope(args, 'scope'), id: readString(args, 'id') },
+    readBoolean(args, 'enabled'),
+    readOptionalWorkspace(args),
+  ));
+  registerCommand('delete_context_rule', (_event, args) => service.deleteRule(
+    { scope: readRuleScope(args, 'scope'), id: readString(args, 'id') },
+    readOptionalWorkspace(args),
+  ));
+}
+
+const DIAGNOSE_REASONING_LEVELS: ReadonlySet<string> = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+/** 测活的思考档：缺省 = 关闭；给了就必须是 pi 的档位名。 */
+function readOptionalReasoning(args: Record<string, unknown>): string | undefined {
+  const value = args.reasoning;
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !DIAGNOSE_REASONING_LEVELS.has(value)) {
+    throw new Error('reasoning must be one of minimal, low, medium, high, xhigh, max');
+  }
+  return value;
+}
+
+function registerProviderCommands(service: ProviderService): void {
+  registerCommand('get_provider_config', () => service.getConfig());
+  registerCommand('get_model_fast_preferences', () => service.getFastPreferences());
+  registerCommand('set_model_fast_preference', (_event, args) => service.setFastPreference(
+    readString(args, 'provider'), readString(args, 'modelId'), readBoolean(args, 'enabled'),
+  ));
+  registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson')));
+  registerCommand('set_provider_api_key', (_event, args) => service.setApiKey(
+    readString(args, 'provider'), readOptionalString(args, 'apiKey'),
+  ));
+  registerCommand('get_provider_credentials', () => service.getCredentials());
+  registerCommand('get_provider_oauth_capabilities', () => service.getOAuthCapabilities());
+  registerCommand('provider_login', (event, args) => {
+    const channel = args.onEvent;
+    const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
+      ? (e: ProviderLoginUiEvent) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, e)
+      : () => {};
+    return service.startLogin(readString(args, 'provider'), emit);
+  });
+  registerCommand('provider_login_prompt', (_event, args) => service.respondPrompt(
+    readString(args, 'promptId'), readString(args, 'value'),
+  ));
+  registerCommand('provider_login_cancel', (_event, args) => service.cancelLogin(readString(args, 'loginId')));
+  registerCommand('provider_logout', (_event, args) => service.logout(readString(args, 'provider')));
+  registerCommand('refresh_model_registry', () => service.refresh());
+  registerCommand('list_models_global', () => service.listModels());
+  registerCommand('fetch_provider_models', (_event, args) => service.fetchModels(readString(args, 'baseUrl'), readString(args, 'apiKey'), readString(args, 'api'), readOptionalHeaders(args, 'headers')));
+  registerCommand('fix_mermaid_diagram', (_event, args) => service.fixMermaid(readString(args, 'workspace'), readText(args, 'code'), readText(args, 'error')));
+  registerCommand('diagnose_provider_model', (event, args) => {
+    const channel = args.onChunk;
+    const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
+      ? (chunk: DiagnoseChunk) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, chunk)
+      : () => {};
+    if (typeof args.stream !== 'boolean') throw new Error('stream must be a boolean');
+    const reasoning = readOptionalReasoning(args);
+    return service.diagnose({
+      requestId: readString(args, 'requestId'),
+      providerId: readString(args, 'providerId'),
+      modelId: readString(args, 'modelId'),
+      prompt: readText(args, 'prompt'),
+      stream: args.stream,
+      ...(reasoning ? { reasoning } : {}),
+    }, emit);
+  });
+  registerCommand('diagnose_provider_model_abort', (_event, args) => service.abortDiagnose(readString(args, 'requestId')));
+}
+
+function registerSettingsCommands(service: SettingsService): void {
+  registerCommand('get_settings', () => service.getAll());
+  registerCommand('set_settings', async (_event, args) => {
+    const settings = args.settings;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      throw new Error('Settings must be an object');
+    }
+    if (!Object.values(settings).every((value) => typeof value === 'string')) {
+      throw new Error('Settings values must be strings');
+    }
+    await service.replace(settings as Record<string, string>);
+  });
+}
+
+function registerWorkspaceCommands(service: WorkspaceService, projectsChanged?: () => Promise<void>): void {
+  registerCommand('get_works_dir', () => service.getWorksDir());
+  registerCommand('create_conversation', () => service.createConversation());
+  registerCommand('prune_orphan_conversations', (_event, args) => {
+    const keep = args.keep;
+    if (!Array.isArray(keep) || !keep.every((path) => typeof path === 'string')) {
+      throw new Error('Keep must be a string array');
+    }
+    return service.pruneOrphanConversations(keep);
+  });
+  registerCommand('list_all_sessions', () => service.listAllSessions());
+  registerCommand('list_projects', () => service.listProjects());
+  registerCommand('list_pi_sessions', (_event, args) => service.listSessions(readString(args, 'workspace')));
+  registerCommand('set_session_display_name', (_event, args) =>
+    service.setSessionDisplayName(readString(args, 'sessionPath'), readText(args, 'name')),
+  );
+  registerCommand('set_sessions_archived', (_event, args) => {
+    const paths = args.sessionPaths;
+    if (!Array.isArray(paths) || !paths.every((path) => typeof path === 'string' && path.length > 0)) {
+      throw new Error('sessionPaths must be a non-empty string array');
+    }
+    if (typeof args.archived !== 'boolean') throw new Error('archived must be a boolean');
+    return service.setSessionsArchived(paths, args.archived);
+  });
+  registerCommand('delete_pi_session', (_event, args) => service.deleteSession(readString(args, 'workspace'), readString(args, 'sessionPath')));
+  registerCommand('delete_conversation', (_event, args) => service.deleteConversation(readString(args, 'workspace')));
+  registerCommand('remove_project', async (_event, args) => {
+    await service.removeProject(readString(args, 'workspace'));
+    await projectsChanged?.();
+  });
+}
+
+function registerUiHistoryCommands(service: UiHistoryService): void {
+  registerCommand('ui_history_read', (_event, args) => service.read(readString(args, 'workspace'), readString(args, 'sessionKey')));
+  registerCommand('ui_history_write', (_event, args) => service.write(
+    readString(args, 'workspace'), readString(args, 'sessionKey'), readText(args, 'content'),
+  ));
+  registerCommand('ui_history_delete', (_event, args) => service.delete(readString(args, 'workspace'), readString(args, 'sessionKey')));
+}
+
+function registerWorkspaceApprovalCommands(service: WorkspaceApprovalService): void {
+  registerCommand('request_workspace_approval', (_event, args) => service.approve(readString(args, 'path')));
+  registerCommand('is_workspace_approved', (_event, args) => service.isApproved(readString(args, 'path')));
+}
+
+function registerGitCommands(service: GitService): void {
+  registerCommand('get_git_status', (_event, args) => service.status(readString(args, 'workspacePath')));
+  registerCommand('get_git_diff', (_event, args) => service.diff(readString(args, 'workspacePath'), readString(args, 'filePath')));
+  registerCommand('get_git_branches', (_event, args) => service.branches(readString(args, 'workspacePath')));
+  registerCommand('git_checkout', (_event, args) => service.checkout(readString(args, 'workspacePath'), readString(args, 'branch')));
+  registerCommand('git_create_branch', (_event, args) => {
+    if (typeof args.checkout !== 'boolean') throw new Error('checkout must be a boolean');
+    return service.createBranch(readString(args, 'workspacePath'), readString(args, 'name'), args.checkout);
+  });
+  registerCommand('get_git_log_graph', (_event, args) => {
+    const limit = args.limit;
+    if (limit !== null && limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) throw new Error('limit must be a positive integer or null');
+    const skip = args.skip ?? 0;
+    if (typeof skip !== 'number' || !Number.isInteger(skip) || skip < 0) throw new Error('skip must be a non-negative integer');
+    return service.logGraph(readString(args, 'workspacePath'), limit as number | null | undefined, skip);
+  });
+}
+
+/** 独立工作区（A 轨）。create 返回的 marker.path 由渲染层当作新 workspace 打开。 */
+function registerIsolatedWorkspaceCommands(
+  service: Pick<IsolatedWorkspaceService, 'create' | 'list' | 'syncBack' | 'state' | 'remove' | 'probe'>,
+  pi?: Pick<PiCommandsPort, 'listRunningTurns'>,
+  workspace?: Pick<WorkspaceService, 'releaseWorkspace'>,
+): void {
+  const optionalBoolean = (args: Record<string, unknown>, key: string): boolean | undefined => {
+    const value = args[key];
+    if (value !== undefined && typeof value !== 'boolean') throw new Error(`${key} must be a boolean`);
+    return value as boolean | undefined;
+  };
+  const samePath = (a: string, b: string) => {
+    const norm = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+    return norm(a) === norm(b);
+  };
+  registerCommand('isolated_workspace_create', (_event, args) => {
+    const base = args.base;
+    if (base !== undefined && base !== 'fresh' && base !== 'head') throw new Error('base must be "fresh" or "head"');
+    const fetch = optionalBoolean(args, 'fetch');
+    const carryChanges = optionalBoolean(args, 'carryChanges');
+    return service.create({
+      project: readString(args, 'workspace'),
+      ...(base === undefined ? {} : { base }),
+      ...(fetch === undefined ? {} : { fetch }),
+      ...(carryChanges === undefined ? {} : { carryChanges }),
+    });
+  });
+  registerCommand('isolated_workspace_state', (_event, args) => service.state(readString(args, 'workspace'), readString(args, 'id')));
+  registerCommand('isolated_workspace_probe', (_event, args) => service.probe(readStringArray(args, 'paths')));
+  // 删除：有会话在跑就拒；没回传 / 有未提交改动且没 force 就拒（先判，免得关了 handle 才拒）；再关 handle、删目录。
+  registerCommand('isolated_workspace_remove', async (_event, args) => {
+    const project = readString(args, 'workspace');
+    const id = readString(args, 'id');
+    const force = optionalBoolean(args, 'force') === true;
+    const entry = service.list(project).find((item) => item.id === id);
+    if (!entry) throw new Error(`没有这个独立工作区：${id}`);
+    if (entry.exists) {
+      const running = ((await pi?.listRunningTurns()) ?? []) as Array<{ workspace?: unknown }>;
+      if (running.some((row) => typeof row.workspace === 'string' && samePath(row.workspace, entry.path))) {
+        throw new Error(`ISOLATED_BUSY: 独立工作区 ${id} 里还有会话在运行，先停止再删除`);
+      }
+      if (!force) {
+        const state = await service.state(project, id);
+        if (state.dirty || !state.synced) {
+          throw new Error(`ISOLATED_UNSAVED: 独立工作区 ${id} 有未提交的改动或分支还没回传`);
+        }
+      }
+      await workspace?.releaseWorkspace(entry.path);
+    }
+    return service.remove(project, id, { force });
+  });
+  registerCommand('isolated_workspace_list', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('isolated_workspace_sync_back', (_event, args) =>
+    service.syncBack(readString(args, 'workspace'), readString(args, 'id')),
+  );
+}
+
+function registerTerminalCommands(service: TerminalService): void {
+  registerCommand('execute_command', (_event, args) => {
+    if (!Array.isArray(args.args) || !args.args.every((arg) => typeof arg === 'string')) throw new Error('args must be a string array');
+    if (args.workspace !== undefined && typeof args.workspace !== 'string') throw new Error('workspace must be a string');
+    return service.execute(readString(args, 'command'), args.args, args.workspace);
+  });
+}
+
+function registerCreateCommands(service: CreateService): void {
+  registerCommand('create_list', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('create_image', (_event, args) => service.read(readString(args, 'workspace'), readString(args, 'name')));
+}
+
+function registerShellCommands(service: ShellService): void {
+  registerCommand('shell_start', (_event, args) => {
+    if (args.workspace !== undefined && typeof args.workspace !== 'string') throw new Error('workspace must be a string');
+    return service.start(args.workspace);
+  });
+  registerCommand('shell_write', (_event, args) => service.write(readString(args, 'sessionId'), readText(args, 'data')));
+  registerCommand('shell_resize', (_event, args) => {
+    if (typeof args.rows !== 'number' || typeof args.cols !== 'number') throw new Error('rows and cols must be numbers');
+    return service.resize(readString(args, 'sessionId'), args.rows, args.cols);
+  });
+  registerCommand('shell_stop', (_event, args) => service.stop(readString(args, 'sessionId')));
+}
+
+function registerPiCommands(service: PiCommandsPort): void {
+  registerCommand('open_workspace', (_event, args) => service.openWorkspace(readString(args, 'workspace')));
+  registerCommand('agent_list_running_turns', () => service.listRunningTurns());
+  registerCommand('warm_workspace', (_event, args) => service.warmWorkspace(readString(args, 'workspace')));
+  registerCommand('close_workspace', (_event, args) => service.closeWorkspace(readString(args, 'workspace')));
+  registerCommand('extension_ui_respond', (_event, args) => service.respondUi(readString(args, 'workspace'), readRecord(args, 'response')));
+  for (const command of [
+    'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering', 'agent_cancel_steer', 'agent_set_model', 'agent_cycle_model',
+    'agent_get_available_models', 'agent_set_thinking_level', 'agent_cycle_thinking_level', 'agent_set_mode',
+    'agent_set_approval', 'agent_set_fast_mode', 'agent_exclude_entry', 'agent_restore_entry', 'agent_rewind_to', 'agent_truncate_to',
+    'agent_compact', 'agent_set_auto_compaction', 'agent_abort_retry', 'agent_get_session_stats', 'agent_get_state',
+    'agent_get_messages', 'agent_get_goal', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
+    'agent_clone', 'agent_get_fork_messages', 'agent_set_session_name',
+    'agent_get_session_defaults', 'agent_set_session_defaults',
+    'ask_user_draft_read', 'ask_user_draft_write', 'ask_user_draft_delete',
+    'agent_complete_ask_user',
+  ]) {
+    registerCommand(command, (_event, args) => {
+      const { workspace, ...input } = args;
+      if (typeof workspace !== 'string' || !workspace.trim()) throw new Error('workspace must be a non-empty string');
+      return service.send(workspace, command, input);
+    });
+  }
+}
+
+/**
+ * 开发期诊断命令。dev_list_commands 复用 register 内部的注册表，故 DevService 不需要反向依赖本文件。
+ * 这些命令只查询、不写入，但仍仅在非打包时注册，避免成为生产版本的额外攻击面。
+ */
+function registerDevCommands(service: DevService): void {
+  registerCommand('dev_runtime_info', () => service.info());
+  registerCommand('dev_list_commands', () => getRegisteredCommands());
+}
+
+
+function readDelivery(args: Record<string, unknown>, key: string): 'followUp' | 'steer' {
+  const value = args[key];
+  if (value !== 'followUp' && value !== 'steer') throw new Error(`${key} must be followUp or steer`);
+  return value;
+}
+
+function readBoolean(args: Record<string, unknown>, key: string): boolean {
+  if (typeof args[key] !== 'boolean') throw new Error(`${key} must be a boolean`);
+  return args[key] as boolean;
+}
+
+function readString(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} must be a non-empty string`);
+  return value;
+}
+
+function readText(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== 'string') throw new Error(`${key} must be a string`);
+  return value;
+}
+
+/** API Key 可为空：null / undefined / 空串都表示清除凭据。 */
+function readOptionalString(args: Record<string, unknown>, key: string): string | null {
+  const value = args[key];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') throw new Error(`${key} must be a string or null`);
+  return value.trim() ? value : null;
+}
+
+function readStringArray(args: Record<string, unknown>, key: string): string[] {
+  const value = args[key];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) throw new Error(`${key} must be a string array`);
+  return value;
+}
+
+function readPositiveInteger(args: Record<string, unknown>, key: string, fallback: number): number {
+  const value = args[key] ?? fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error(`${key} must be a positive integer`);
+  return value;
+}
+function readRecord(args: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = args[key];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${key} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function readOptionalHeaders(args: Record<string, unknown>, key: string): Record<string, string> | undefined {
+  const value = args[key];
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${key} must be an object`);
+  const record = value as Record<string, unknown>;
+  if (!Object.values(record).every((v) => typeof v === 'string')) throw new Error(`${key} values must be strings`);
+  return record as Record<string, string>;
+}

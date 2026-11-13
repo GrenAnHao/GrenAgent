@@ -1,3 +1,4 @@
+import "./pi-node-providers.js";
 import { type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { applyOfficialMainPackageDir } from "./official-package-dir.js";
 

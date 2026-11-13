@@ -9,11 +9,12 @@ const { listModelsGlobal, diagnoseProviderModel, abortDiagnoseProviderModel } = 
   abortDiagnoseProviderModel: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('../../lib/pi', () => ({
-  pi: { listModelsGlobal, diagnoseProviderModel, abortDiagnoseProviderModel },
+  pi: { listModelsGlobal, diagnoseProviderModel, abortDiagnoseProviderModel,requestObservation:vi.fn(async (p:any)=>p.action==='list'?[]:{availability:'unavailable'}),exportRequestObservation:vi.fn() },
 }));
 
 import { invalidateAvailableModels } from './availableModelsCache';
 import { ProviderDiagnostics } from './ProviderDiagnostics';
+import { MODEL_VISIBILITY_STORAGE_KEY, useModelVisibilityStore } from '../../stores/modelVisibilityStore';
 
 const MODELS = [
   { provider: 'relay', id: 'claude-x', api: 'anthropic-messages', reasoning: true, thinkingLevelMap: { off: 'off', low: 'low', high: 'high', xhigh: 'max' } },
@@ -56,6 +57,8 @@ async function renderReady(props: Partial<Parameters<typeof ProviderDiagnostics>
 }
 
 beforeEach(() => {
+  localStorage.removeItem(MODEL_VISIBILITY_STORAGE_KEY);
+  useModelVisibilityStore.setState({ hidden: [] });
   invalidateAvailableModels();
   listModelsGlobal.mockResolvedValue({ ok: true, models: MODELS });
 });
@@ -158,6 +161,38 @@ describe('ProviderDiagnostics', () => {
     expect(abortDiagnoseProviderModel).toHaveBeenCalledWith(requestId);
     expect(screen.queryByTestId('prov-diag-output')).toBeNull();
     expect(screen.queryByTestId('prov-diag-cancel')).toBeNull();
+  });
+
+  it('隐藏进行中的模型只收窄候选，不取消请求或把模型/档位换成其它候选', async () => {
+    const pending = deferred<DiagnoseResult>();
+    diagnoseProviderModel.mockReturnValue(pending.promise);
+    await renderReady();
+    fireEvent.click(screen.getByTestId('prov-diag-run'));
+    act(() => useModelVisibilityStore.getState().setHidden('relay', 'claude-x', true));
+    expect(screen.getByTestId('prov-diag-model').textContent).toContain('claude-x');
+    expect(screen.getByTestId('prov-diag-level').textContent).toContain('关闭');
+    expect(abortDiagnoseProviderModel).not.toHaveBeenCalled();
+    await act(async () => pending.resolve(OK));
+    expect(screen.getByTestId('prov-diag-output').textContent).toBe('hi there');
+    expect(screen.getByTestId('prov-diag-model').textContent).toContain('claude-x');
+    expect(screen.getByTestId('prov-diag-run')).toBeDisabled();
+    const options = await openSelect('prov-diag-model');
+    expect(options.map((el) => el.getAttribute('title'))).toEqual(['plain']);
+    fireEvent.click(options[0]);
+    expect(screen.getByTestId('prov-diag-run')).not.toBeDisabled();
+    expect((diagnoseProviderModel.mock.calls[0][0] as DiagnoseRequest).modelId).toBe('claude-x');
+  });
+
+  it('所有候选隐藏后不回退旧模型且键盘发送也不能绕过', async () => {
+    await renderReady();
+    act(() => {
+      useModelVisibilityStore.getState().setHidden('relay', 'claude-x', true);
+      useModelVisibilityStore.getState().setHidden('relay', 'plain', true);
+    });
+    expect(screen.getByTestId('prov-diag-run')).toBeDisabled();
+    fireEvent.keyDown(screen.getByTestId('prov-diag-prompt'), { key: 'Enter', ctrlKey: true });
+    expect(diagnoseProviderModel).not.toHaveBeenCalled();
+    expect(screen.getByTestId('prov-diag-model').textContent).toContain('claude-x');
   });
 
   it('失败显示供应商错误', async () => {

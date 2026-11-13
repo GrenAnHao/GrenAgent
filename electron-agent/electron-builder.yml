@@ -53,15 +53,11 @@ asarUnpack:
   # agent-host 子进程和 pi-worker 一样以 RunAsNode 加载，入口要在 asar 外面。
   - out-pkg/main/agent-host.js
   - out-pkg/main/agent-host.jsc
-  # AgentData 与 CodeGraph 的子进程同理。
-  - out-pkg/main/agentdata-host.js
-  - out-pkg/main/agentdata-host.jsc
+  # CodeGraph 的子进程同理。
   - out-pkg/main/codegraph-host.js
   - out-pkg/main/codegraph-host.jsc
   - out-pkg/main/codegraph-worker.js
   - out-pkg/main/codegraph-worker.jsc
-  # RepoWiki 单文件 CJS 子进程不参与字节码构建，也不依赖 asar 内的 node_modules。
-  - out-pkg/main/repo-wiki-host.cjs
   # agent-host 的进程树守卫：主进程 spawn 它，asar 里的 exe 起不来。
   - out-pkg/main/pi-job-guard.exe
   - out-pkg/main/bytecode-loader.cjs
@@ -69,8 +65,8 @@ asarUnpack:
   - out-pkg/main/runner.py
   - out-pkg/main/runner.mjs
   - out-pkg/main/prompts/**
-  # gpt-with-taste 的 texts/：agent-host 从 app.asar.unpacked 加载，import.meta.url 旁必须真有这些文件。
-  - out-pkg/main/texts/**
+  - out-pkg/main/dist/core/export-html/**
+  - out-pkg/main/dist/modes/interactive/theme/*.json
   # 选 A：预编译 helper 入仓后由 copyPiAdjacentAssets 拷到 out-pkg/main。
   # asar:true 下 exe 必须 unpack，否则无法 spawn。
   - out-pkg/main/pi-sandbox-win.exe

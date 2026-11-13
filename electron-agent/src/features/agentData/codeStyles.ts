@@ -18,68 +18,76 @@ export const codeStyles = createStaticStyles(({ css }) => ({
   /** 覆盖分栏的 440px 下限，让高度完全由 fill 决定。 */
   split: css`&& { min-height: 0; }`,
   column: css`min-width: 0;`,
-  /** 结果列表尾部的「显示更多」：与上方平铺行同一条分隔线。 */
-  loadMore: css`padding: 6px 8px; border-block-start: 1px solid ${cssVar.colorFillQuaternary};`,
-  stats: css`display: flex; flex-wrap: wrap; gap: 12px; color: ${cssVar.colorTextTertiary}; font-size: 12px;`,
-  heading: css`
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
-    h3, h4 { margin: 0; font-size: 15px; font-weight: 600; }
+  /** 列表栏顶部的计数条：滚动时吸顶，背景盖住下方行。负 margin 抵消分栏的 6px 内边距。 */
+  listHeader: css`
+    position: sticky; top: -6px; z-index: 1;
+    margin: -6px -6px 0; padding: 8px 12px;
+    background: ${cssVar.colorBgContainer};
+    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+    color: ${cssVar.colorTextTertiary}; font-size: 12px;
+    font-variant-numeric: tabular-nums;
   `,
-  toolbar: css`display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 12px; min-width: 0;`,
-  input: css`
-    min-width: 0; max-width: 100%; box-sizing: border-box; flex: 1;
-    height: 34px; padding-inline: 10px; border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 6px; background: ${cssVar.colorBgContainer}; color: ${cssVar.colorText};
-    &:focus-visible { outline: 2px solid ${cssVar.colorPrimary}; outline-offset: 2px; }
+  /** 结果列表尾部的「显示更多」：与行同样的圆角语言。 */
+  loadMore: css`margin: 2px 6px 6px; padding: 4px 8px; border-radius: 8px;`,
+  /** 统计数字聚成一条胶囊：数字等宽、段间细线分隔，不再是一串散落的灰字。 */
+  stats: css`
+    display: inline-flex; flex-wrap: wrap; align-items: center;
+    padding: 3px 6px; border-radius: 999px; background: ${cssVar.colorFillTertiary};
+    color: ${cssVar.colorTextSecondary}; font-size: 12px; font-variant-numeric: tabular-nums;
+    > span { padding: 1px 10px; }
+    > span + span { border-inline-start: 1px solid ${cssVar.colorBorderSecondary}; }
+    > span:last-child { color: ${cssVar.colorTextTertiary}; }
   `,
-  select: css`
-    width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box;
-    height: 34px; padding-inline: 8px; border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 6px; background: ${cssVar.colorBgContainer}; color: ${cssVar.colorText};
+  /** 把状态标签与统计聚成一组，和项目选择、操作按钮在页头里清晰分段。 */
+  statusCluster: css`display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px;`,
+  /** 详情列：源码卡铺满剩余高度；符号上下文/关系收在底部限高区。 */
+  detailColumn: css`
+    display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0;
   `,
-  button: css`
-    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-    min-height: 34px; padding: 5px 10px; border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 6px; background: ${cssVar.colorBgContainer}; color: ${cssVar.colorTextSecondary};
-    font: inherit; cursor: pointer;
-    &:hover:not(:disabled) { border-color: ${cssVar.colorPrimary}; color: ${cssVar.colorPrimary}; }
-    &:focus-visible { outline: 2px solid ${cssVar.colorPrimary}; outline-offset: 2px; }
-    &:disabled { opacity: .5; cursor: not-allowed; }
-    &[aria-pressed='true'], &[aria-selected='true'] { color: ${cssVar.colorPrimary}; border-color: ${cssVar.colorPrimary}; background: ${cssVar.colorPrimaryBg}; }
-  `,
-  card: css`
-    min-width: 0; padding: 14px; margin-bottom: 12px;
-    border: 1px solid ${cssVar.colorBorderSecondary}; border-radius: 7px;
+  sourceCard: css`
+    display: flex; flex-direction: column; gap: 8px;
+    flex: 1; min-height: 240px; min-width: 0; padding: 10px 12px;
+    border: 1px solid ${cssVar.colorBorderSecondary}; border-radius: 10px;
     background: ${cssVar.colorBgContainer};
   `,
-  hint: css`color: ${cssVar.colorTextTertiary}; line-height: 1.6; overflow-wrap: anywhere;`,
-  error: css`padding: 8px 10px; margin-block: 8px; border-radius: 5px; color: ${cssVar.colorError}; background: ${cssVar.colorErrorBg}; overflow-wrap: anywhere;`,
-  state: css`padding: 24px 12px; color: ${cssVar.colorTextTertiary}; line-height: 1.7; text-align: center; border: 1px dashed ${cssVar.colorBorderSecondary}; border-radius: 7px;`,
-  results: css`display: grid; gap: 7px; list-style: none; padding: 0; margin: 10px 0; min-width: 0;`,
-  result: css`
-    display: block; width: 100%; min-width: 0; box-sizing: border-box; text-align: start;
-    padding: 10px 12px; border: 1px solid ${cssVar.colorBorderSecondary}; border-radius: 6px;
-    color: ${cssVar.colorText}; background: ${cssVar.colorBgContainer}; font: inherit; overflow-wrap: anywhere;
-    &[type='button'] { cursor: pointer; }
-    &[type='button']:hover { border-color: ${cssVar.colorPrimary}; }
-    &[aria-pressed='true'] { border-color: ${cssVar.colorPrimary}; background: ${cssVar.colorPrimaryBg}; }
-    &:focus-visible { outline: 2px solid ${cssVar.colorPrimary}; outline-offset: 2px; }
-    strong, span { display: block; }
+  sourceToolbar: css`
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0;
+    color: ${cssVar.colorTextTertiary}; font-size: 12px;
+  `,
+  sourceStats: css`font-variant-numeric: tabular-nums;`,
+  toolbarSpacer: css`flex: 1;`,
+  sourceViewer: css`
+    flex: 1; min-height: 0; overflow: hidden;
+    border: 1px solid ${cssVar.colorBorderSecondary}; border-radius: 8px;
+    background: ${cssVar.colorBgContainer};
+  `,
+  contextSection: css`
+    flex: none; min-height: 0; max-height: 38%; overflow: auto;
+    display: flex; flex-direction: column; gap: 8px;
+    margin-block-start: 12px;
+  `,
+  searchIcon: css`display: inline-flex; color: ${cssVar.colorTextTertiary};`,
+  detailHeader: css`
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+    margin-block-end: 12px;
+  `,
+  detailTitle: css`
+    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+    h3, h4, h5 { margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  `,
+  detailPath: css`
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: ${cssVar.colorTextTertiary}; font-size: 12px;
+  `,
+  relations: css`
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+    margin-block-start: 16px;
+    > .ant-segmented { align-self: flex-start; }
   `,
   raw: css`
-    max-width: 100%; min-width: 0; margin-block: 10px; color: ${cssVar.colorTextSecondary};
-    summary { cursor: pointer; }
+    max-width: 100%; min-width: 0; margin: 6px; color: ${cssVar.colorTextSecondary};
+    summary { cursor: pointer; font-size: 12px; color: ${cssVar.colorTextTertiary}; }
     pre { max-width: 100%; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
   `,
   text: css`font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;`,
-  source: css`
-    max-height: 520px; max-width: 100%; overflow: auto; margin: 10px 0;
-    padding-block: 8px; border: 1px solid ${cssVar.colorBorderSecondary}; border-radius: 6px;
-    background: ${cssVar.colorFillQuaternary}; font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
-    [data-source-line] { display: flex; align-items: baseline; padding-inline: 8px; min-height: 1.7em; }
-    [data-source-line][aria-current='location'] { background: ${cssVar.colorPrimaryBg}; box-shadow: inset 2px 0 ${cssVar.colorPrimary}; }
-    [data-line-number] { flex: 0 0 4em; padding-right: 12px; text-align: right; color: ${cssVar.colorTextTertiary}; user-select: none; }
-    code { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: inherit; }
-  `,
 }));

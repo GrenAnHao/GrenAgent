@@ -1,0 +1,280 @@
+{
+  "changeName": "complete-desktop-session-workflows",
+  "changeDir": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\proposal.md"
+    ],
+    "specs": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\specs\\session-context-edits\\spec.md",
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\specs\\session-portability\\spec.md",
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\specs\\session-tree-navigation\\spec.md"
+    ],
+    "design": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\design.md"
+    ],
+    "tasks": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 35,
+    "complete": 1,
+    "remaining": 34
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 实施前检查当前改动和相关旧决策，更新同主题 Agent Note（无同主题才新建），记录 native／旧排除双层、副本有效状态补偿、位置持久化、candidate 和历史来源非授信边界；验证 `npm run verify-notes`，不改冻结的 docs/decisions。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 5
+    },
+    {
+      "id": "2",
+      "description": "1.2 从 cli 的 pi-coding-agent@1.5.1 实际依赖根建立真实 SDK 临时 JSONL fixture 与注入 stream 的测试工具，先写 fork before／at、navigateTree、label、context_edit／refreshContext 与导出范围红测；验证测试确实使用该版本且网络／凭据访问计数为零，不用残留顶层 agent-core。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 6
+    },
+    {
+      "id": "3",
+      "description": "1.3 保存实施前 Node／CLI 类型检查的具体错误基线，并列出本 change 所触及入口与已有定向测试；验证后续检查能区分原有约 169／82 类错误记录与新增错误，不删测试或放宽类型绕过基线。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 7
+    },
+    {
+      "id": "4",
+      "description": "2.1 为树／label／导航／内容编辑／导出预览与确认／导入预览与确认定义类型化 IPC DTO，补齐 renderer bridge、主进程授权白名单、agentProcess contract／runtimeGraph／handle 分发；验证 contract 单测覆盖 targetSessionPath、identity／leaf／revision、JSON-safe 数据与每个新增 command 的生产路由。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 11
+    },
+    {
+      "id": "5",
+      "description": "2.2 实现按 session owner 的操作串行化和锁内 busy／stale 检查，收口在途偏好写入；验证 A 确认后切 B、旧 revision、run／preflight／压缩／摘要／重试／续跑队列均拒绝且零写盘、不 abort、不排队，B 的状态不变。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 12
+    },
+    {
+      "id": "6",
+      "description": "2.3 实现按 sessionPath 的已确认位置记录、null-root、冷恢复与截断后失效处理；验证真实临时 JSONL 在导航未发消息后重启仍停正确位置，旧截断删除锚点后给出提示且新消息 parentId 不断链。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 13
+    },
+    {
+      "id": "7",
+      "description": "2.4 为派生会话与导入增加 staged candidate handoff，源在候选完成前保持可用；将非授信 usageOriginRequired custom 标记与 provenance registry 准备纳入 publish barrier／operation manifest。验证标记未写不可发布、registry 缺失／未提交只返回 unverified 而不 fallback、candidate 构造／canonical／rebind／发布／选中故障及冷恢复，半成品不可发送，清理仅触及本次候选和准备行。源仍拥有后台任务时按既有 dock／owner 生命周期保留，不直接 dispose。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 14
+    },
+    {
+      "id": "8",
+      "description": "2.5 实现 persisted-needs-reload 回执和发送门：区分写盘前失败、已追加未刷新和选中失败；验证 append 成功后刷新失败不重复 append、不用旧上下文发送，重开源路径能恢复，并补充本组契约／恢复文档与笔记证据。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 15
+    },
+    {
+      "id": "9",
+      "description": "3.1 以真实 getTree／getLabel 生成全树 DTO，接树面板与节点书签增改删；验证多根／深链／旁支／技术条目的父子关系、当前 leaf、书签冷恢复，设置书签不改 session title，更新节点操作说明。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 19
+    },
+    {
+      "id": "10",
+      "description": "3.2 接 navigateTree 的实际目标与 editorText 预览、已有草稿保留／替换选择；验证 user／custom_message 至 parent、assistant／其他节点至自身、根位置、取消、无新 session 文件和旁支仍可访问。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 20
+    },
+    {
+      "id": "11",
+      "description": "3.3 接默认关闭的分支摘要选项、请求状态与取消，保留 branchSummary source 及 SDK 原始 usage；验证真实 SDK＋stub stream 的共同祖先范围、摘要附着进入位置、无摘要时零请求、失败／取消保留原 leaf，不自动降级；故障注入覆盖 session_tree 后置钩子抛错后的旧位置恢复。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 21
+    },
+    {
+      "id": "12",
+      "description": "3.4 接通已有 fork／clone 的 before／at／当前分支复制，用同一 candidate 接缝保护激活，并复用副本旧排除补偿；验证 before 只接受 user 且不含目标、at 含目标、clone 只含当前路径和适用书签、路径外旧 add／remove 的有效状态不丢、新身份／文件生成、源文件与旁支不变及未落盘空会话的明确提示。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 22
+    },
+    {
+      "id": "13",
+      "description": "3.5 将导航与派生操作接到既有 canonical 偏好／composer／事件 owner，导航保持当前五项偏好、派生显式种子化；验证分叉点早于偏好节点、A／B 同模型不同 thinking／Fast／approval／mode、源草稿保留、新草稿独立、运行 turn／pending approvals 不复制、原背景事件不落新会话，分支记忆／prune 不沿用离开路径。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 23
+    },
+    {
+      "id": "14",
+      "description": "3.6 新增 `session-tree` UI harness scenario／probe，使用真实树与操作组件，仅主进程 I/O 用桩；运行 `cd electron-agent; npm run ui:check -- session-tree`，检查键盘选择／书签／展开、busy／stale 提示、摘要取消、草稿选择、宽窄及深浅主题并查看生成截图；不顺带跑既有全量场景。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 24
+    },
+    {
+      "id": "15",
+      "description": "3.7 对接观测/账本 owner 的来源 port，提交受管继承 assistant／cache_warm 的 target/source entry 映射并消费 prepare/commit/abort 回执，不实现第二套 registry；验证无 responseId 的多级 fork／clone、冷恢复和重跑补录关联同一可信 origin，发布前联通 resolver/账本消费者，不把缺映射按新身份记费，后续真实新请求由观测请求边界正常登记；更新接口和失败语义。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 25
+    },
+    {
+      "id": "16",
+      "description": "4.1 写真实 SDK 投影红测并实现 entryId 目标解析、文本块编辑与 appendContextEdit 后公开 refreshContext；验证 original／effective 分离、多次替换、不同分支替换同一祖先、导航至编辑前、raw 消息／模型／usage 不变。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 29
+    },
+    {
+      "id": "17",
+      "description": "4.2 实现恢复原文追加非 null 原始完整 content，保留多模态、工具块与协议签名；验证恢复不是 omit、不是上一版本替换，工具结果／调用关联不损坏，重启后投影一致，compaction 窗口外目标不被误称已重新纳入。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 30
+    },
+    {
+      "id": "18",
+      "description": "4.3 为编辑增加结构／配对检查和失败状态；验证移除助手 toolCall、孤立 toolResult、错误 content 类型／旁支目标被拒且零追加，保存后刷新失败进入恢复门，工具与签名块不会被纯文本编辑器吞掉。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 31
+    },
+    {
+      "id": "19",
+      "description": "4.4 保留旧 timestamp/custom exclusion 和现有排除／恢复入口，分别投影“旧版会话排除”与 native 内容状态，旧层排除时先明确恢复再准替换；验证旧文件打开零迁移写入、碰撞 timestamp 不猜 entryId、替换后独立排除再恢复原文不撤销排除，并更新双层行为说明。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 32
+    },
+    {
+      "id": "20",
+      "description": "4.5 新增 `session-context-edits` 真实组件 harness／probe，运行 `cd electron-agent; npm run ui:check -- session-context-edits`；检查原文／有效内容切换、替换／恢复确认、旧排除阻止提示、工具配对拒绝、重挂载、busy 与深浅主题并查看截图，仅跑本需求场景。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 33
+    },
+    {
+      "id": "21",
+      "description": "5.1 接主进程保存对话框、snapshot 票据、格式／内容范围／绝对目的地预览及覆盖确认；验证取消无目标文件、snapshot 过期必须重新预览、无 share／上传／模型请求，路径权限校验和临时写入失败不破坏既有文件，补导出操作说明。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 37
+    },
+    {
+      "id": "22",
+      "description": "5.2 复用 SDK HTML 导出并落实历史 JSON／Markdown／工具 HTML 转义、可信 viewer 隔离及 CSP／离线资源策略；验证恶意 script／事件处理器／JSON closing tag／远程图片无执行或网络加载、无 Node／preload 桥，断网打开真实生成文件可读全树、代码块与工具内容。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 38
+    },
+    {
+      "id": "23",
+      "description": "5.3 在独立 snapshot manager 上实现当前路径 JSONL 导出与适用 label／canonical 偏好规范化，收口旧 pulse 后以全日志有效排除集合补充副本兼容 add／remove；验证真实 SDK 可重开、parent／edit／label／compaction 引用成立、fromId 仅作外部出处，旁支独有正文不出现、source leaf／原记录不动，不把补偿转成 native 编辑。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 39
+    },
+    {
+      "id": "24",
+      "description": "5.4 增加 JSONL round-trip fixture（多模态／签名思考／工具调用及结果／context_edit／压缩／摘要／responseModel／usage），验证 raw 元数据保留、有效投影一致、不重算历史费用；文档明确 HTML 全树、JSONL 当前分支、两者都保留敏感原文且不含未落盘草稿。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 40
+    },
+    {
+      "id": "25",
+      "description": "5.5 加入祖先 M＋A 上旧排除＋B 导出／导入的真实 SDK＋旧兼容层 fixture，以及 B 路径旧 add 被 A 后续 remove 覆盖的反向 fixture；验证导入后与确认快照的有效上下文相同、下一轮 stub 请求不意外重入／隐藏 M、旧 timestamp 碰撞保持旧语义、A 独有正文不导出，源无迁移写入，并补文档说明仅副本补偿。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 41
+    },
+    {
+      "id": "26",
+      "description": "6.1 实现无 runtime 的逐行严格解析／大小边界／版本与引用验证，已知迁移只在候选上执行；验证坏行不能被 SDK 容错跳过，重复 ID／断链／循环／非法编辑目标／未知版本／超界文件给出定位错误，源文件不变、无模型或预热。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 45
+    },
+    {
+      "id": "27",
+      "description": "6.2 接文件与 cwd 确认、只读数据／有效上下文预览和新身份受管文件发布；为所有外部历史 entry 登记 external-history 并落非授信 usageOriginRequired 标记，不信任文件携带的 provenance。验证同 ID 重复导入不覆盖、缺失或其他 cwd 必须明确确认、不跟随 parentSession／URL、候选失败保留当前会话和草稿，更新导入范围说明。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 46
+    },
+    {
+      "id": "28",
+      "description": "6.3 在加载本地可信资源前初始化已确认的安全 canonical 偏好，导入模型／thinking／Fast 只作待确认值、approval／mode 不自动升权；验证文件中的工具、扩展、配置、trust、credentials 与高权限声明不执行或写配置，缺模型保持 unavailable，无自动测试／继续／预热请求。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 47
+    },
+    {
+      "id": "29",
+      "description": "6.4 将导出／导入 UI 合为 `session-portability` harness scenario／probe，运行 `cd electron-agent; npm run ui:check -- session-portability`；检查两种范围标签、敏感预览、目的地／覆盖／取消、坏行错误、目录与偏好确认、只读结果和深浅／窄屏，查看截图；HTML 断网真实文件检查沿用 5.2 结果，不用桩取代。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 48
+    },
+    {
+      "id": "30",
+      "description": "6.5 将 5.4／5.5 的导出文件经过真实 SDK 导入和冷恢复，再用 stub stream 捕获下一轮实际请求；验证 native 投影加旧排除后的有效内容与源确认快照一致、关联／偏好确认结果正确，主动发送前请求计数为零，补往返与信任边界文档。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 49
+    },
+    {
+      "id": "31",
+      "description": "6.6 对外部导入的历史 usage 仅保留展示，导入后真实新请求由观测/账本 owner 的请求边界逐条登记 local-origin；验证同包／伪造来源／同 responseId 的重复导入不新增、合并或覆盖本机账本，不因来源字段授信；导入后新调用正常计数，registry 缺失冷开标 unverified 而不猜 t:newSession 键，并记录历史展示与本机累计的区别。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 50
+    },
+    {
+      "id": "32",
+      "description": "7.1 新增源码生产 agent-host 子进程 IPC 集成测试，使用临时 agentDir／sessions 和传输 stub；串行覆盖树／label／导航／fork／clone／内容编辑／导出／导入，不直接绕到 service 方法；验证 command 白名单、runtime replacement、实际 session 身份与恢复路径，测试结束无残留子进程／文件。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 54
+    },
+    {
+      "id": "33",
+      "description": "7.2 在同一生产链执行 A／B 并存、busy／stale、candidate 构造失败、写盘后 refresh 失败及重启恢复；验证五项 canonical／草稿／事件隔离、源文件／上次位置可恢复，不把归属错误交给观测 change 修补。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 55
+    },
+    {
+      "id": "34",
+      "description": "7.3 运行本 change 新增和受影响的定向 vitest、三项 UI 场景，以及与模型设置／观测的 contract 检查；混合 fixture 同时含冻结 legacy roster 中未入账旧原生文件（仍可补录）、新复制缺 registry、外部重复导入和导入后真实新调用，验证 canonical 历史去重及新调用正常记录，target 不扩大 roster；与 1.3 类型基线比较无新增错误，记录命令／结果／截图／未执行项，不把未执行真实模型测试写成已验证。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 56
+    },
+    {
+      "id": "35",
+      "description": "7.4 对照三个规格逐项审阅实际 diff 与证据，运行 `npm run verify-notes` 和 `openspec validate complete-desktop-session-workflows --strict`；确认无自动上传、无旧 exclusion 迁移、无范围外包／模型设置改动，全部任务实际完成后才交实施验收。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-session-workflows\\tasks.md",
+      "line": 57
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "ready",
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "root": {
+    "path": "D:\\OneDrive\\Project Files\\Pi",
+    "source": "nearest"
+  }
+}

@@ -1,0 +1,3 @@
+D:\OneDrive\Project Files\Pi\cli\node_modules\.pnpm\@earendil-works+pi-coding-a_46363ec98625f1d639749413625da3f6\node_modules\@earendil-works\pi-coding-agent\package.json 1.5.1
+D:\OneDrive\Project Files\Pi\cli\node_modules\.pnpm\@earendil-works+pi-agent-co_5a792928428be6437b31f3db2304d94e\node_modules\@earendil-works\pi-agent-core\package.json 1.5.1
+D:\OneDrive\Project Files\Pi\cli\node_modules\.pnpm\@earendil-works+pi-ai@1.5.1_146f734bb5a2869891b46f8da8389f5c\node_modules\@earendil-works\pi-ai\package.json 1.5.1

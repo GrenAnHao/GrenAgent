@@ -1,0 +1,393 @@
+[
+  {
+    "provider": "google",
+    "id": "deep-research-max-preview-04-2026",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "deep-research-preview-04-2026",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-2.5-computer-use-preview-10-2025",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-2.5-flash",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-2.5-flash-lite",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-2.5-pro",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3-flash-preview",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.1-flash-lite",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.1-flash-lite-preview",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.1-pro-preview",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.1-pro-preview-customtools",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.5-flash",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.5-flash-lite",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.6-flash",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.7-flash",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-3.8-flash",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-4-argon",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-flash-latest",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-flash-lite-latest",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-pro-latest",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemini-robotics-er-2-preview",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemma-4-26b-a4b-it",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  },
+  {
+    "provider": "google",
+    "id": "gemma-4-31b-it",
+    "api": "google-generative-ai",
+    "inputLimits": {
+      "maxRequestBytes": 20971520,
+      "images": {
+        "maxPerRequest": 3600,
+        "resize": {
+          "maxWidth": 2000,
+          "maxHeight": 2000,
+          "maxBytes": 4718592,
+          "jpegQuality": 80
+        }
+      }
+    }
+  }
+]

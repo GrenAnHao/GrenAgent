@@ -1,0 +1,104 @@
+{
+  "changeName": "complete-desktop-package-updates",
+  "schemaName": "spec-driven",
+  "planningHome": {
+    "kind": "repo",
+    "root": "D:\\OneDrive\\Project Files\\Pi",
+    "changesDir": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes",
+    "defaultSchema": "spec-driven"
+  },
+  "changeRoot": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates",
+  "artifactPaths": {
+    "proposal": {
+      "outputPath": "proposal.md",
+      "resolvedOutputPath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\proposal.md",
+      "existingOutputPaths": [
+        "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\proposal.md"
+      ]
+    },
+    "specs": {
+      "outputPath": "specs/**/*.md",
+      "resolvedOutputPath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\specs\\**\\*.md",
+      "existingOutputPaths": [
+        "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\specs\\desktop-package-updates\\spec.md"
+      ]
+    },
+    "design": {
+      "outputPath": "design.md",
+      "resolvedOutputPath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\design.md",
+      "existingOutputPaths": [
+        "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\design.md"
+      ]
+    },
+    "tasks": {
+      "outputPath": "tasks.md",
+      "resolvedOutputPath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "existingOutputPaths": [
+        "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md"
+      ]
+    }
+  },
+  "isPlanningComplete": true,
+  "isComplete": true,
+  "applyRequires": [
+    "tasks"
+  ],
+  "nextSteps": [
+    "All planning artifacts are complete. Run openspec instructions apply --change \"complete-desktop-package-updates\" --json to inspect implementation progress."
+  ],
+  "actionContext": {
+    "mode": "repo-local",
+    "sourceOfTruth": "repo",
+    "planningArtifacts": [
+      "proposal",
+      "specs",
+      "design",
+      "tasks"
+    ],
+    "linkedContext": [],
+    "allowedEditRoots": [
+      "D:\\OneDrive\\Project Files\\Pi"
+    ],
+    "requiresAffectedAreaSelection": false,
+    "constraints": [
+      "Repo-local change artifacts and implementation edits are scoped to this project."
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "proposal",
+      "outputPath": "proposal.md",
+      "status": "done",
+      "requires": []
+    },
+    {
+      "id": "specs",
+      "outputPath": "specs/**/*.md",
+      "status": "done",
+      "requires": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "design",
+      "outputPath": "design.md",
+      "status": "done",
+      "requires": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "tasks",
+      "outputPath": "tasks.md",
+      "status": "done",
+      "requires": [
+        "specs",
+        "design"
+      ]
+    }
+  ],
+  "root": {
+    "path": "D:\\OneDrive\\Project Files\\Pi",
+    "source": "nearest"
+  }
+}

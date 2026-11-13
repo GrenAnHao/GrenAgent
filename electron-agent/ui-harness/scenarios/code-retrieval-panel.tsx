@@ -1,6 +1,5 @@
 import type { ReactElement } from 'react'
 import { CodeRetrievalPanel } from '../../src/features/agentData/CodeRetrievalPanel'
-import { AgentDataTaskProvider } from '../../src/features/agentData/AgentDataTaskProvider'
 import { styles } from '../../src/features/agentData/agentDataStyles'
 import { useSessionStore } from '../../src/store'
 import { exposeData, installBridge, track } from '../stubs'
@@ -39,6 +38,7 @@ const symbolRows = Array.from({ length: SYMBOL_COUNT }, (_, index) => ({
 function sourceOf(count: number): string {
   return Array.from({ length: count }, (_, index) => {
     const number = index + 1
+    if (number % 7 === 0) return ''
     return number % LONG_COMMENT_EVERY === 0
       ? `// line ${number}: ${'这是一条很长的注释，会在预览里折成好几行。 '.repeat(8)}`
       : `const line${number} = ${number}`
@@ -94,9 +94,7 @@ export default function CodeRetrievalPanelScenario(): ReactElement {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--gren-content-bg)' }}>
       <div className={styles.panel} data-testid="agent-data-panel">
-        <AgentDataTaskProvider visible activeView="code">
-          <CodeRetrievalPanel initialProject={WORKSPACE} visible />
-        </AgentDataTaskProvider>
+        <CodeRetrievalPanel initialProject={WORKSPACE} visible />
       </div>
     </div>
   )

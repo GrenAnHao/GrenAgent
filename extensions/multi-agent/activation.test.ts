@@ -1,3 +1,6 @@
+// Runtime I/O is covered by real SDK usage-ledger tests, not these state-machine stubs.
+vi.mock('../usage-ledger/liveUsage.js',()=>({attachUsageEntryTracking:vi.fn(()=>()=>{})}));
+vi.mock('../usage-ledger/legacyRoster.js',()=>({ensureLegacyRoster:vi.fn()}));
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 const sdk = vi.hoisted(() => ({
@@ -7,12 +10,18 @@ const sdk = vi.hoisted(() => ({
   getAgentDir: vi.fn(() => "/agent"),
 }));
 
+const originalBudgetSessionMethods = new WeakMap<object, { prompt: unknown; dispose: unknown }>();
+
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: {
     open: (...args: unknown[]) => sdk.open(...args),
   },
   createAgentSessionServices: (...args: unknown[]) => sdk.createAgentSessionServices(...args),
-  createAgentSessionFromServices: (...args: unknown[]) => sdk.createAgentSessionFromServices(...args),
+  createAgentSessionFromServices: async (...args: unknown[]) => {
+    const created = await sdk.createAgentSessionFromServices(...args);
+    if (created?.session) originalBudgetSessionMethods.set(created.session, { prompt: created.session.prompt, dispose: created.session.dispose });
+    return created;
+  },
   getAgentDir: () => sdk.getAgentDir(),
 }));
 
@@ -244,7 +253,7 @@ describe("activation", () => {
       expect(error).toBeInstanceOf(SubagentError);
       expect((error as SubagentError).code).toBe("ACTIVATION_CLOSING");
     }
-    expect(session.prompt).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).not.toHaveBeenCalled();
 
     const session2 = mockSession();
     install(session2, { childId: "sa-2" });
@@ -266,7 +275,7 @@ describe("activation", () => {
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
-    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalledTimes(1);
     expect(getActivation("sa-1")).toBeUndefined();
   });
 
@@ -278,16 +287,16 @@ describe("activation", () => {
     session.resolveIdle();
     deliverToChild("sa-1", "more work", "followUp");
     await vi.waitFor(() => {
-      expect(session.prompt).toHaveBeenCalled();
+      expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalled();
     });
     expect(sendMessage).toHaveBeenCalledTimes(0);
-    expect(session.dispose).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).not.toHaveBeenCalled();
     expect(getActivation("sa-1")).toBeDefined();
     session.resolveIdle();
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
-    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalledTimes(1);
   });
 
   it("disposeActivation when unannounced does not send settlement", async () => {
@@ -296,7 +305,7 @@ describe("activation", () => {
     install(session, { announced: false });
     await disposeActivation("sa-1", "cancel");
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalledTimes(1);
     expect(getActivation("sa-1")).toBeUndefined();
   });
 
@@ -318,7 +327,7 @@ describe("activation", () => {
     const sendMessage = registerHost({ workspace: "B" });
     const act = install(session, { announced: true, workspace: "A" });
     await vi.waitFor(() => {
-      expect(session.dispose).toHaveBeenCalledTimes(1);
+      expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalledTimes(1);
     });
     expect(sendMessage).not.toHaveBeenCalled();
     try {
@@ -350,14 +359,14 @@ describe("activation", () => {
     install(session, { announced: true });
     deliverToChild("sa-1", "steer now", "steer");
     await vi.waitFor(() => {
-      expect(session.prompt).toHaveBeenCalled();
+      expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalled();
     });
     expect(sendMessage).toHaveBeenCalledTimes(0);
     session.resolveIdle();
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
-    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalledTimes(1);
     expect(getActivation("sa-1")).toBeUndefined();
   });
 
@@ -376,10 +385,10 @@ describe("activation", () => {
     expect(getActivation("sa-1")).toBeDefined();
     expect(sendMessage).toHaveBeenCalledTimes(0);
     expect(act.inbox.closing).toBeUndefined();
-    expect(session.dispose).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).not.toHaveBeenCalled();
     deliverToChild("sa-1", "continue", "followUp");
     await vi.waitFor(() => {
-      expect(session.prompt).toHaveBeenCalled();
+      expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalled();
     });
     expect(sendMessage).toHaveBeenCalledTimes(0);
     expect(getActivation("sa-1")).toBeDefined();
@@ -652,10 +661,10 @@ describe("coldResumeAndDeliver", () => {
         }),
       }),
     );
-    expect(session.prompt).toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalled();
     expect(getActivation("sa-1")?.announced).toBe(true);
     expect(getActivation("sa-1")).toBeDefined();
-    expect(session.dispose).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledTimes(0);
   });
 
@@ -679,7 +688,7 @@ describe("coldResumeAndDeliver", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(getActivation("sa-1")).toBeDefined();
-    expect(session.dispose).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledTimes(0);
   });
 
@@ -770,7 +779,7 @@ describe("idle residency (settled in-process children stay warm)", () => {
     const { sm } = entriesManager();
     install(session, { announced: true, keepResident: true, sessionManager: sm });
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
-    expect(session.dispose).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).not.toHaveBeenCalled();
     expect(getActivation("sa-1")).toBeUndefined();
     expect(residentChildIds()).toEqual(["sa-1"]);
 
@@ -778,7 +787,7 @@ describe("idle residency (settled in-process children stay warm)", () => {
     expect(sdk.open).not.toHaveBeenCalled();
     expect(getActivation("sa-1")?.session).toBe(session);
     expect(residentChildIds()).toEqual([]);
-    expect(session.prompt).toHaveBeenCalledWith("one more thing", expect.anything());
+    expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalledWith("one more thing", expect.anything());
   });
 
   it("without keepResident (worker sessions) the session is disposed on settlement", async () => {
@@ -786,7 +795,7 @@ describe("idle residency (settled in-process children stay warm)", () => {
     const sendMessage = registerHost();
     install(session, { announced: true });
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
-    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalledTimes(1);
     expect(residentChildIds()).toEqual([]);
   });
 
@@ -811,7 +820,7 @@ describe("idle residency (settled in-process children stay warm)", () => {
     const sendMessage = registerHost();
     install(session, { announced: true, keepResident: true });
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
-    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(originalBudgetSessionMethods.get(session)?.dispose ?? session.dispose).toHaveBeenCalledTimes(1);
   });
 
   it("draining the parent disposes its residents; tearing down writes through the resident's own log handle", async () => {
@@ -859,7 +868,7 @@ describe("deliverWithoutWaking (send_message wake: false)", () => {
     await expect(deliverWithoutWaking("sa-1", { message })).resolves.toBe("next-step");
     // 不先查 isStreaming 再 steer：交给持有会话的一侧 triggerTurn: false，它在跑就排到 turn_end，不会在这一轮刚好结束时变成新开一轮。
     expect(session.sendCustomMessage).toHaveBeenCalledWith(message, { triggerTurn: false });
-    expect(session.prompt).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).not.toHaveBeenCalled();
   });
 
   it("an idle child with a live activation gets it appended to its context without a turn", async () => {
@@ -867,7 +876,7 @@ describe("deliverWithoutWaking (send_message wake: false)", () => {
     install(session);
     await expect(deliverWithoutWaking("sa-1", { message })).resolves.toBe("appended");
     expect(session.sendCustomMessage).toHaveBeenCalledWith(message, { triggerTurn: false });
-    expect(session.prompt).not.toHaveBeenCalled();
+    expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).not.toHaveBeenCalled();
     expect(message.content).toBe("Agent p1 sent a message without waking you:\nremember BANANA");
   });
 
@@ -1010,7 +1019,7 @@ describe("leaked errors and teardown boundaries", () => {
     });
     installWith(session);
     runAsChild("sa-parent", () => deliverToChild("sa-1", "go", "followUp"));
-    await vi.waitFor(() => expect(session.prompt).toHaveBeenCalled());
+    await vi.waitFor(() => expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalled());
     expect(owner).toBe("sa-1");
   });
 
@@ -1108,7 +1117,7 @@ describe("leaked errors and teardown boundaries", () => {
     const sendMessage = registerHost();
     installWith(session);
     deliverToChild("sa-1", "go", "followUp");
-    await vi.waitFor(() => expect(session.prompt).toHaveBeenCalled());
+    await vi.waitFor(() => expect(originalBudgetSessionMethods.get(session)?.prompt ?? session.prompt).toHaveBeenCalled());
     reportLeakedError(new Error("boom"), "sa-1");
     // 会话看着空闲（还在 preflight）：这时中断会被起跑重置，所以先不中断，也不结算。
     expect(session.abort).not.toHaveBeenCalled();

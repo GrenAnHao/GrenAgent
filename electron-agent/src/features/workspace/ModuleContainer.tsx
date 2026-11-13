@@ -8,11 +8,13 @@ const SettingsPanel = lazy(() => import('../settings/SettingsPanel').then((m) =>
 const ConnectionsPanel = lazy(() => import('../connections/ConnectionsPanel').then((m) => ({ default: m.ConnectionsPanel })));
 const ExtensionsPanel = lazy(() => import('../extensions/ExtensionsPanel').then((m) => ({ default: m.ExtensionsPanel })));
 const UsagePanel = lazy(() => import('../usage/UsagePanel').then((m) => ({ default: m.UsagePanel })));
-const AgentDataCenter = lazy(() => import('../agentData/AgentDataCenter').then((m) => ({ default: m.AgentDataCenter })));
+const CodeIndexWorkspace = lazy(() => import('../codeIndex/CodeIndexWorkspace').then((m) => ({ default: m.CodeIndexWorkspace })));
 const DevWorkbench = lazy(() => import('../devtools/DevWorkbench').then((m) => ({ default: m.DevWorkbench })));
 
 /** 全局模块面板（应用级，或以全局数据为主）：相对较轻，按需挂载/卸载即可。 */
 function ActivePanel({ module }: { module: ModuleId }) {
+  // 在组件内订阅，模块切换与项目切换都能驱动重渲染。
+  const workspace = useSessionStore((state) => state.activeWorkspace);
   switch (module) {
     case 'settings':
       return <SettingsPanel />;
@@ -22,6 +24,8 @@ function ActivePanel({ module }: { module: ModuleId }) {
       return <ExtensionsPanel />;
     case 'usage':
       return <UsagePanel />;
+    case 'codeIndex':
+      return <CodeIndexWorkspace visible initialProject={workspace || undefined} />;
     // 生产构建里入口不可达，但 store 仍可能被（比如被测试）手动置成该值，这里兜一层不渲染。
     case 'devWorkbench':
       return IS_DEV ? <DevWorkbench /> : null;
@@ -37,14 +41,7 @@ function ActivePanel({ module }: { module: ModuleId }) {
  */
 export function ModuleContainer({ chat }: { chat: ReactNode }) {
   const activeModule = useModuleStore((s) => s.activeModule);
-  const workspace = useSessionStore((state) => state.activeWorkspace);
-  const [agentData, setAgentData] = useState<{ initialProject?: string }>();
   const isChat = activeModule === 'chat';
-  const isAgentData = activeModule === 'agentData' || activeModule === 'repoWiki';
-
-  useEffect(() => {
-    if (isAgentData) setAgentData((current) => current ?? { initialProject: workspace || undefined });
-  }, [isAgentData, workspace]);
 
   return (
     <>
@@ -59,15 +56,7 @@ export function ModuleContainer({ chat }: { chat: ReactNode }) {
       >
         {chat}
       </div>
-      {agentData ? <div
-        hidden={!isAgentData}
-        style={{ display: isAgentData ? 'flex' : 'none', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
-      >
-        <Suspense fallback={null}>
-          <AgentDataCenter userId="local" initialProject={agentData.initialProject} visible={isAgentData} requestedTab={activeModule === 'repoWiki' ? 'repoWiki' : undefined} />
-        </Suspense>
-      </div> : null}
-      {isChat || isAgentData ? null : (
+      {isChat ? null : (
         <Suspense fallback={null}>
           <ActivePanel module={activeModule} />
         </Suspense>

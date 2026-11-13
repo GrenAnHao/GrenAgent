@@ -1,0 +1,203 @@
+{
+  "changeName": "observe-desktop-model-requests",
+  "changeDir": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\proposal.md"
+    ],
+    "specs": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\specs\\cache-warming-observability\\spec.md",
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\specs\\model-request-diagnostics\\spec.md",
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\specs\\model-usage-provenance\\spec.md"
+    ],
+    "design": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\design.md"
+    ],
+    "tasks": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 24,
+    "complete": 24,
+    "remaining": 0
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 由同一实现 owner 认领 Gren runtime 请求观察、agent-host IPC、渲染请求状态与账本契约；与模型设置 / 会话流程 owner 协调共享入口，实施前写入或更新现有同主题 Agent Note，记录字段所有权与备选；验证：笔记覆盖 design 决定，`npm run verify-notes` 通过。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 5
+    },
+    {
+      "id": "2",
+      "description": "1.2 为真实 SDK 建立离线 fixtures，分别触发普通会话、oneshot 测活、重试、后台预热及缺回调适配器；验证：先以失败测试证明现状缺少 request scope / 观测数据，再证实公开 options 回调可在每次实际调用重绑定，网络和真实凭据读取被测试强制禁止。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 6
+    },
+    {
+      "id": "3",
+      "description": "1.3 定义安全请求 DTO、稳定 identity / generation / 序列与 unavailable 语义，并写入相邻契约文档或实施笔记；验证：契约测试覆盖 A/B 并发、无 sessionPath 的稳定 sessionId、取消后迟到事件、host 重建和已观察响应序号，不依赖当前活动会话补身份。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 7
+    },
+    {
+      "id": "4",
+      "description": "1.4 由本 change owner 完整实现 provenance registry、resolveUsageOrigin 三态、真实新请求登记与 canonical ledgerKey 绑定，向会话 owner 提供受管 prepare/commit/abort port；会话侧只写 required 标记和候选发布状态并提交映射，不直接写 registry。验证：新建原生会话在会话 change 未部署时可正常入账，拒绝 renderer / 外部文件自授来源；受管多级复制无 responseId 仍归一原键，登记失败不按新 sessionId 猜键，并建立 fork/clone/import 启用前的来源消费者联测门。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 8
+    },
+    {
+      "id": "5",
+      "description": "2.1 在实际运行时 stream / complete 边界组合公共 onResponse / onProviderStreamEvent 与既有回调；保持 SDK 对象只读并为暖请求创建新 scope；验证：定向 SDK 测试覆盖 HTTP 200 / 429、请求前失败、已观察多响应和不支持回调，原模型结果 / 重试 / 认证行为不变。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 12
+    },
+    {
+      "id": "6",
+      "description": "2.2 实现 header 白名单与采集端安全结构投影，默认不创建原始缓存；验证：单测将大小写 Authorization、cookies、嵌套令牌、正文、思考、工具参数 / 结果、未知字符串及携带秘密的动态对象 key 放入 fixtures，只保留 envelope 白名单键与安全类型，跨进程 DTO / 预览 / 导出 / 诊断日志均不含敏感原文，脱敏异常丢弃数据而不打断模型执行。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 13
+    },
+    {
+      "id": "7",
+      "description": "2.3 接入 agent-host / pi-worker / oneshot 的独立 observation 通道、快照查询及 renderer 按 identity 保存的状态；验证：现有 agentProcess / IPC 测试新增真实序列化回环，乱序、重复、A/B 并发、取消重试和旧 generation 不串写，不将原始事件写入 turns/items。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 14
+    },
+    {
+      "id": "8",
+      "description": "2.4 增加仅显式启用的临时结构收集、200 条 / 1 MiB 上限、冻结预览、单独导出与清除；验证：生命周期单测覆盖默认关闭、启用前不可补采、终态冻结、关详情清除、重开关闭、截断、未知结构、文件写入失败可重试，导出只含已预览快照。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 15
+    },
+    {
+      "id": "9",
+      "description": "2.5 更新请求诊断协议与隐私说明，列明支持 / unavailable 回调、白名单、启用范围、保留期限和导出语义；验证：文档示例逐项对应 2.1–2.4 测试中的有效 DTO，不出现凭据值或未经脱敏的真实事件。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 16
+    },
+    {
+      "id": "10",
+      "description": "3.1 将公开 cacheWarmingStatus getter 暴露为按会话查询的快照；详情可见时最多每秒读一次，并由生命周期 / 决定 / entry_appended 刷新；验证：定向测试覆盖 scheduled / refreshing / inactive、nextWarmAt、经济性缺失、extensionOverride、上下文变化、安全时限和断连，关闭详情释放查询且不修改 SDK 模式或创建预热任务。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 20
+    },
+    {
+      "id": "11",
+      "description": "3.2 增加 cache_warm entry 提取与共享账本写入 helper，桌面 / Gren / 嵌入及子进程子代理在真正持有 AgentSession 的入口实时消费成功的 entry_appended；官方 CLI 按用户批准改为公开 session_start 基线与 turn_end / agent_end / session_shutdown 的已持久化 entry 延迟补录，不轮询；验证：离线 SDK 测试覆盖这些入口，CLI 不授信基线前历史，明确 idle 延迟、强杀 / 崩溃和退出竞态的覆盖限制，决定事件和失败尝试不记估算费用，工具 usage 不入账。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 21
+    },
+    {
+      "id": "12",
+      "description": "3.3 以事务为旧 calls 加 response_model / cost_source，并新增 aux_usage 表；验证：临时旧 schema 数据库实跑迁移、并发初始化与回滚测试，旧金额 / assistant rollup / 原 callKey 不变，预热按 provider + entryId + timestamp 幂等，fork 复制也不重计。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 22
+    },
+    {
+      "id": "13",
+      "description": "3.4 更新历史补录扫描及版本，安全补齐已有行缺失元数据并补录准确的 cache_warm entry；验证：usageService / ledger 单测覆盖实时后补录、重复补录、分支复制、删除或回退后费用保留、缺字段旧记录来源未知、compaction / branch_summary / tool usage 不猜归属。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 23
+    },
+    {
+      "id": "14",
+      "description": "3.5 更新账本 / 预热实施笔记和覆盖说明；验证：明确新旧费用与计数定义、迁移和回退步骤，并在临时数据库按文档完成一次升级后使用旧 reader 读取 assistant 数据，`npm run verify-notes` 通过。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 24
+    },
+    {
+      "id": "15",
+      "description": "3.6 冻结迁移前 legacy 会话清单并在历史补录前消费可信 origin 绑定；验证：混合冷重启 fixture 同时包括旧原生未入账文件、新复制缺失或未提交 registry、重复外部导入及其后真实新请求，断言旧口径继续、原 r:/t:/u: 键不改、新历史不冒充 legacy、外部自报 responseId 不覆盖已有金额 / 元数据、真正新调用正常记账，第二次冷补录零增量；来源清单损坏明确报错而不自动重授信。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 25
+    },
+    {
+      "id": "16",
+      "description": "4.1 在现有 ProviderDiagnostics 与当前请求详情接入安全元数据、原始事件临时启用 / 预览 / 导出入口；验证：组件单测保留 TTFT、tokens、正文 / 思考和取消，供应商切换停止旧订阅，不增加 AgentData 诊断模块。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 29
+    },
+    {
+      "id": "17",
+      "description": "4.2 接入预热状态区，展示 USD 估算、百分比、最终 action / 原因、扩展覆盖及独立已发生预热费用；验证：单测断言 unavailable 不显示零、排期不称已发送、估算不进入实际费用，不重写已有三档预热开关。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 30
+    },
+    {
+      "id": "18",
+      "description": "4.3 在消息保真链与用量 DTO 中追加 responseModel / costSource，账本报告增加 warmingTotals / warmingCalls / recordedCost；验证：定向单测使用 total=0.12、分项和=0.10、true / false / 缺省 / 旧 unknown / 零值，确保不把 boolean 当金额、不重算 total，原 assistant 统计定义不变。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 31
+    },
+    {
+      "id": "19",
+      "description": "4.4 用量页显示请求 / 响应模型、供应商报告 / 目录估算 / 未知 / 混合来源、助手和预热分项及「已记录费用」总额，说明外部历史只展示、未验证来源及未归属辅助用量范围；验证：UsagePanel 测试覆盖三种来源混合、旧报表兼容、来源覆盖缺口、加载失败与重试、两模型不同和响应未报告。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 32
+    },
+    {
+      "id": "20",
+      "description": "4.5 新增 request-observability、usage-provenance 场景和 probe，并更新本次有关的 provider-diagnostics / cache-warming 场景；验证：只运行 `cd electron-agent; npm run ui:check -- request-observability usage-provenance provider-diagnostics cache-warming`，全部 PASS 并检查真实深浅 / 窄屏截图、键盘启用、关闭清除、A/B 切换、截断及导出预览；其他已定档场景不跑。若修改公共样式，先 `--changed --dry-run`，只在行为确受影响时增加场景并记录理由。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 33
+    },
+    {
+      "id": "21",
+      "description": "4.6 更新相邻用户说明和实施笔记；验证：说明准确区分估计 / 供应商报告金额 / 来源未知，包含临时诊断清除和导出步骤，文案与实际页面一致。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 34
+    },
+    {
+      "id": "22",
+      "description": "5.1 从实际生产 agent-host / pi-worker 字节码入口运行离线 observation / usage 烟测，经真实 IPC 收取安全 DTO、读取临时账本并在结束后验证无原始事件落盘；验证：faux provider / 注入传输产生 HTTP 元数据和新来源字段，A/B 与后台预热交叠仍归属正确，网络及真实凭据读取禁止，保留命令和输出，不以源码 grep 或普通 build 成功替代。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 38
+    },
+    {
+      "id": "23",
+      "description": "5.2 汇总本 change 已运行的定向 vitest、CLI / Electron 构建、ui-harness 与生产边界证据；验证：按当前基线区分既有类型诊断，不覆盖运行中应用产物，不重启服务，不执行真实付费请求，`npm run verify-notes` 和 `openspec validate observe-desktop-model-requests --strict` 通过。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 39
+    },
+    {
+      "id": "24",
+      "description": "5.3 对照三份 spec 逐条验收并交付支持矩阵、迁移 / 回退证据及实际费用覆盖边界；验证：每项场景有对应测试或明确失败记录，未通过关键项保持未完成，不将规划完成标成产品已接入。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\observe-desktop-model-requests\\tasks.md",
+      "line": 40
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "all_done",
+  "instruction": "All tracked tasks are complete.\nReview or verify the change as appropriate before archiving.",
+  "root": {
+    "path": "D:\\OneDrive\\Project Files\\Pi",
+    "source": "nearest"
+  }
+}

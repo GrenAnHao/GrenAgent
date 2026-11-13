@@ -1,3 +1,5 @@
+import {observeModelRuntime} from '../../../cli/src/observed-model-runtime.js';
+import { guardModelInputLimits } from '../../../cli/src/model-input-limits.js';
 import type { ModelRuntime } from '../../../cli/src/pi-sdk.js';
 import type { ThinkingLevel } from '@earendil-works/pi-ai';
 import { formatNonStream } from '../../../extensions/_shared/oneshot.js';
@@ -6,6 +8,8 @@ type Model = NonNullable<ReturnType<ModelRuntime['getModel']>>;
 
 export interface ShortCallInput {
   user: string;
+  /** Existing diagnostic request identity; ordinary short-call contracts stay unchanged. */
+  requestId?:string;
   systemPrompt?: string;
   model?: Model;
   provider?: string;
@@ -34,6 +38,7 @@ export interface ShortCallInput {
 export interface ModelRuntimeHostOptions {
   /** 注入点仅为可测性；生产传 () => ModelRuntime.create({ authPath, modelsPath })。 */
   create: () => Promise<ModelRuntime>;
+  modelsPath?: string;
   /** 读 userData 下的默认模型。生产：SettingsManager.create(userDataCwd, agentDir)。 */
   resolveSettings?: () => Promise<{ provider: string; modelId: string }>;
 }
@@ -97,7 +102,9 @@ export class ModelRuntimeHost {
       await input.beforeDispatch!(headers);
       return headers;
     };
-    const msg = await runtime.completeSimple(
+    const observed=input.requestId?observeModelRuntime(runtime,{identity:()=>({sessionId:`diagnostics:${model.provider}`,requestId:input.requestId})}):runtime;
+    const checked=this.options.modelsPath?guardModelInputLimits(observed,{modelsPath:this.options.modelsPath}):observed;
+    const msg = await checked.completeSimple(
       model,
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },
       options,
@@ -121,7 +128,9 @@ export class ModelRuntimeHost {
     if (input.temperature !== undefined) options.temperature = input.temperature;
     if (input.reasoning !== undefined) options.reasoning = input.reasoning;
     if (input.samplingParams !== undefined) options.samplingParams = input.samplingParams;
-    for await (const ev of runtime.streamSimple(
+    const observed=input.requestId?observeModelRuntime(runtime,{identity:()=>({sessionId:`diagnostics:${model.provider}`,requestId:input.requestId})}):runtime;
+    const checked=this.options.modelsPath?guardModelInputLimits(observed,{modelsPath:this.options.modelsPath}):observed;
+    for await (const ev of checked.streamSimple(
       model,
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },
       options,

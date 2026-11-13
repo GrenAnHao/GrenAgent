@@ -16,7 +16,7 @@ const restoreGenerationByWorkspace = new Map<string, number>();
  */
 export function restoreInlineQuestionOnLoad(
   workspace: string,
-  msgs: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown }>,
+  msgs: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown; historyOnly?: unknown }>,
   sessionPath?: string | null,
 ): void {
   const generation = (restoreGenerationByWorkspace.get(workspace) ?? 0) + 1;
@@ -26,7 +26,7 @@ export function restoreInlineQuestionOnLoad(
 
 async function restoreInlineQuestionOnLoadAsync(
   workspace: string,
-  msgs: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown }>,
+  msgs: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown; historyOnly?: unknown }>,
   sessionPath: string | null | undefined,
   generation: number,
 ): Promise<void> {
@@ -36,7 +36,7 @@ async function restoreInlineQuestionOnLoadAsync(
   // 活着的等待优先：不要 clear，也不要用 restored 覆盖。
   if (cur?.mode === 'live') return;
 
-  const pending = findPendingAskUser(msgs);
+  const pending = findPendingAskUser(msgs.filter(message => message.historyOnly !== true));
   if (!pending) {
     if (!isCurrent()) return;
     useInlineQuestionStore.getState().clear(workspace);

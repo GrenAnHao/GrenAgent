@@ -31,6 +31,8 @@ Status: implemented
 
 ### 源码预览：超过 1000 行才虚拟化
 
+> 本节渲染层已于 2026-11-08 被 CodeMirror 只读 viewer 取代（见 [代码索引详情区换 CodeMirror 只读预览并铺满高度](../feature/2026-11-08-code-index-codemirror-preview.md)）：高亮、铺满、窗口化交给 CodeMirror，`scrollToLine` 对外 API 保留。本篇主进程分页的结论仍成立。
+
 新增 `CodeSourceLines`，`CodeSourceDetail` 里原来整块的 `<pre>` 换成它。行数 ≤ `VIRTUALIZE_LINE_THRESHOLD`（1000）整块渲染，在预览里整段选中、复制照旧可用；超过则用 virtua 的 `Virtualizer`（`data` + 函数子元素，只为窗口里的行创建元素）。滚动容器仍是 `pre` 自己（`max-height: 520px; overflow: auto`），经 `scrollRef` 交给 `Virtualizer`；行按预览宽度折行、高度不一，由 `Virtualizer` 测量。
 
 跳到某一行统一走 `CodeSourceLines` 的 `scrollToLine(line)`：长文件按下标 `scrollToIndex(line - 1, { align: 'center' })`，因为目标行可能根本没挂在 DOM 里；短文件在预览里找 `[data-source-line="N"]` 调 `scrollIntoView`。行不在文件里就什么都不做。`CodeSourceDetail` 的 `lines` 用 `useMemo` 固定，输入行号时不再每次重新切一遍文件。样式里的行选择器从 `> div` 改成 `[data-source-line]`，两种渲染共用。

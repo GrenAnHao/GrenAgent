@@ -1,0 +1,28 @@
+{
+  "entry": "D:\\OneDrive\\Project Files\\Pi\\cli\\dist\\main.js",
+  "calls": [
+    {
+      "key": "r:openrouter:fixture-1794285362110",
+      "cost": 0.12,
+      "cost_source": "provider"
+    },
+    {
+      "key": "r:openrouter:fixture-1794285365181",
+      "cost": 0.12,
+      "cost_source": "provider"
+    }
+  ],
+  "warms": [
+    {
+      "entry_id": "9895a1c8",
+      "cost": 1.500015
+    },
+    {
+      "entry_id": "a8203cf6",
+      "cost": 1.500015
+    }
+  ],
+  "baselineHistoryUntrusted": true,
+  "coverage": "public lifecycle delayed; idle until next hook; forced kill/crash/shutdown race can omit final warm",
+  "stderr": "[agent-mode] 读取 Ultra 调度规则失败： Error: ENOENT: no such file or directory, open 'D:\\OneDrive\\Project Files\\Pi\\cli\\dist\\ultra-rules.md'\n    at readFileSync (node:fs:435:20)\n    at fs.readFileSync (C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cli-delayed-warm-nTKBdp\\offline.cjs:1:468)\n    at ultraSchedulingRules (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:49263:19)\n    at ../extensions/agent-mode/ultra-rules.js (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:49309:30)\n    at __init (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:16:56)\n    at ../extensions/agent-mode/index.js (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:49784:5)\n    at __init (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:16:56)\n    at ../extensions/index.js (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:103975:5)\n    at __init (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:16:56)\n    at src/runtime.ts (file:///D:/OneDrive/Project%20Files/Pi/cli/dist/main.js:104124:5) {\n  errno: -4058,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: 'D:\\\\OneDrive\\\\Project Files\\\\Pi\\\\cli\\\\dist\\\\ultra-rules.md'\n}\n[grenagent-sidecar] ready ext=42 safety=on\n(node:70640) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[debug-tools] extension loaded\n[dap] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[lsp] extension loaded\n[ast-tools] extension loaded\n[github] extension loaded\n[code-exec] extension loaded\n[hashline] extension loaded\n"
+}

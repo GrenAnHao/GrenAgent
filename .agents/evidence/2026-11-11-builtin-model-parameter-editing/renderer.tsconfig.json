@@ -1,0 +1,11 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "references": [],
+  "compilerOptions": { "types": ["vite/client"], "typeRoots": ["../../../electron-agent/node_modules/@types", "../../../electron-agent/node_modules"] },
+  "include": [
+    "../../../electron-agent/src/vite-env.d.ts",
+    "../../../electron-agent/src/features/settings/BuiltinModelEditor.tsx",
+    "../../../electron-agent/src/features/settings/builtinModelOverrides.ts",
+    "../../../electron-agent/src/features/settings/ProviderModelCard.tsx"
+  ]
+}

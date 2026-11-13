@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { pi, type DiagnoseChunk, type DiagnoseResult } from '../../lib/pi';
 import { Channel } from '../../platform/runtime';
 import { useAvailableModelsState } from './availableModelsCache';
+import { useVisibleModels } from '../../stores/modelVisibilityStore';
 import {
   clampDockHeight,
   diagnosticLevelOptions,
@@ -188,6 +189,7 @@ interface Props {
 export function ProviderDiagnostics({ providerId, dirty, missingKey }: Props) {
   const { models: catalog, loading } = useAvailableModelsState(undefined);
   const providerModels = useMemo(() => (catalog ?? []).filter((m) => m.provider === providerId), [catalog, providerId]);
+  const visibleModels = useVisibleModels(providerModels);
   const [open, setOpen] = useState(dockMemory.open);
   const [height, setHeight] = useState(dockMemory.height);
   const [modelId, setModelId] = useState('');
@@ -222,8 +224,9 @@ export function ProviderDiagnostics({ providerId, dirty, missingKey }: Props) {
   }, [providerId]);
 
   useEffect(() => {
-    if (!providerModels.some((m) => m.id === modelId)) setModelId(providerModels[0]?.id ?? '');
-  }, [providerModels, modelId]);
+    // Visibility changes never replace the current/request model. Only initialise a missing raw identity.
+    if (!running && !providerModels.some((m) => m.id === modelId)) setModelId(visibleModels[0]?.id ?? '');
+  }, [providerModels, visibleModels, modelId, running]);
 
   useEffect(() => {
     setLevel((current) => pickDiagnosticLevel(model, current));
@@ -265,7 +268,7 @@ export function ProviderDiagnostics({ providerId, dirty, missingKey }: Props) {
   };
 
   const run = async () => {
-    if (!modelId || running) return;
+    if (running || !visibleModels.some((m) => m.id === modelId)) return;
     const requestId = `diag-${Date.now().toString(36)}-${(requestSeq++).toString(36)}`;
     activeRef.current = requestId;
     setRunning(true);
@@ -310,7 +313,7 @@ export function ProviderDiagnostics({ providerId, dirty, missingKey }: Props) {
     }
   };
 
-  const hint = !loading && providerModels.length === 0
+  const hint = !loading && visibleModels.length === 0
     ? dirty ? '保存后才能测活：测活走已保存的配置。' : '这个供应商暂无可用模型，先添加模型并保存。'
     : dirty
       ? '有未保存的改动，测活使用的是已保存的配置。'
@@ -359,9 +362,9 @@ export function ProviderDiagnostics({ providerId, dirty, missingKey }: Props) {
               <span className={styles.controlLabel}>模型</span>
               <Select
                 data-testid="prov-diag-model"
-                disabled={running || providerModels.length === 0}
+                disabled={running || visibleModels.length === 0}
                 loading={loading}
-                options={providerModels.map((m) => ({ value: m.id, label: m.id }))}
+                options={visibleModels.map((m) => ({ value: m.id, label: m.id }))}
                 placeholder={loading ? '加载模型…' : '没有可测的模型'}
                 showSearch
                 value={modelId || undefined}
@@ -411,7 +414,7 @@ export function ProviderDiagnostics({ providerId, dirty, missingKey }: Props) {
             ) : (
               <Button
                 data-testid="prov-diag-run"
-                disabled={!modelId}
+                disabled={!visibleModels.some((m) => m.id === modelId)}
                 icon={<Icon icon={Activity} size={14} />}
                 title="Ctrl+Enter 发送"
                 type="primary"

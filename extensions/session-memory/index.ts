@@ -67,6 +67,10 @@ export default function (pi: ExtensionAPI) {
     turnsSinceWrite = 0;
   };
 
+  pi.on("session_tree", () => {
+    writeSeq += 1; turnsSinceWrite = 0; needReanchor = true;
+  });
+
   pi.on("turn_end", async () => {
     turnsSinceWrite += 1;
   });

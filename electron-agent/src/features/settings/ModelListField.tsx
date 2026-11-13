@@ -1,5 +1,6 @@
 import { Select } from 'antd';
 import { useProviderModelData } from './providerModelData';
+import { isModelHidden, useModelVisibilityStore } from '../../stores/modelVisibilityStore';
 
 interface ModelListFieldProps {
   value: string;
@@ -25,6 +26,11 @@ export function parseModelList(raw: string): string[] {
  */
 export function ModelListField({ value, testId, onChange }: ModelListFieldProps) {
   const { ready, providerOptions, nameOf, modelsFor } = useProviderModelData();
+  const hidden = useModelVisibilityStore((state) => state.hidden);
+  const hiddenRoute = (route: string) => {
+    const split = route.indexOf('/');
+    return split > 0 && isModelHidden(hidden, route.slice(0, split), route.slice(split + 1));
+  };
   const selected = parseModelList(value);
 
   const catalog = ready
@@ -33,7 +39,7 @@ export function ModelListField({ value, testId, onChange }: ModelListFieldProps)
   const known = new Set(catalog.map((o) => o.value));
   const options = [
     ...catalog,
-    ...selected.filter((v) => !known.has(v)).map((v) => ({ value: v, label: `${v}（不可用）` })),
+    ...selected.filter((v) => !known.has(v) && !hiddenRoute(v)).map((v) => ({ value: v, label: `${v}（不可用）` })),
   ];
 
   return (
@@ -42,6 +48,7 @@ export function ModelListField({ value, testId, onChange }: ModelListFieldProps)
       mode="multiple"
       value={selected}
       options={options}
+      labelRender={({ label, value }) => hiddenRoute(String(value)) ? `${value}（已隐藏）` : label ?? value}
       placeholder="选择允许的路由"
       style={{ minWidth: 320 }}
       showSearch

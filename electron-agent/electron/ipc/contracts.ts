@@ -14,6 +14,7 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+export type { ModelBudgetState, ModelBudgetRow, ModelCompactionPatch, BudgetSyncResult } from '../../../extensions/_shared/model-compaction-budgets';
 
 export interface InvokeRequest {
   command: string;
@@ -32,7 +33,6 @@ export interface EventEnvelope<T = unknown> {
 export type { Item as ItemDto, Thread as ThreadDto, Turn as TurnDto } from '../app/appServer/types';
 export type { PermissionAuthorization, PermissionOperation, PermissionRequest } from '../app/permissionManager';
 export type { PluginManifest as PluginManifestDto, PluginStateRecord as PluginStateDto } from '../app/plugin/pluginManager';
-export type { WikiManagementApi, WikiLibraryView, WikiSource, WikiPage, WikiVersion } from '../agentData/wikiContracts';
 export type { TaskRef, TaskView, TaskStatus, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceRef, ResourceNavigation, AuditQuery, AuditView, AuditPage, AuditExport, DiagnosticItem, DiagnosticReport, WorkbenchOverview } from '../agentData/operationsContracts';
 
 export function isInvokeRequest(value: unknown): value is InvokeRequest {
@@ -44,3 +44,5 @@ export function isInvokeRequest(value: unknown): value is InvokeRequest {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
+
+export type { SessionWorkflowRequest, SessionWorkflowAck, SessionTreeDto, SessionWorkflowTarget } from '../app/sessionWorkflowContracts';

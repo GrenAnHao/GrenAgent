@@ -21,32 +21,32 @@ describe('moduleStore', () => {
     expect(useModuleStore.getState().activeWorkspaceView).toBe('chat');
   });
 
-  it('protects Repo Wiki drafts until leaving is accepted and releases the guard on unmount', () => {
-    useModuleStore.getState().setActiveModule('repoWiki');
+  it('protects drafts until leaving is accepted and releases the guard on unmount', () => {
+    useModuleStore.getState().setActiveModule('usage');
     let accepted = false;
     let calls = 0;
-    const release = registerModuleLeaveGuard('repoWiki', () => { calls++; return accepted; });
+    const release = registerModuleLeaveGuard('usage', () => { calls++; return accepted; });
     useModuleStore.getState().setActiveModule('chat');
-    expect(useModuleStore.getState().activeModule).toBe('repoWiki');
-    useModuleStore.getState().setActiveModule('repoWiki');
+    expect(useModuleStore.getState().activeModule).toBe('usage');
+    useModuleStore.getState().setActiveModule('usage');
     expect(calls).toBe(1);
     accepted = true;
     useModuleStore.getState().setActiveModule('chat');
     expect(useModuleStore.getState().activeModule).toBe('chat');
     release();
     accepted = false;
-    useModuleStore.getState().setActiveModule('repoWiki');
+    useModuleStore.getState().setActiveModule('usage');
     useModuleStore.getState().setActiveModule('settings');
     expect(useModuleStore.getState().activeModule).toBe('settings');
   });
 
   it('an older guard cleanup cannot clear a newer mounted guard', () => {
-    useModuleStore.getState().setActiveModule('repoWiki');
-    const stale = registerModuleLeaveGuard('repoWiki', () => true);
-    const release = registerModuleLeaveGuard('repoWiki', () => false);
+    useModuleStore.getState().setActiveModule('usage');
+    const stale = registerModuleLeaveGuard('usage', () => true);
+    const release = registerModuleLeaveGuard('usage', () => false);
     stale();
     useModuleStore.getState().setActiveModule('chat');
-    expect(useModuleStore.getState().activeModule).toBe('repoWiki');
+    expect(useModuleStore.getState().activeModule).toBe('usage');
     release();
   });
 });

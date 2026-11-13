@@ -3,8 +3,8 @@
  * - 文件列表由主进程按页返回：每次请求只要一页，结果行只画已加载的页，尾部「显示更多」点一次取一页，一路点到底也不退回前端切页。
  * - 页面高度有上限：外层面板（AgentDataCenter 的 panel）不被撑长、不出现整页滚动，结果列表在左栏里自己滚。
  * - 原始结果展开前不画内容，展开后高度有上限，超长的内容被截断并写明。
- * - 换成搜索后页数重置；点结果进详情，详情栏同样在栏内滚动，窄视口（只显示详情栏）也一样。
- * - 大文件的源码预览虚拟化：DOM 里只有窗口附近的行，目标行居中、跳到任意行、滚到头尾都对，折行的长注释行高不一也不乱。
+ * - 换成搜索后页数重置；点结果进详情，详情栏同样有界，窄视口（只显示详情栏）也一样。
+ * - 源码预览是 CodeMirror 只读：语法高亮、铺满详情列；大文件 DOM 里只有窗口附近的行，目标行高亮居中、跳到任意行、滚到头尾都对，长行横向滚动不折行。
  */
 
 const PANEL = '[data-testid="agent-data-panel"]'
@@ -13,9 +13,11 @@ const MAIN = '[data-split-main]'
 const ROWS = '[data-code-list] [aria-pressed]'
 const INPUT = 'input[aria-label="搜索代码"]'
 const JUMP_INPUT = 'input[aria-label="行号"]'
-const SRC = 'pre[aria-label="源码内容"]'
-const SRC_LINES = `${SRC} [data-source-line]`
-/** 窗口里的行数上限：预览 520px 高、每行约 20px，加上缓冲也远小于这个数 */
+const SRC = '[aria-label="源码内容"]'
+const SRC_LINES = `${SRC} .cm-line`
+const SCROLLER = `${SRC} .cm-scroller`
+const TARGET = `${SRC} .cm-target-line`
+/** 窗口里的行数上限：预览铺满也就几百像素高、每行约 20px，加上缓冲也远小于这个数 */
 const WINDOW_LIMIT = 300
 
 /** 滚动容器自身有没有溢出：scrollHeight 比 clientHeight 大就是在栏内滚动 */
@@ -82,6 +84,16 @@ export default async function (t) {
   t.ok('分栏吃掉了页头以下的剩余高度', side.clientHeight > 440)
   await t.shot('files-first-page')
 
+  // —— 视觉分层：文件图标 + 标题/路径分层、右栏引导空态 ——
+  t.ok('文件行带文件图标', await t.js(`!!document.querySelector('${ROWS} svg, ${ROWS} img')`))
+  t.ok('文件行标题是 basename、全路径单独弱化', await t.js(`(() => {
+    const row = document.querySelector('${ROWS}')
+    const title = row.querySelector('strong')
+    return !!title && title.textContent === 'index.ts' && row.textContent.includes('src/module-0000/index.ts')
+  })()`))
+  t.ok('未选结果时右栏有引导空态', (await t.text(MAIN)).includes('未选择结果'))
+  t.ok('空态带图标', await t.js(`!!document.querySelector('${MAIN} svg')`))
+
   // 滚到栏底，「显示更多」就在眼前，点得到
   await scrollToEnd(t, SPLIT)
   t.ok('找到「显示更多」', await markByText(t, '[data-code-list] button', '显示更多', 'more'))
@@ -132,22 +144,30 @@ export default async function (t) {
   t.ok('超长内容写明已截断', (await t.text('[data-code-list]')).includes('已截断'))
   await expectBoundedPage(t, '展开原始结果后')
 
-  // —— 详情一：400 行的小文件整块渲染 ——
+  // —— 详情一：小文件，CodeMirror 只读高亮、铺满详情列 ——
   await t.js(`document.querySelector('${SPLIT}').scrollTop = 0`)
   await t.click(ROWS, 20)
   t.ok('源码预览出来', await t.waitFor(SRC))
-  await t.waitUntil(`document.querySelectorAll('${SRC} > div').length === ${data.smallSourceLines}`)
-  t.check('小文件 400 行全在 DOM 里（不虚拟化，整段可选中复制）', await t.count(`${SRC} > [data-source-line]`), data.smallSourceLines)
+  await t.waitFor(SRC_LINES)
+  t.ok('语法高亮开启', await t.waitFor(`${SRC} .cm-line span[class]`))
+  t.ok('小文件元信息写行数与只读', (await t.text(MAIN)).includes(`${data.smallSourceLines} 行 · 只读`))
   const mainBox = await t.js(metrics(MAIN))
   const sideBox = await t.js(metrics(SPLIT))
   t.check('详情栏和列表栏同高', mainBox.clientHeight, sideBox.clientHeight)
-  t.ok('详情内容比栏高，在栏内滚动', mainBox.scrollHeight > mainBox.clientHeight)
   const source = await t.rect(SRC)
-  t.ok(`源码预览自己有高度上限（${Math.round(source.h)}px ≤ 522px）`, source.h <= 522)
+  t.ok(`符号行：源码框与底部上下文区一起填满详情列（源码 ${Math.round(source.h)}px）`, await t.js(`(() => {
+    const m = document.querySelector('${MAIN}').getBoundingClientRect()
+    const col = document.querySelector('${MAIN} > div')
+    const last = col.lastElementChild.getBoundingClientRect()
+    const s = document.querySelector('${SRC}').getBoundingClientRect()
+    return s.height > 240 && m.bottom - last.bottom <= 40
+  })()`))
+  t.ok('长内容在 CodeMirror 滚动区里滚', await t.js(`(() => { const e = document.querySelector('${SCROLLER}'); return e.scrollHeight > e.clientHeight + 100 })()`))
   await expectBoundedPage(t, '详情')
   await t.shot('detail')
+  t.ok('选中行有左侧强调条', await t.js(`getComputedStyle(document.querySelector('${ROWS}[aria-pressed="true"]')).boxShadow !== 'none'`))
 
-  // —— 详情二：12000 行的大文件，虚拟化 ——
+  // —— 详情二：12000 行的大文件，CodeMirror 只画窗口附近的行 ——
   await t.js(`(() => {
     const row = document.querySelectorAll('${ROWS}')[1]
     row.setAttribute('data-probe-node', 'row2')
@@ -155,48 +175,58 @@ export default async function (t) {
   })()`)
   await t.click('[data-probe-node="row2"]', 20)
   await t.waitUntil(`document.body.textContent.includes('${data.bigSourceLines} 行 · 只读')`)
-  await t.waitUntil(`!!document.querySelector('${SRC}') && document.querySelectorAll('${SRC_LINES}').length > 0`)
+  await t.waitUntil(`document.querySelectorAll('${SRC_LINES}').length > 0`)
   const windowed = await t.count(SRC_LINES)
   t.ok(`大文件只挂窗口附近的行（${windowed} 行，不是 ${data.bigSourceLines}）`, windowed > 0 && windowed < WINDOW_LIMIT)
-  t.ok('索引行 6 挂在 DOM 里且标成当前位置', (await t.js(`document.querySelector('[data-testid="code-source-line-6"]')?.getAttribute('aria-current')`)) === 'location')
-  t.ok('索引行 6 完整在预览可视区里', await t.waitUntil(insideScroller('[data-testid="code-source-line-6"]', SRC)))
+  t.ok('索引行 6 高亮成当前位置', await t.waitUntil(`(() => { const e = document.querySelector('${TARGET}'); return !!e && e.textContent.includes('const line6 = 6') })()`))
+  t.ok('索引行 6 完整在预览可视区里', await t.waitUntil(insideScroller(TARGET, SRC)))
   const bigSource = await t.rect(SRC)
-  t.ok(`大文件预览同样有高度上限（${Math.round(bigSource.h)}px ≤ 522px）`, bigSource.h <= 522)
+  t.ok(`大文件预览保住源码区高度（${Math.round(bigSource.h)}px > 240px）`, bigSource.h > 240)
   await expectBoundedPage(t, '大文件详情')
 
-  // 跳到第 9000 行：目标行不在 DOM 里，靠 scrollToIndex 滚过去并居中
+  // 跳到第 9000 行：目标行不在 DOM 里，靠 scrollIntoView 滚过去并居中
   await t.click(JUMP_INPUT, 20)
   await t.type('9000')
   await t.key('Return')
-  await t.waitUntil(`document.querySelector('[data-testid="code-source-line-9000"]')?.getAttribute('aria-current') === 'location'`)
-  t.ok('跳到第 9000 行后它在预览可视区里', await t.waitUntil(insideScroller('[data-testid="code-source-line-9000"]', SRC)))
-  const off = await t.js(offCenter('[data-testid="code-source-line-9000"]'))
+  await t.waitUntil(`(() => { const e = document.querySelector('${TARGET}'); return !!e && e.textContent.includes('// line 9000:') })()`)
+  t.ok('跳到第 9000 行后它在预览可视区里', await t.waitUntil(insideScroller(TARGET, SRC)))
+  const off = await t.js(offCenter(TARGET))
   t.ok(`第 9000 行大致居中（偏离 ${off}px ≤ 120px）`, off <= 120)
   t.ok('跳转后窗口仍然很小', (await t.count(SRC_LINES)) < WINDOW_LIMIT)
   await t.shot('big-source-line-9000')
 
-  // 折行的长注释行：第 200 行比普通行高，窗口里的行高不一也不叠在一起
+  // 长注释行：不折行，横向滚动；行高 uniform 不叠在一起
   await t.click(JUMP_INPUT, 20)
   await t.key('a', ['control'])
   await t.type(String(data.longCommentEvery))
   await t.key('Return')
-  await t.waitUntil(`document.querySelector('[data-testid="code-source-line-${data.longCommentEvery}"]')?.getAttribute('aria-current') === 'location'`)
-  await t.waitUntil(insideScroller(`[data-testid="code-source-line-${data.longCommentEvery}"]`, SRC))
-  const wrapped = await t.rect(`[data-testid="code-source-line-${data.longCommentEvery}"]`)
-  const plain = await t.rect(`[data-testid="code-source-line-${data.longCommentEvery - 1}"]`)
-  t.ok(`折行的长注释比普通行高（${Math.round(wrapped.h)}px > ${Math.round(plain.h)}px）`, wrapped.h > plain.h * 1.5)
-  t.ok('长注释行紧接着上一行，没有重叠', Math.abs(plain.bottom - wrapped.y) <= 1)
+  await t.waitUntil(`(() => { const e = document.querySelector('${TARGET}'); return !!e && e.textContent.includes('这是一条很长的注释') })()`)
+  await t.waitUntil(insideScroller(TARGET, SRC))
+  t.ok('长行不折行、滚动区横向滚', await t.js(`(() => { const e = document.querySelector('${SCROLLER}'); return e.scrollWidth > e.clientWidth + 100 })()`))
+  t.ok('行号栏不透明，横滚时行号不叠在代码上', await t.js(`getComputedStyle(document.querySelector('${SRC} .cm-gutters')).backgroundColor !== 'rgba(0, 0, 0, 0)'`))
+  const wrapped = await t.rect(TARGET)
+  const plain = await t.rect(SRC_LINES)
+  t.ok(`行高 uniform 不重叠（${Math.round(wrapped.h)}px ≈ ${Math.round(plain.h)}px）`, Math.abs(wrapped.h - plain.h) <= 2)
 
-  // 滚到文件尾、再滚回文件头：两头的行都挂得出来，滚动中窗口始终很小
-  for (let i = 0; i < 8 && !(await t.js(`!!document.querySelector('[data-testid="code-source-line-${data.bigSourceLines}"]')`)); i++) {
-    await t.wheel(SRC, 20000000)
-  }
-  t.ok('滚到底能看到最后一行', await t.waitFor(`[data-testid="code-source-line-${data.bigSourceLines}"]`))
-  t.ok('滚到底时窗口仍然很小', (await t.count(SRC_LINES)) < WINDOW_LIMIT)
-  for (let i = 0; i < 8 && !(await t.js(`!!document.querySelector('[data-testid="code-source-line-1"]')`)); i++) {
+  // 滚轮能滚、跳得到文件尾、滚得回文件头：两头行都挂得出来，窗口始终很小
+  await t.click(JUMP_INPUT, 20)
+  await t.key('a', ['control'])
+  await t.type('1')
+  await t.key('Return')
+  await t.waitUntil(`(() => { const e = document.querySelector('${TARGET}'); return !!e && e.textContent.includes('const line1 = 1') })()`)
+  const topBefore = await t.js(`document.querySelector('${SCROLLER}').scrollTop`)
+  await t.wheel(SRC, 3000)
+  t.ok('滚轮向下滚动源码', await t.waitUntil(`document.querySelector('${SCROLLER}').scrollTop > ${topBefore + 100}`))
+  await t.click(JUMP_INPUT, 20)
+  await t.key('a', ['control'])
+  await t.type(String(data.bigSourceLines))
+  await t.key('Return')
+  t.ok('跳到文件尾能看到最后一行', await t.waitUntil(`(() => { const e = document.querySelector('${TARGET}'); return !!e && e.textContent.includes('// line ${data.bigSourceLines}:') })()`))
+  t.ok('文件尾时窗口仍然很小', (await t.count(SRC_LINES)) < WINDOW_LIMIT)
+  for (let i = 0; i < 8 && !(await t.js(`document.querySelector('${SRC}').textContent.includes('const line1 = 1')`)); i++) {
     await t.wheel(SRC, -20000000)
   }
-  t.ok('滚回顶部能看到第一行', await t.waitFor('[data-testid="code-source-line-1"]'))
+  t.ok('滚回顶部能看到第一行', await t.waitUntil(`document.querySelector('${SRC}').textContent.includes('const line1 = 1')`))
 
   // —— 矮窗口：卡片有 320px 的下限，放不下的部分由外层面板滚动，不是把分栏压成一条缝 ——
   // 卡片里还有搜索栏（约 47px），所以分栏至少 270px 左右；下限没生效时这里只有 150px 上下。
@@ -207,12 +237,32 @@ export default async function (t) {
   t.ok('矮窗口：放不下的部分由外层面板滚动', shortPanel.scrollHeight > shortPanel.clientHeight + 20)
   await t.resize(...tall)
 
-  // —— 窄视口：容器小于 800px 只显示详情栏，同样有上限 ——
+  // —— 窄视口：容器小于 800px 只显示详情栏，源码在 CM 滚动区里滚 ——
   const restore = await t.resize(640, 880)
   await expectBoundedPage(t, '窄视口详情', MAIN)
-  const narrow = await t.js(metrics(MAIN))
-  t.ok('窄视口详情栏在栏内滚动', narrow.scrollHeight > narrow.clientHeight)
+  const narrow = await t.js(metrics(SCROLLER))
+  t.ok('窄视口源码在 CodeMirror 滚动区里滚', narrow.scrollHeight > narrow.clientHeight)
   t.ok('窄视口下大文件窗口仍然很小', (await t.count(SRC_LINES)) < WINDOW_LIMIT)
   await t.shot('detail-narrow')
   await t.resize(...restore)
+
+  // —— 文件行详情：源码框纯铺满、底部没有废话 ——
+  await t.click('button[aria-label="返回结果列表"]', 12)
+  await t.click(INPUT, 20)
+  await t.key('a', ['control'])
+  await t.key('Backspace')
+  await t.waitUntil(`document.querySelectorAll('${ROWS}').length === ${data.pageSize}`)
+  await t.click(ROWS, 20)
+  await t.waitFor(SRC)
+  const fileMain = await t.js(metrics(MAIN))
+  const fileSource = await t.rect(SRC)
+  t.ok(`文件行源码框铺满详情列、底部无死白（${Math.round(fileSource.h)}px）`, fileSource.h > 400 && fileSource.bottom >= fileMain.bottom - 40)
+  t.ok('文件行详情不挂符号废话', !(await t.text(MAIN)).includes('未提供符号'))
+  await t.shot('detail-file')
+
+  // —— 浅色主题目检截图 ——
+  await t.setTheme('light')
+  await t.shot('detail-file-light')
+  await t.click('button[aria-label="返回结果列表"]', 12)
+  await t.shot('files-light')
 }

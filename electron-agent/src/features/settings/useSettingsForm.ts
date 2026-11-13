@@ -24,7 +24,7 @@ export function hydrateSettingsValues(next: Record<string, string>): void {
   for (const hydrate of hydrates) hydrate(next);
 }
 
-export function useSettingsForm(): SettingsForm {
+export function useSettingsForm(options: { cacheWarming?: boolean } = {}): SettingsForm {
   const { workspace } = useAgentStoreContext();
   const [values, setValues] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -34,16 +34,17 @@ export function useSettingsForm(): SettingsForm {
   const wsRef = useRef(workspace);
   wsRef.current = workspace;
   const valuesRef = useRef(values);
+  const savedCacheWarming = useRef<string | undefined>(undefined);
   valuesRef.current = values;
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    void pi
-      .getSettings()
-      .then((s) => {
+    void Promise.all([pi.getSettings(), options.cacheWarming ? pi.getCacheWarming() : Promise.resolve(undefined)])
+      .then(([s, mode]) => {
         if (alive) {
-          setValues(s ?? {});
+          savedCacheWarming.current = mode;
+          setValues({ ...(s ?? {}), ...(mode === undefined ? {} : { PI_CACHE_WARMING: mode }) });
           setDirty(false);
         }
       })
@@ -60,8 +61,9 @@ export function useSettingsForm(): SettingsForm {
 
   useEffect(() => {
     const hydrate = (next: Record<string, string>) => {
-      valuesRef.current = next;
-      setValues(next);
+      const hydrated = { ...next, ...(savedCacheWarming.current === undefined ? {} : { PI_CACHE_WARMING: savedCacheWarming.current }) };
+      valuesRef.current = hydrated;
+      setValues(hydrated);
       setDirty(false);
     };
     hydrates.add(hydrate);
@@ -89,12 +91,21 @@ export function useSettingsForm(): SettingsForm {
     return true;
   };
 
+  const persistValues = async () => {
+    const { PI_CACHE_WARMING: mode, ...settings } = valuesRef.current;
+    await pi.setSettings(settings);
+    if (options.cacheWarming && mode !== savedCacheWarming.current) {
+      await pi.setCacheWarming(mode);
+      savedCacheWarming.current = mode;
+    }
+  };
+
   const persist = useCallback(async () => {
     setSaving(true);
     setError(null);
     try {
       if (rejectInvalid()) return;
-      await pi.setSettings(valuesRef.current);
+      await persistValues();
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -108,7 +119,7 @@ export function useSettingsForm(): SettingsForm {
     setError(null);
     try {
       if (rejectInvalid()) return;
-      await pi.setSettings(valuesRef.current);
+      await persistValues();
       setDirty(false);
       // restart 类设置：close + open 重启 sidecar 使其生效。
       const ws = wsRef.current;

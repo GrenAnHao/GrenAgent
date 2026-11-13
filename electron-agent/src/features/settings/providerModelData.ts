@@ -1,4 +1,5 @@
 import { useSessionStore } from '../../store/session';
+import { useVisibleModels } from '../../stores/modelVisibilityStore';
 import { useAvailableModels } from './availableModelsCache';
 import { useProviderList } from './providerListCache';
 
@@ -29,7 +30,7 @@ export function useProviderModelData(): ProviderModelData {
   const models = useAvailableModels(workspace);
   const providers = useProviderList();
 
-  const list = models ?? [];
+  const list = useVisibleModels(models ?? []);
   const nameOf = (id: string) => providers.find((p) => p.id === id)?.name ?? id;
   const providerOptions = Array.from(new Set(list.map((m) => m.provider))).map((id) => ({
     label: nameOf(id),
@@ -40,5 +41,6 @@ export function useProviderModelData(): ProviderModelData {
       .filter((m) => m.provider === providerId)
       .map((m) => ({ label: m.name ?? m.id, value: m.id }));
 
-  return { ready: list.length > 0, providerOptions, nameOf, modelsFor };
+  // All hidden is a loaded catalog with no candidates, not a reason to offer free typing.
+  return { ready: (models?.length ?? 0) > 0, providerOptions, nameOf, modelsFor };
 }

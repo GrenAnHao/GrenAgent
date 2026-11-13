@@ -44,7 +44,7 @@ describe('UsageService', () => {
     expect(report.byModel).toEqual([{ provider: 'openai', model: 'gpt-5', tokens: 20, cost: 0.25, messages: 1 }]);
     expect(report.byProject).toEqual([{ cwd: 'C:/work', name: 'Latest', tokens: 20, cost: 0.25, sessions: 1 }]);
     expect(report.recentSessions[0]).toMatchObject({ id: 's1', name: 'Latest', tokens: 20, cost: 0.25, path: join(sessionDir, 'a.jsonl') });
-    expect(report.calls).toEqual([{ timestamp: '2026-08-30T10:00:00Z', provider: 'openai', model: 'gpt-5', input: 10, output: 5, cacheRead: 4, cacheWrite: 1, totalTokens: 20, cost: 0.25 }]);
+    expect(report.calls).toEqual([{ responseModel:null,costSource:'unknown',timestamp: '2026-08-30T10:00:00Z', provider: 'openai', model: 'gpt-5', input: 10, output: 5, cacheRead: 4, cacheWrite: 1, totalTokens: 20, cost: 0.25 }]);
   });
 
   it('ignores usage-looking text inside tool results and non-session files', async () => {
@@ -105,4 +105,39 @@ describe('UsageService', () => {
     expect(x).toBe(y);
     await x;
   });
+});
+
+it('cold reconciliation freezes legacy, ignores unmanaged/forged/imported histories and records only new local entries', async()=>{
+ const {agent,sessionDir,ledger,service}=await setup();
+ const old=join(sessionDir,'old.jsonl');await writeFile(old,`${header('old')}\n${assistant('2026-11-10T00:00:00Z',1,12)}\n`);
+ expect((await service.report()).totals.messages).toBe(1);
+ const {UsageOriginRegistry,defaultOriginRegistryPath}=await import('../../../extensions/usage-ledger/originRegistry.js');
+ const registry=new UsageOriginRegistry(defaultOriginRegistryPath(agent));
+ try {
+  registry.prepare({operationId:'copy',kind:'clone',targetSessionId:'copy',mappings:[{targetEntryId:'e1',source:{sessionId:'old',entryId:'e1'}}]});registry.commit('copy');
+  await writeFile(join(sessionDir,'copy.jsonl'),`${header('copy')}\n${assistant('2026-11-10T00:00:00Z',1,999,{responseModel:'poison',responseId:'pretend'})}\n`);
+  await writeFile(join(sessionDir,'missing.jsonl'),`${header('missing')}\n${assistant('2026-11-10T00:00:00Z',1,999)}\n`);
+  registry.prepare({operationId:'import',kind:'import',targetSessionId:'external',mappings:[{targetEntryId:'e1'}]});registry.commit('import');
+  registry.registerLocalEntry({sessionId:'external',entryId:'e2'},join(sessionDir,'import.jsonl'));
+  await writeFile(join(sessionDir,'import.jsonl'),`${header('external')}\n${assistant('2026-11-10T00:00:00Z',1,999,{responseId:'same'})}\n${assistant('2026-11-10T00:00:01Z',2,4,{responseModel:'actual'})}\n`);
+ }finally{registry.close();}
+ const cold=new UsageService(agent,{ledger});expect(await cold.reconcile()).toMatchObject({added:1});
+ expect((await cold.report()).totals).toMatchObject({messages:2,cost:0.16});
+ expect(await cold.reconcile()).toMatchObject({added:0});
+ await writeFile(join(agent,'usage','legacy-roster-v1.json'),'corrupt');
+ await expect(cold.reconcile()).rejects.toThrow('corrupt');
+ expect(ledger.report().totals.messages).toBe(2);
+});
+it('a new file spoofing a registered header and entry cannot backfill original metadata',async()=>{
+ const {sessionDir,service,ledger}=await setup();await writeFile(join(sessionDir,'original.jsonl'),`${header('same')}\n${assistant('2026-11-10T00:00:00Z',1,12)}\n`);await service.report();
+ await writeFile(join(sessionDir,'a-spoof.jsonl'),`${header('same')}\n${assistant('2026-11-10T00:00:00Z',1,999,{responseModel:'poison',usage:{cost:{total:999,totalFromProvider:true}}})}\n`);
+ await service.reconcile();expect(ledger.report().calls[0]).toMatchObject({responseModel:null,costSource:'unknown',cost:0.12});expect(ledger.report().totals.messages).toBe(1);
+});
+it('reconciles only exact persisted cache_warm envelopes and keeps auxiliary/tool usages outside assistant totals',async()=>{
+ const {agent,sessionDir,service,ledger}=await setup();const file=join(sessionDir,'native.jsonl');const usage={input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{total:0.03,totalFromProvider:false}};
+ const warm={type:'usage',kind:'cache_warm',id:'warm-entry',timestamp:'2026-11-10T00:00:00Z',provider:'p',model:'attributed',usage};
+ await writeFile(file,[header('native'),assistant('2026-11-10T00:00:00Z',1,12),JSON.stringify(warm),JSON.stringify({type:'compaction',id:'compact',usage}),JSON.stringify({type:'branch_summary',id:'branch',usage}),toolResult(JSON.stringify({usage}))].join('\n'));
+ const report=await service.report();expect(report.totals).toMatchObject({messages:1,cost:0.12});expect(report.warmingTotals).toMatchObject({messages:1,cost:0.03});expect(report.recordedCost?.totalCost).toBe(0.15);
+ const {UsageOriginRegistry,defaultOriginRegistryPath}=await import('../../../extensions/usage-ledger/originRegistry.js');const r=new UsageOriginRegistry(defaultOriginRegistryPath(agent));try{r.prepare({operationId:'copy-warm',kind:'clone',targetSessionId:'copy-warm',mappings:[{targetEntryId:'warm-entry',source:{sessionId:'native',entryId:'warm-entry'}}]});r.commit('copy-warm');}finally{r.close();}
+ await writeFile(join(sessionDir,'copy.jsonl'),[header('copy-warm'),JSON.stringify(warm)].join('\n'));await rm(file);await service.reconcile();expect(ledger.report().warmingTotals).toMatchObject({messages:1,cost:0.03});
 });

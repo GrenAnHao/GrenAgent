@@ -1,0 +1,18 @@
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {afterEach,expect,it} from 'vitest';import {SessionManager} from '../../../cli/src/pi-sdk.js';
+import {PiRuntimeService} from './piRuntimeService.js';import {contextExclusionConfigKey} from '../../../extensions/compaction-policy/exclusion.js';
+const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true});});
+async function fixture(pulse:unknown){const dir=await mkdtemp(join(tmpdir(),'workflow-pulse-'));dirs.push(dir);const sm=SessionManager.create(dir,join(dir,'sessions'));const m=sm.appendMessage({role:'user',content:'M',timestamp:1});const config=join(dir,'runtime.json');await writeFile(config,JSON.stringify({[contextExclusionConfigKey(dir)]:typeof pulse==='string'?pulse:JSON.stringify(pulse)}));const session={sessionId:sm.getSessionId(),sessionFile:sm.getSessionFile(),sessionManager:sm,isIdle:true};const handle={session};const service=new PiRuntimeService({agentDir:dir,runtimeConfigPath:config,agentHost:{get:()=>handle,open:async()=>handle,close:async()=>{}} as never,modelRuntimeHost:{refresh:async()=>{}}});const tree=(await service.sessionWorkflow(dir,{action:'tree',targetSessionPath:sm.getSessionFile()})).tree!;return{dir,sm,m,service,tree};}
+it.each([{op:'add',ts:1,rev:5},'not-json'])('refuses export preview before a pending/unknown old exclusion pulse is confirmed',async pulse=>{const f=await fixture(pulse);await expect(f.service.sessionWorkflow(f.dir,{...f.tree,action:'export-preview',format:'jsonl',destination:join(f.dir,'out.jsonl')})).rejects.toThrow('SESSION_EXCLUSION_PENDING');});
+it('accepts a persisted matching pulse, but rejects a legacy append occurring during async snapshot validation',async()=>{const f=await fixture({op:'add',ts:1,rev:5});f.sm.appendCustomEntry('context_exclusion',{op:'add',ts:1});const tree=(await f.service.sessionWorkflow(f.dir,{action:'tree',targetSessionPath:f.sm.getSessionFile()})).tree!;await expect(f.service.sessionWorkflow(f.dir,{...tree,action:'export-preview',format:'jsonl',destination:join(f.dir,'good.jsonl')})).resolves.toMatchObject({status:'ok'});
+ let entered!:()=>void,release!:()=>void;const started=new Promise<void>(r=>entered=r);const reading=new Promise<void>(r=>release=r);
+ const internal=f.service as unknown as {portability:{previewExport:(...args:unknown[])=>Promise<unknown>}};const original=internal.portability.previewExport.bind(internal.portability);internal.portability.previewExport=async(...args)=>{entered();await reading;return original(...args);};
+ const pending=f.service.sessionWorkflow(f.dir,{...tree,action:'export-preview',format:'jsonl',destination:join(f.dir,'stale.jsonl')});await started;f.sm.appendLabelChange(f.m,'unreviewed');release();await expect(pending).rejects.toThrow('SESSION_STALE');
+});
+
+it('derived previews are read-only and state exact before/at/current retained paths',async()=>{
+ const f=await fixture(undefined);const {readFile}=await import('node:fs/promises');const original=await readFile(f.sm.getSessionFile()!,'utf8');
+ const before=await f.service.sessionWorkflow(f.dir,{...f.tree,action:'fork-preview',entryId:f.m,position:'before'});expect(before).toMatchObject({nodeCount:0,targetLeafId:null,editorText:'M'});
+ const at=await f.service.sessionWorkflow(f.dir,{...f.tree,action:'fork-preview',entryId:f.m,position:'at'});expect(at).toMatchObject({nodeCount:1,targetLeafId:f.m});
+ const clone=await f.service.sessionWorkflow(f.dir,{...f.tree,action:'clone-preview'});expect(clone.nodeCount).toBe(1);expect(await readFile(f.sm.getSessionFile()!,'utf8')).toBe(original);
+});

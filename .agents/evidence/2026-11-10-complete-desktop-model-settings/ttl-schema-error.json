@@ -1,0 +1,3 @@
+{
+  "error": "Invalid models.json schema:\n  - providers.fixture.models.0.promptCache.long: must be number\n\nFile: C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-ttl-schema-QNLV3o\\models.json"
+}

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+
+ Test Files  2 passed (2)
+      Tests  31 passed (31)
+   Start at  00:00:33
+   Duration  1.27s (transform 90ms, setup 0ms, import 154ms, tests 865ms, environment 0ms)
+

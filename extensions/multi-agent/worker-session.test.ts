@@ -63,7 +63,7 @@ const uiEvents = vi.hoisted(() => [] as unknown[]);
 vi.mock("./embedded-events.js", () => ({ emitEmbeddedSubagentEvent: (event: unknown) => uiEvents.push(event) }));
 
 import { spawn } from "node:child_process";
-import { openWorkerChildSession, resumeWorkerChildSession, workerSlotsInUse } from "./worker-session.js";
+import { openWorkerChildSession, resumeWorkerChildSession, workerSlotsInUse,syncWorkerModelCompactionBudgets } from "./worker-session.js";
 import { onLeakedError } from "../_shared/leak-owner.js";
 import { __resetApprovalRoutesForTest, registerTopApprovalRoute } from "../_shared/approval-route.js";
 
@@ -380,4 +380,16 @@ describe("routing domain across the worker boundary", () => {
     const resumed = await resumeWorkerChildSession("/ws/s/sa-1.jsonl", "sa-1");
     expect(resumed.routingMode).toBe("ordinary");
   });
+});
+
+it('worker budget transport aggregates explicit ACKs and reports pending/disconnected owners',async()=>{
+ let release!:Function;const gate=new Promise(r=>{release=r;});const path='/budget-worker/child.jsonl';const child=nextChild(async(method)=>{
+  if(method==='open'){await gate;return {sessionId:'budget-worker',sessionPath:path,workspace:'/budget-worker',inheritedEventCount:0,entries:[],state:idle};}
+  if(method==='modelCompaction.sync')return {sessions:[{workspace:'/budget-worker',sessionPath:path,provider:'fixture',modelId:'m',effective:{reserveTokens:123,keepRecentTokens:456}}]};return null;
+ });
+ const opening=openWorkerChildSession({cwd:'/budget-worker',task:'budget',agentId:'budget-worker'},prepared());await new Promise(r=>setTimeout(r,0));
+ expect((await syncWorkerModelCompactionBudgets()).sessions.some(s=>s.error==='WORKER_SESSION_NOT_READY')).toBe(true);release();const handle=await opening;
+ expect((await syncWorkerModelCompactionBudgets()).sessions.find(s=>s.sessionPath===path)).toMatchObject({effective:{reserveTokens:123,keepRecentTokens:456}});
+ child.exit(1);expect((await syncWorkerModelCompactionBudgets()).sessions.find(s=>s.sessionPath===path)).toMatchObject({error:'WORKER_DISCONNECTED'});
+ handle.session.dispose();expect((await syncWorkerModelCompactionBudgets()).sessions.some(s=>s.sessionPath===path)).toBe(false);
 });

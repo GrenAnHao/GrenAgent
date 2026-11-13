@@ -1,10 +1,13 @@
 import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core';
+import type { ReactNode } from 'react';
 import { Icon } from '@lobehub/ui';
 import { fastApiSupported } from '../../../../extensions/_shared/fast-mode';
 import { useModelMessages } from '../../lib/modelMessages';
 import { Checkbox, Collapse, Input, InputNumber, Select } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react';
+import { ModelAdvancedOptionsEditor, type AdvancedDrafts } from './ModelAdvancedOptionsEditor';
+import type { ProviderModelOptions } from '../../../../extensions/_shared/provider-model-options';
 import {
   THINKING_FORMAT_OPTIONS,
   THINKING_LEVEL_ROWS,
@@ -40,6 +43,13 @@ const styles = createStaticStyles(({ css }) => ({
   grow: css`
     flex: 1 1 150px;
     min-width: 0;
+  `,
+  builtinId: css`
+    flex: 0 1 220px;
+    min-width: 120px;
+    padding-inline: 0;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
   `,
   chk: css`
     flex: 0 0 auto;
@@ -213,16 +223,17 @@ function duplicateThresholds(tiers: ModelCostTier[]): Set<number> {
 
 interface CostTiersEditorProps {
   cost: ModelCost | undefined;
-  index: number;
+  index: number | string;
+  preserveEmpty?: boolean;
   onChange: (cost: ModelCost) => void;
 }
 
-function CostTiersEditor({ cost, index, onChange }: CostTiersEditorProps) {
+function CostTiersEditor({ cost, index, onChange, preserveEmpty = false }: CostTiersEditorProps) {
   const tiers = cost?.tiers ?? [];
   const dup = duplicateThresholds(tiers);
   const missingThreshold = tiers.some((t) => typeof t.inputTokensAbove !== 'number');
 
-  const setTiers = (next: ModelCostTier[]) => onChange({ ...cost, tiers: next.length ? next : undefined });
+  const setTiers = (next: ModelCostTier[]) => onChange({ ...cost, tiers: next.length || preserveEmpty ? next : undefined });
   const patchTier = (tierIndex: number, patch: Partial<ModelCostTier>) =>
     setTiers(tiers.map((t, i) => (i === tierIndex ? { ...t, ...patch } : t)));
   const addTier = () => {
@@ -344,8 +355,24 @@ function setCompat(model: UiModel, key: string, value: unknown): Partial<UiModel
   return patch;
 }
 
-function renderCompatControl(field: CompatField, model: UiModel, index: number, onChange: (patch: Partial<UiModel>) => void) {
+function renderCompatControl(field: CompatField, model: UiModel, index: number | string, onChange: (patch: Partial<UiModel>) => void) {
   const raw = compatValue(model.compat, field.key);
+  if (field.kind === 'bool' && field.defaultLabel) {
+    return (
+      <Select
+        data-testid={`prov-compat-${field.key}-${index}`}
+        value={raw === true ? 'enabled' : raw === false ? 'disabled' : 'default'}
+        options={[
+          { value: 'default', label: field.defaultLabel },
+          { value: 'enabled', label: '开启' },
+          { value: 'disabled', label: '关闭' },
+        ]}
+        style={{ width: '100%', marginTop: 8 }}
+        variant="filled"
+        onChange={(value) => onChange(setCompat(model, field.key, value === 'default' ? undefined : value === 'enabled'))}
+      />
+    );
+  }
   if (field.kind === 'bool') {
     return (
       <Checkbox
@@ -402,18 +429,23 @@ export interface ModelCardDragHandle {
 
 export interface ProviderModelCardProps {
   model: UiModel;
-  index: number;
+  index: number | string;
   api: string | undefined;
   expanded: boolean;
   /** ID 为空时标红（保存被拦下之后才传 true）。 */
   markEmptyId?: boolean;
   onToggle: () => void;
   onChange: (patch: Partial<UiModel>) => void;
-  onRemove: () => void;
+  onRemove?: () => void;
   dragHandle?: ModelCardDragHandle;
+  lockedIdentity?: boolean;
+  advancedValue?: ProviderModelOptions & AdvancedDrafts;
+  inherited?: ProviderModelOptions;
+  headerActions?: ReactNode;
 }
 
-export function ProviderModelCard({ model, index, api, expanded, markEmptyId = false, onToggle, onChange, onRemove, dragHandle }: ProviderModelCardProps) {
+export function ProviderModelCard({ model, index, api, expanded, markEmptyId = false, onToggle, onChange, onRemove, dragHandle, lockedIdentity = false, advancedValue, inherited, headerActions }: ProviderModelCardProps) {
+  api = model.api ?? api;
   const messages = useModelMessages();
   const formatChip = thinkingFormatChip(model.thinkingFormat);
   const groups = groupsForEditor(api);
@@ -446,7 +478,7 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
 
   return (
     <div className={styles.card} data-testid={`prov-model-card-${index}`}>
-      <div className={styles.row}>
+      <div className={styles.row} data-testid={`prov-model-header-${index}`}>
         {dragHandle ? (
           <button
             type="button"
@@ -462,12 +494,14 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
           </button>
         ) : null}
         <Input
-          className={styles.grow}
+          className={lockedIdentity ? styles.builtinId : styles.grow}
           data-testid={`prov-model-id-${index}`}
           value={model.id}
+          readOnly={lockedIdentity}
+          title={lockedIdentity ? model.id : undefined}
           placeholder="模型 ID"
           status={markEmptyId && !model.id.trim() ? 'error' : undefined}
-          variant="filled"
+          variant={lockedIdentity ? 'borderless' : 'filled'}
           onChange={(e) => onChange({ id: e.target.value })}
         />
         <Input
@@ -505,7 +539,7 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
           {messages.fastCheckbox}
         </Checkbox>
         {formatChip ? <span className={styles.chip}>{formatChip}</span> : null}
-        <InputNumber
+        <InputNumber<number | string>
           className={styles.ctx}
           data-testid={`prov-model-context-${index}`}
           value={model.contextWindow}
@@ -516,20 +550,21 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
           variant="filled"
           title="上下文窗口（tokens），如 200000 / 1000000"
           formatter={(v) => (v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '')}
-          parser={(v) => (v ? Number(v.replace(/,/g, '')) : 0)}
+          parser={(v) => lockedIdentity ? (v ?? '').replace(/,/g, '') : (v ? Number(v.replace(/,/g, '')) : 0)}
           onChange={(v) => onChange({ contextWindow: typeof v === 'number' ? v : undefined })}
         />
+        {headerActions}
         <button type="button" data-testid={`prov-model-expand-${index}`} className={styles.iconBtn} onClick={onToggle}>
           <Icon icon={expanded ? ChevronUp : ChevronDown} size={14} />
           {expanded ? '收起' : '展开'}
         </button>
-        <button type="button" data-testid={`prov-model-del-${index}`} className={styles.delBtn} onClick={onRemove}>
+        {onRemove ? <button type="button" data-testid={`prov-model-del-${index}`} className={styles.delBtn} onClick={onRemove}>
           <Icon icon={Trash2} size={14} />
-        </button>
+        </button> : null}
       </div>
 
       {expanded ? (
-        <div className={styles.body}>
+        <div className={styles.body} data-testid={`prov-model-body-${index}`}>
           <div className={styles.split}>
             <div className={styles.field}>
               <FieldLabel label="支持扩展思考" en="reasoning" help="打开后，对话里才会出现思考档位。关掉则只发普通回复。" />
@@ -589,7 +624,7 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
             ))}
           </div>
 
-          <CostTiersEditor cost={model.cost} index={index} onChange={(cost) => onChange({ cost })} />
+          <CostTiersEditor cost={model.cost} index={index} preserveEmpty={lockedIdentity} onChange={(cost) => onChange({ cost })} />
 
           {showFormat ? (
             <div className={styles.field} style={{ marginBottom: 12 }}>
@@ -648,16 +683,31 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
             </>
           ) : null}
 
+          <div onKeyDownCapture={(event) => {
+              const target = event.target as HTMLElement;
+              // The shared Collapse handles Enter; add Space only for this new button header.
+              if (event.key === ' ' && target.getAttribute('role') === 'button'
+                && target.querySelector(`[data-testid="prov-model-advanced-toggle-${index}"]`)) {
+                event.preventDefault();
+                if (!event.repeat) target.click();
+              }
+          }}>
           <Collapse
             bordered={false}
             defaultActiveKey={['thinking']}
             destroyOnHidden
-            items={groups.map((g) => ({
+            items={[
+              {
+                key: 'advanced-request',
+                label: <span data-testid={`prov-model-advanced-toggle-${index}`}>高级请求参数</span>,
+                children: <ModelAdvancedOptionsEditor value={advancedValue ?? model} inherited={inherited} api={api} testId={`advanced-${index}`} onChange={onChange} />,
+              },
+              ...groups.map((g) => ({
               key: g.id,
               label: g.title,
               children: g.fields.map((field) => (
-                <div key={field.key} className={field.kind === 'bool' ? styles.compatRow : styles.field} style={field.kind === 'bool' ? undefined : { margin: '10px 0' }}>
-                  {field.kind === 'bool' ? (
+                <div key={field.key} className={field.kind === 'bool' && !field.defaultLabel ? styles.compatRow : styles.field} style={field.kind === 'bool' && !field.defaultLabel ? undefined : { margin: '10px 0' }}>
+                  {field.kind === 'bool' && !field.defaultLabel ? (
                     <>
                       {renderCompatControl(field, model, index, onChange)}
                       <span>
@@ -674,8 +724,10 @@ export function ProviderModelCard({ model, index, api, expanded, markEmptyId = f
                   )}
                 </div>
               )),
-            }))}
+            })),
+            ]}
           />
+          </div>
         </div>
       ) : null}
     </div>

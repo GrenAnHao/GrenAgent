@@ -89,6 +89,32 @@ const builtins = [
 ];
 
 describe('PiPackageService.list', () => {
+  it('exposes scoped read-only disk snapshots without installing or loading packages', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gren-package-snapshot-'));
+    const userPath = join(root, 'agent/npm/node_modules/demo');
+    const projectPath = join(root, 'ws/.pi/npm/node_modules/demo');
+    await mkdir(userPath, { recursive: true }); await mkdir(projectPath, { recursive: true });
+    await writeFile(join(userPath, 'package.json'), '{"name":"demo","version":"1.0.0"}');
+    await writeFile(join(projectPath, 'package.json'), '{"name":"demo","version":"2.0.0"}');
+    const settings = fakeSettings({ global: [{ source: 'npm:demo@1.0.0', autoload: false, skills: ['kept'] }], project: ['npm:demo@2.0.0'] });
+    const install = vi.fn();
+    const svc = new PiPackageService({
+      agentDir: join(root, 'agent'), allowedPluginIds: () => [], extensions: [], createSettingsManager: () => settings,
+      createPackageManager: () => ({ listConfiguredPackages: () => [
+        { source: 'npm:demo@1.0.0', scope: 'user', filtered: true, installedPath: userPath },
+        { source: 'npm:demo@2.0.0', scope: 'project', filtered: false, installedPath: projectPath },
+      ], installAndPersist: install, removeAndPersist: vi.fn() }),
+    });
+    try {
+      const snapshots = await svc.snapshots(join(root, 'ws'));
+      expect(snapshots.map((row) => [row.scope, row.installedVersion, row.enabled])).toEqual([['user', '1.0.0', false], ['project', '2.0.0', true]]);
+      expect(snapshots[0].key).not.toBe(snapshots[1].key);
+      expect(snapshots[0].overriddenBy).toBe(snapshots[1].key);
+      expect(snapshots[0].filters).toEqual({ skills: ['kept'] });
+      expect(install).not.toHaveBeenCalled();
+    } finally { if (!root.startsWith(join(tmpdir(), 'gren-package-snapshot-'))) throw new Error('unsafe cleanup'); await rm(root, { recursive: true, force: true }); }
+  });
+
   it('lists CORE_ALWAYS_ON plus allowed managed plugins, not CHAT_EXCLUDED unmanaged names', async () => {
     const settings = fakeSettings({
       global: [

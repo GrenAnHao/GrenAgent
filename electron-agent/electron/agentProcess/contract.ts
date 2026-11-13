@@ -14,8 +14,10 @@ export const AGENT_METHODS = [
   'pi.closeWorkspace',
   'pi.respondUi',
   'pi.send',
+  'pi.sessionWorkflow',
   'pi.permissionProfile',
   'pi.refreshModelRegistry',
+  'pi.syncModelCompactionBudgets',
   'pi.enqueueTurn',
   'pi.releaseSessions',
   'pi.ownsSession',
@@ -38,6 +40,7 @@ export const AGENT_METHODS = [
   'controlPlane.releaseChildForDelete',
   'resources.reload',
   'extensions.catalog',
+  'observations.command',
   'usage.report',
   'usage.reconcile',
 ] as const;
@@ -99,3 +102,4 @@ export interface ExtensionCatalogEntry {
   name: string;
   manifest?: { id: string };
 }
+

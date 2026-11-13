@@ -22,6 +22,11 @@ describe('SETTINGS_SCHEMA notifications', () => {
 });
 
 describe('SETTINGS_SCHEMA general', () => {
+  it('不再提供缓存预热字段，保留原自动压缩设置', () => {
+    const field = SETTINGS_SCHEMA.find((c) => c.id === 'general')?.fields?.find((f) => f.key === 'PI_CACHE_WARMING');
+    expect(field).toBeUndefined();
+    expect(SETTINGS_SCHEMA.find((c) => c.id === 'general')?.fields?.some((f) => f.key === 'AUTO_COMPACT_PERCENT')).toBe(true);
+  });
   it('在标题模型后提供默认开启的自动标题开关', () => {
     const fields = SETTINGS_SCHEMA.find((category) => category.id === 'general')?.fields ?? [];
     const autoTitle = fields.find((field) => field.key === 'AUTO_TITLE');
@@ -193,58 +198,12 @@ describe('AgentData settings', () => {
     const fields = SETTINGS_SCHEMA.flatMap((category) => [...(category.fields ?? []), ...(category.sections ?? []).flatMap((section) => section.fields)]);
     expect(fields.filter((field) => field.key.startsWith('MEMORY_'))).toEqual([]);
   });
-  const category = () => SETTINGS_SCHEMA.find((item) => item.id === 'agentData');
-  const fields = () => category()?.sections?.flatMap((section) => section.fields) ?? [];
 
-  it('在能力分组提供模型和 Wiki 抽取设置', () => {
-    expect(category()).toMatchObject({ title: 'AgentData', group: '能力' });
-    expect(category()?.sections?.map((section) => section.title)).toEqual(['模型', 'Wiki 抽取']);
-    expect(fields().map((field) => field.key)).toEqual([
-      'agentDataModel',
-      'KNOWLEDGE_WIKI_INGEST_MODE',
-      'KNOWLEDGE_WIKI_INGEST_CONCURRENCY',
-      'KNOWLEDGE_LLM_GLOBAL_CONCURRENCY',
-    ]);
-  });
-
-  it('Wiki 模型留空走应用默认模型', () => {
-    expect(fields().find((field) => field.key === 'agentDataModel')).toMatchObject({
-      type: 'model',
-      effect: 'instant',
-      description: expect.stringContaining('留空'),
-    });
-  });
-
-  it('抽取模式默认两段式，并发留空合法、越界在保存前拒绝', () => {
-    expect(fields().find((field) => field.key === 'KNOWLEDGE_WIKI_INGEST_MODE')).toMatchObject({
-      type: 'select',
-      default: 'two-stage',
-      effect: 'instant',
-      options: [
-        { value: 'two-stage', label: '两段式' },
-        { value: 'single-stage', label: '单段式' },
-      ],
-    });
-    expect(fields().find((field) => field.key === 'KNOWLEDGE_WIKI_INGEST_CONCURRENCY')).toMatchObject({
-      type: 'number',
-      min: 1,
-      max: 10,
-      placeholder: '3',
-      effect: 'instant',
-    });
-    expect(fields().find((field) => field.key === 'KNOWLEDGE_LLM_GLOBAL_CONCURRENCY')).toMatchObject({
-      type: 'number',
-      min: 1,
-      max: 20,
-      placeholder: '5',
-      effect: 'instant',
-    });
-    expect(validateSettingValues({})).toBeUndefined();
-    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_CONCURRENCY: '10', KNOWLEDGE_LLM_GLOBAL_CONCURRENCY: '1' })).toBeUndefined();
-    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_CONCURRENCY: '0' })).toMatch(/1 到 10/);
-    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_CONCURRENCY: '11' })).toMatch(/1 到 10/);
-    expect(validateSettingValues({ KNOWLEDGE_LLM_GLOBAL_CONCURRENCY: '21' })).toMatch(/1 到 20/);
-    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_MODE: 'batch' })).toMatch(/两段式|单段式/);
+  it('资料 Wiki 的下线设置已移除', () => {
+    // 资料 Wiki 的抽取模式与抽取并发随该功能下线，运行时无人读取。
+    const fields = SETTINGS_SCHEMA.flatMap((category) => [...(category.fields ?? []), ...(category.sections ?? []).flatMap((section) => section.fields)]);
+    expect(fields.some((field) => field.key === 'KNOWLEDGE_WIKI_INGEST_MODE')).toBe(false);
+    expect(fields.some((field) => field.key === 'KNOWLEDGE_WIKI_INGEST_CONCURRENCY')).toBe(false);
   });
 });
 

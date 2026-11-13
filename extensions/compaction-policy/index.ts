@@ -80,8 +80,14 @@ export default function (pi: ExtensionAPI) {
       .filter((e) => e.type === "custom" && e.customType === "context_exclusion")
       .map((e) => e.data as ExclusionOp);
     excluded = buildExclusionSet(ops);
+    // A new managed snapshot acknowledges only the host's latest pulse, never imported claims.
+    const snapshot = [...entries].reverse().find(e => e.type === "custom" && e.customType === "context_exclusion_snapshot");
+    const data = snapshot?.data as {version?:unknown;pulseRev?:unknown} | undefined;
+    if (data?.version === 1 && typeof data.pulseRev === "number" && Number.isFinite(data.pulseRev)) lastPulseRev = data.pulseRev;
     consumeDesktopPulse();
   });
+
+  pi.on("session_tree", () => { pruneState = emptyPruneState(); });
 
   // context 钩子：排除集 → 超大 toolResult 熔断 → 按压力裁旧工具输出。都只改发往模型的副本。
   pi.on("context", async (event, ctx) => {

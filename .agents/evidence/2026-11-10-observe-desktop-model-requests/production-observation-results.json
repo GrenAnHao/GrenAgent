@@ -1,0 +1,389 @@
+{
+  "entry": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\agent-host.js",
+  "executable": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\node_modules\\electron\\dist\\electron.exe",
+  "facts": [
+    "actual host resolved local registered fixture model",
+    "actual IPC preserves distinct A/B session identities",
+    "background warm has independent request identity",
+    "HTTP whitelist and final source fields reach actual IPC",
+    "temporary structure is safe across actual IPC",
+    "real temporary ledger keeps assistant and warm separate",
+    "actual packaged pi-worker IPC carries safe diagnostics and independent generation",
+    "packaged worker persisted assistant and cache_warm through shared ledger",
+    "no raw diagnostic is persisted after process exit"
+  ],
+  "report": {
+    "totals": {
+      "input": 1000000,
+      "output": 2,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 1000002,
+      "cost": 0.24,
+      "sessions": 2,
+      "messages": 2,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 1000002,
+        "cost": 0.24
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "openrouter",
+        "model": "offline",
+        "tokens": 1000002,
+        "cost": 0.24,
+        "messages": 2
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\B",
+        "name": null,
+        "tokens": 500001,
+        "cost": 0.12,
+        "sessions": 1
+      },
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\A",
+        "name": null,
+        "tokens": 500001,
+        "cost": 0.12,
+        "sessions": 1
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "01a1c3bf-a0ee-75a0-b009-1a3aada66916",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\B",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-llZCsH-B--\\2026-11-10T04-37-58-126Z_01a1c3bf-a0ee-75a0-b009-1a3aada66916.jsonl",
+        "timestamp": "2026-11-10T04:37:58.126Z",
+        "tokens": 500001,
+        "cost": 0.12
+      },
+      {
+        "id": "01a1c3bf-a057-75a0-b009-1a38378e09e7",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\A",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-llZCsH-A--\\2026-11-10T04-37-57-976Z_01a1c3bf-a057-75a0-b009-1a38378e09e7.jsonl",
+        "timestamp": "2026-11-10T04:37:57.976Z",
+        "tokens": 500001,
+        "cost": 0.12
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": "physical-offline",
+        "costSource": "provider",
+        "timestamp": "2026-11-10T04:38:00.061Z",
+        "provider": "openrouter",
+        "model": "offline",
+        "input": 500000,
+        "output": 1,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 500001,
+        "cost": 0.12
+      },
+      {
+        "responseModel": "physical-offline",
+        "costSource": "provider",
+        "timestamp": "2026-11-10T04:37:58.418Z",
+        "provider": "openrouter",
+        "model": "offline",
+        "input": 500000,
+        "output": 1,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 500001,
+        "cost": 0.12
+      }
+    ],
+    "warmingCalls": [
+      {
+        "sessionId": "01a1c3bf-a057-75a0-b009-1a38378e09e7",
+        "entryId": "6b7e6626",
+        "timestamp": "2026-11-10T04:37:59.395Z",
+        "kind": "cache_warm",
+        "provider": "openrouter",
+        "attributedModel": "physical-offline",
+        "input": 500000,
+        "output": 1,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 500001,
+        "cost": 1.500015,
+        "costSource": "catalog"
+      }
+    ],
+    "warmingTotals": {
+      "cost": 1.500015,
+      "messages": 1,
+      "totalTokens": 500001
+    },
+    "recordedCost": {
+      "assistantCost": 0.24,
+      "warmingCost": 1.500015,
+      "totalCost": 1.740015,
+      "sourceBreakdown": {
+        "provider": 0.24,
+        "catalog": 1.500015,
+        "unknown": 0
+      }
+    }
+  },
+  "safeObservations": [
+    {
+      "identity": {
+        "sessionId": "01a1c3bf-a057-75a0-b009-1a38378e09e7",
+        "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-llZCsH-A--\\2026-11-10T04-37-57-976Z_01a1c3bf-a057-75a0-b009-1a38378e09e7.jsonl",
+        "runtimeGeneration": "d4ca5d46-adad-4f1b-996d-bd73dd9eb0c5",
+        "requestId": "d4e8fa0e-d80e-4f28-a61c-f51b8d3b6a6c"
+      },
+      "sequence": 8,
+      "observedAt": 1794285478417,
+      "phase": "completed",
+      "attempt": 1,
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "requestedModel": "offline",
+      "category": "session",
+      "startedAt": 1794285478231,
+      "availability": "supported",
+      "responses": [
+        {
+          "attempt": 1,
+          "metadata": {
+            "rateLimit": {},
+            "httpStatus": 200,
+            "providerRequestId": "assistant-safe"
+          }
+        }
+      ],
+      "collecting": false,
+      "events": [
+        {
+          "id": "[redacted]",
+          "object": "chat.completion.chunk",
+          "created": 1,
+          "model": "[redacted]",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "[redacted]"
+              },
+              "finish_reason": null
+            }
+          ],
+          "unknownFields": {
+            "count": 1
+          }
+        },
+        {
+          "id": "[redacted]",
+          "object": "chat.completion.chunk",
+          "created": 1,
+          "model": "[redacted]",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {},
+              "finish_reason": "[redacted]"
+            }
+          ],
+          "usage": {
+            "total_tokens": 500001,
+            "unknownFields": {
+              "count": 4
+            }
+          },
+          "unknownFields": {
+            "count": 1
+          }
+        }
+      ],
+      "previewVersion": 0,
+      "metadata": {
+        "rateLimit": {},
+        "httpStatus": 200,
+        "providerRequestId": "assistant-safe"
+      },
+      "outcome": {
+        "responseModel": "physical-offline",
+        "costTotal": 0.12,
+        "costSource": "provider"
+      }
+    },
+    {
+      "identity": {
+        "sessionId": "01a1c3bf-a0ee-75a0-b009-1a3aada66916",
+        "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-llZCsH-B--\\2026-11-10T04-37-58-126Z_01a1c3bf-a0ee-75a0-b009-1a3aada66916.jsonl",
+        "runtimeGeneration": "d4ca5d46-adad-4f1b-996d-bd73dd9eb0c5",
+        "requestId": "fb7535dc-0f7f-4e1c-8abf-93efe05f1a20"
+      },
+      "sequence": 18,
+      "observedAt": 1794285480061,
+      "phase": "completed",
+      "attempt": 1,
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "requestedModel": "offline",
+      "category": "session",
+      "startedAt": 1794285478250,
+      "availability": "supported",
+      "responses": [
+        {
+          "attempt": 1,
+          "metadata": {
+            "rateLimit": {},
+            "httpStatus": 200,
+            "providerRequestId": "assistant-safe"
+          }
+        }
+      ],
+      "collecting": false,
+      "events": [
+        {
+          "id": "[redacted]",
+          "object": "chat.completion.chunk",
+          "created": 1,
+          "model": "[redacted]",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "[redacted]"
+              },
+              "finish_reason": null
+            }
+          ],
+          "unknownFields": {
+            "count": 1
+          }
+        },
+        {
+          "id": "[redacted]",
+          "object": "chat.completion.chunk",
+          "created": 1,
+          "model": "[redacted]",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {},
+              "finish_reason": "[redacted]"
+            }
+          ],
+          "usage": {
+            "total_tokens": 500001,
+            "unknownFields": {
+              "count": 4
+            }
+          },
+          "unknownFields": {
+            "count": 1
+          }
+        }
+      ],
+      "previewVersion": 0,
+      "metadata": {
+        "rateLimit": {},
+        "httpStatus": 200,
+        "providerRequestId": "assistant-safe"
+      },
+      "outcome": {
+        "responseModel": "physical-offline",
+        "costTotal": 0.12,
+        "costSource": "provider"
+      }
+    },
+    {
+      "identity": {
+        "sessionId": "01a1c3bf-a057-75a0-b009-1a38378e09e7",
+        "sessionPath": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\request-production-ipc-llZCsH\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-request-production-ipc-llZCsH-A--\\2026-11-10T04-37-57-976Z_01a1c3bf-a057-75a0-b009-1a38378e09e7.jsonl",
+        "runtimeGeneration": "d4ca5d46-adad-4f1b-996d-bd73dd9eb0c5",
+        "requestId": "fa673c07-d56f-45d6-bcca-b06c34f0aab6"
+      },
+      "sequence": 14,
+      "observedAt": 1794285479395,
+      "phase": "completed",
+      "attempt": 1,
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "requestedModel": "offline",
+      "category": "cache-warm",
+      "startedAt": 1794285479242,
+      "availability": "supported",
+      "responses": [
+        {
+          "attempt": 1,
+          "metadata": {
+            "rateLimit": {},
+            "httpStatus": 200,
+            "providerRequestId": "warm-safe"
+          }
+        }
+      ],
+      "collecting": false,
+      "events": [
+        {
+          "id": "[redacted]",
+          "object": "chat.completion.chunk",
+          "created": 1,
+          "model": "[redacted]",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "[redacted]"
+              },
+              "finish_reason": null
+            }
+          ],
+          "unknownFields": {
+            "count": 1
+          }
+        },
+        {
+          "id": "[redacted]",
+          "object": "chat.completion.chunk",
+          "created": 1,
+          "model": "[redacted]",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {},
+              "finish_reason": "[redacted]"
+            }
+          ],
+          "usage": {
+            "total_tokens": 500001,
+            "unknownFields": {
+              "count": 2
+            }
+          },
+          "unknownFields": {
+            "count": 1
+          }
+        }
+      ],
+      "previewVersion": 0,
+      "metadata": {
+        "rateLimit": {},
+        "httpStatus": 200,
+        "providerRequestId": "warm-safe"
+      },
+      "outcome": {
+        "responseModel": "physical-offline",
+        "costTotal": 1.500015,
+        "costSource": "catalog"
+      }
+    }
+  ],
+  "stderr": "(node:69672) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n[agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5815\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n[agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5904\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n[agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5987\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n(node:79336) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n[pi-worker] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5815\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n[pi-worker] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5904\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n[pi-worker] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.\n    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)\n    at dynamicImport (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5570)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:5987\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_env_api_keys (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\env-api-keys-B51jbw_7.jsc:1:6599)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1320692\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460\n    at Object.init_compat (D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\compat-DGiAtD6i.jsc:1:1322446)\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\dist-43FQ_dPB.jsc:1:2227139\n    at D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main\\chunks\\rolldown-runtime-ch10HqoO.jsc:1:460 {\n  code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'\n}\n"
+}

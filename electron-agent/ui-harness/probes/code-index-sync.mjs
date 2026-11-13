@@ -79,5 +79,19 @@ export default async function (t) {
   t.ok('监听不可用时标签仍是「已索引」', await t.waitForText(TAG, '已索引', 4000))
   t.ok('横幅提示监听不可用、需要手动同步', await t.waitForText(PANEL, '文件监听不可用（EMFILE: too many open files），索引不会自动跟上改动，需要时请手动同步', 4000))
 
+  // —— watcher 未落定：静默轮询继续，新鲜度不会永远未知 ——
+  await t.act('set', 'watch-starting')
+  await refreshStatus(t)
+  t.ok('watcher 未落定时新鲜度暂写未知', await t.waitForText('[data-testid="code-index-freshness"]', '新鲜度未知', 4000))
+  const pendingBefore = await statusReads(t)
+  await t.sleep(3200)
+  const pendingAfter = await statusReads(t)
+  t.ok(`watcher 未落定期间静默轮询继续（3.2 秒内 ${pendingAfter - pendingBefore} 次）`, pendingAfter - pendingBefore >= 1)
+  await t.act('set', 'idle')
+  t.ok('watcher 落定后新鲜度标签消失', await t.waitUntil(`!document.querySelector('[data-testid="code-index-freshness"]')`, 4000))
+  const settledReads = await statusReads(t)
+  await t.sleep(3200)
+  t.check('落定后不再轮询', await statusReads(t), settledReads)
+
   await t.shot('code-index-sync')
 }

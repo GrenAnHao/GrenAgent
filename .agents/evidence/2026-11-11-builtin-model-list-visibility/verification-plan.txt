@@ -1,0 +1,2 @@
+Scope: builtin-model-settings and model-visibility Electron scenarios only; targeted Vitest, strict renderer check, production build, note validation.
+Use deterministic synthetic catalogs, browser preference storage and bridge fakes only. No real login, auth file access, external model requests or paid operations.

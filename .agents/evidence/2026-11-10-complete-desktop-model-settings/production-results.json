@@ -1,0 +1,24 @@
+{
+  "product": "D:\\OneDrive\\Project Files\\Pi\\electron-agent\\out-pkg\\main",
+  "facts": [
+    "production main invokes real model-budget IPC",
+    "main dedicated IPC persists explicit zero",
+    "main old settings snapshots cannot overwrite budget",
+    "main clear restores inherited SDK budget",
+    "main actual SDK preserves advanced model fields",
+    "production host initial model uses actual desktop zero and SDK inherited field",
+    "real host sync receipt includes main, embedded and worker owners",
+    "all three live owner receipts show actual new effective budgets",
+    "embedded failure is explicit while main and worker successes remain",
+    "retry sync recovers embedded without restarting any owner",
+    "disposed embedded and worker owners leave the sync registry",
+    "host model B uses its own exact budget",
+    "host clear restores fresh SDK values",
+    "host rebuild reads persisted desktop budget",
+    "rebuilt host SDK preserves advanced model fields",
+    "production worker applies budget to actual SDK manager",
+    "worker config notification updates the existing session",
+    "worker cold resume applies current desktop budget",
+    "resumed worker SDK preserves advanced model fields"
+  ]
+}

@@ -1,0 +1,1 @@
+{"providers":{"fixture":{"api":"openai-completions","models":[{"id":"org/Model","samplingParams":{"top_p":0},"promptCache":{"short":300}}]}}}

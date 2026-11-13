@@ -201,3 +201,8 @@ describe('adaptPiEvent', () => {
     expect(adaptPiEvent({ type: 'future_event', value: 1 })).toBeUndefined();
   });
 });
+it('preserves independent response model and provider total without persisting raw observations',()=>{
+ const raw={type:'message_end',message:{role:'assistant',model:'alias',responseModel:'actual',usage:{input:1,cost:{total:0.12,input:0.10,totalFromProvider:true}},content:[]}};
+ expect(adaptPiEvent(raw)?.data).toMatchObject({message:{model:'alias',responseModel:'actual',usage:{cost:{total:0.12,totalFromProvider:true}},costSource:'provider'}});
+ expect(adaptPiEvent({type:'request-observation',events:[{text:'secret'}]})).toBeUndefined();
+});

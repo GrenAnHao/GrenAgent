@@ -105,7 +105,16 @@ function projectData(rawType: string, raw: Record<string, unknown>, message: Rec
 }
 
 function projectMessage(message: Record<string, unknown> | undefined, includeContent = false): Record<string, unknown> {
-  return pick(message, includeContent ? ['id', 'role', 'content', 'timestamp', 'errorMessage'] : ['id', 'role']);
+  const out=pick(message,includeContent?['id','role','content','timestamp','errorMessage','provider','model','responseModel']:['id','role']);
+  if(includeContent&&message?.usage&&isRecord(message.usage)){
+    const usage=pick(message.usage,['input','output','cacheRead','cacheWrite','totalTokens']);
+    if(isRecord(message.usage.cost)){
+      usage.cost=pick(message.usage.cost,['input','output','cacheRead','cacheWrite','total','totalFromProvider']);
+      out.costSource=message.usage.cost.totalFromProvider===true?'provider':'catalog';
+    }
+    out.usage=usage;
+  }
+  return out;
 }
 
 function projectAssistantMessageEvent(value: unknown): Record<string, unknown> {

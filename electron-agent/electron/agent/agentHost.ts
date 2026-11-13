@@ -5,7 +5,7 @@ import type { WorkspaceHandle } from './workspaceHandle.js';
 interface Reloadable { dispose(): Promise<void>; reload(): Promise<void> }
 
 export interface AgentHostOptions {
-  createHandle: (workspace: string, cwd: string) => Promise<WorkspaceHandle>;
+  createHandle: (workspace: string, cwd: string, candidatePath?: string) => Promise<WorkspaceHandle>;
   watchConfig?: typeof realWatchConfig;
   onResourceReloadRequested?: typeof realOnResourceReload;
   getConfig?: typeof realGetConfig;
@@ -91,10 +91,10 @@ export class AgentHost {
   }
 
   /** 再开一个 handle，不替换前景。调用方决定何时 focus。 */
-  async openAdditional(workspace: string, cwd: string): Promise<WorkspaceHandle> {
+  async openAdditional(workspace: string, cwd: string, candidatePath?: string): Promise<WorkspaceHandle> {
     const inFlightClose = this.closing.get(workspace);
     if (inFlightClose) await inFlightClose;
-    const task = this.options.createHandle(workspace, cwd);
+    const task = this.options.createHandle(workspace, cwd, candidatePath);
     const inflight = this.extraOpening.get(workspace) ?? new Set<Promise<WorkspaceHandle>>();
     inflight.add(task);
     this.extraOpening.set(workspace, inflight);
@@ -194,3 +194,4 @@ export class AgentHost {
     return this.reloading;
   }
 }
+

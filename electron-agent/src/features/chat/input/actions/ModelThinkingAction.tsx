@@ -7,6 +7,7 @@ import { useModelMessages } from '../../../../lib/modelMessages';
 import { createStaticStyles, cssVar, cx, useThemeMode } from 'antd-style';
 import { Brain, Check, Cpu, Image, Search, Zap } from 'lucide-react';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
+import { useVisibleModels } from '../../../../stores/modelVisibilityStore';
 import { loadProviderList } from '../../../settings/providerListCache';
 import {
   useAvailableModelsState,
@@ -267,6 +268,7 @@ export default function ModelThinkingAction() {
     workspaceReady ? workspace : undefined,
   );
   const [models, setModels] = useState<ModelInfo[]>(() => getCachedAvailableModels(workspace) ?? []);
+  const visibleModels = useVisibleModels(models);
   const [providerNames, setProviderNames] = useState<Map<string, string>>(new Map());
 
   const [open, setOpen] = useState(false);
@@ -444,7 +446,7 @@ export default function ModelThinkingAction() {
     };
     const groups: { provider: string; items: ModelInfo[] }[] = [];
     const index = new Map<string, number>();
-    for (const m of models) {
+    for (const m of visibleModels) {
       if (!match(m)) continue;
       let gi = index.get(m.provider);
       if (gi === undefined) {
@@ -455,7 +457,7 @@ export default function ModelThinkingAction() {
       groups[gi].items.push(m);
     }
     return groups;
-  }, [models, providerNames, query]);
+  }, [visibleModels, providerNames, query]);
 
   // 档位跟当前模型列表走，不跟会话里那份选中时的快照。
   const catalogModel = mergeModelCatalog(displayModel, models);

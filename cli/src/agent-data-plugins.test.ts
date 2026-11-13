@@ -5,7 +5,7 @@ import { builtinPluginDefinitions } from '../../electron-agent/electron/app/plug
 import { PluginManager } from '../../electron-agent/electron/app/plugin/pluginManager.js';
 import { AgentDataStorage } from '../../electron-agent/electron/agentData/storage.js';
 
-const dataPlugins = ['code-retrieval', 'wiki-rag'];
+const dataPlugins = ['code-retrieval'];
 const allowedIds = ['goal', 'web-search', 'mcp', ...dataPlugins];
 
 describe('agent-data-plugins', () => {
@@ -38,10 +38,8 @@ describe('agent-data-plugins', () => {
     const loaded = filterManagedExtensions(manifestExtensions, JSON.stringify(allowedIds));
     for (const entry of loaded.filter((entry) => dataPlugins.includes(entry.name))) entry.factory(pi as never);
 
-    expect(tools.sort()).toEqual([
-      'wiki_list', 'wiki_read', 'wiki_search',
-      'code_explore',
-    ].sort());
+    // 资料 Wiki 已下线：只保留代码检索工具。
+    expect(tools.sort()).toEqual(['code_explore']);
   });
 
   test('parked IM extensions are not loaded in the product extension list', () => {
@@ -76,7 +74,6 @@ describe('agent-data-plugins', () => {
       await manager.stop('code-retrieval');
       const remaining = filterManagedExtensions(manifestExtensions, JSON.stringify(manager.allowedPluginIds()));
       expect(remaining.some((entry) => entry.name === 'code-retrieval')).toBe(false);
-      expect(remaining.some((entry) => entry.name === 'wiki-rag')).toBe(true);
       expect(remaining.some((entry) => entry.name === 'code-exec')).toBe(false);
     } finally {
       storage.close();

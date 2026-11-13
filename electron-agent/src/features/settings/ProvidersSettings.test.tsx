@@ -2,16 +2,36 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 
-const { getProviderConfig, setProviderConfig, getSettings, setSettings, listModelsGlobal } = vi.hoisted(() => ({
+const {
+  getProviderConfig, setProviderConfig, setProviderApiKey, getSettings, setSettings, listModelsGlobal,
+  getProviderCredentials, getProviderOAuthCapabilities, logoutProvider, listBuiltinModels,
+} = vi.hoisted(() => ({
   getProviderConfig: vi.fn(() => Promise.resolve({ modelsJson: '{}', authJson: '{}', agentDir: '/a' })),
   setProviderConfig: vi.fn(() => Promise.resolve({ refreshed: ['/ws'], failed: [] })),
+  setProviderApiKey: vi.fn(() => Promise.resolve()),
   getSettings: vi.fn(() => Promise.resolve({} as Record<string, string>)),
   setSettings: vi.fn(() => Promise.resolve()),
   listModelsGlobal: vi.fn(() => Promise.resolve({ ok: true, models: [{ provider: 'openai', id: 'gpt-5', reasoning: true }] })),
+  listBuiltinModels: vi.fn(() => Promise.resolve([] as Record<string, unknown>[])),
+  getProviderCredentials: vi.fn(() => Promise.resolve([])),
+  getProviderOAuthCapabilities: vi.fn(() => Promise.resolve([])),
+  logoutProvider: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('../../lib/pi', () => ({
-  pi: { getProviderConfig, setProviderConfig, getSettings, setSettings, listModelsGlobal },
+  pi: {
+    getProviderConfig, setProviderConfig, setProviderApiKey, getSettings, setSettings, listModelsGlobal,
+    getProviderCredentials, getProviderOAuthCapabilities, logoutProvider, listBuiltinModels,
+  },
 }));
+
+const openaiCapability = {
+  providerId: 'openai', name: 'OpenAI (ChatGPT subscription)',
+  loginLabel: 'Sign in with ChatGPT', isSubscription: true,
+};
+const oauthCredential = {
+  providerId: 'openai', type: 'oauth' as const, source: 'OAuth', configured: true,
+  expiresAt: 1893456000000, isSubscription: true,
+};
 vi.mock('antd', async (importOriginal) => {
   const actual = await importOriginal<typeof import('antd')>();
   return {
@@ -76,7 +96,7 @@ describe('ProvidersSettings', () => {
     expect(screen.getByText('有未保存的改动，测活使用的是已保存的配置。')).toBeTruthy();
   }, 30000);
 
-  it('loads providers and saves a built-in key to auth.json', async () => {
+  it('saves a changed built-in API key through the credential command, not a generated auth.json', async () => {
     render(<ProvidersSettings />);
     await waitFor(() => expect(getProviderConfig).toHaveBeenCalled());
     expect(await screen.findByTestId('prov-item-openai')).toBeTruthy();
@@ -85,22 +105,87 @@ describe('ProvidersSettings', () => {
     fireEvent.change(key, { target: { value: 'sk-test' } });
     fireEvent.click(screen.getByTestId('prov-save'));
 
-    await waitFor(() => expect(setProviderConfig).toHaveBeenCalled());
-    const lastCall = setProviderConfig.mock.calls.at(-1) as unknown as [string, string];
-    expect(JSON.parse(lastCall[1]).openai).toEqual({ type: 'api_key', key: 'sk-test' });
+    await waitFor(() => expect(setProviderApiKey).toHaveBeenCalledWith('openai', 'sk-test'));
+    const lastCall = setProviderConfig.mock.calls.at(-1) as unknown as [string];
+    expect(lastCall).toHaveLength(1);
   }, 30000);
 
-  it('migrates legacy OPENAI_API_KEY into auth.json and strips it from settings', async () => {
+  it('does not write any credential when the saved API key matches the loaded value', async () => {
+    render(<ProvidersSettings />);
+    await waitFor(() => expect(getProviderConfig).toHaveBeenCalled());
+    expect(await screen.findByTestId('prov-item-openai')).toBeTruthy();
+
+    // 先 touch 让保存按钮可用，再把凭据改回原值：保存仍应只提交 models.json。
+    const key = screen.getByPlaceholderText('sk-...') as HTMLInputElement;
+    fireEvent.change(key, { target: { value: 'temp' } });
+    fireEvent.change(key, { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('prov-save'));
+
+    await waitFor(() => expect(setProviderConfig).toHaveBeenCalled());
+    expect(setProviderApiKey).not.toHaveBeenCalled();
+  }, 30000);
+
+  it('migrates legacy OPENAI_API_KEY into the official credential store and strips it from settings', async () => {
     getSettings.mockResolvedValueOnce({ OPENAI_API_KEY: 'sk-legacy' });
     render(<ProvidersSettings />);
 
-    await waitFor(() => expect(setProviderConfig).toHaveBeenCalled());
-    const lastCall = setProviderConfig.mock.calls.at(-1) as unknown as [string, string];
-    expect(JSON.parse(lastCall[1]).openai.key).toBe('sk-legacy');
+    await waitFor(() => expect(setProviderApiKey).toHaveBeenCalledWith('openai', 'sk-legacy'));
 
     await waitFor(() => expect(setSettings).toHaveBeenCalled());
     const arg = (setSettings.mock.calls.at(-1) as unknown as [Record<string, string>])[0];
     expect(arg.OPENAI_API_KEY).toBeUndefined();
+  }, 30000);
+
+  it('shows the subscription entry only for providers with runtime OAuth capability', async () => {
+    getProviderOAuthCapabilities.mockResolvedValueOnce([openaiCapability]);
+    render(<ProvidersSettings />);
+    expect(await screen.findByTestId('prov-oauth-mode')).toBeTruthy();
+
+    fireEvent.click(await screen.findByTestId('prov-item-xai'));
+    expect(screen.queryByTestId('prov-oauth-mode')).toBeNull();
+    expect(screen.getByPlaceholderText('sk-...')).toBeTruthy();
+  }, 30000);
+
+  it('shows a logged-in account card and marks the provider configured without an API key', async () => {
+    getProviderOAuthCapabilities.mockResolvedValueOnce([openaiCapability]);
+    getProviderCredentials.mockResolvedValueOnce([oauthCredential]);
+    render(<ProvidersSettings />);
+
+    expect(await screen.findByTestId('prov-oauth-card')).toBeTruthy();
+    expect(screen.getByText('已登录（OAuth）')).toBeTruthy();
+    expect(screen.getByTestId('prov-oauth-logout')).toBeTruthy();
+    const dot = screen.getByTestId('prov-item-openai').querySelectorAll('span')[1];
+    expect(dot?.getAttribute('style')).toContain('success');
+  }, 30000);
+
+  it('confirms before switching from OAuth to API key', async () => {
+    getProviderOAuthCapabilities.mockResolvedValueOnce([openaiCapability]);
+    getProviderCredentials.mockResolvedValueOnce([oauthCredential]);
+    render(<ProvidersSettings />);
+    expect(await screen.findByTestId('prov-oauth-card')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('API Key'));
+    expect(screen.getByTestId('prov-oauth-switch-confirm')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('prov-oauth-switch-ok'));
+    expect(await screen.findByPlaceholderText('sk-...')).toBeTruthy();
+  }, 30000);
+
+  it('keeps the account card after saving unrelated model config', async () => {
+    getProviderOAuthCapabilities.mockResolvedValueOnce([openaiCapability]);
+    getProviderCredentials.mockResolvedValueOnce([oauthCredential]);
+    setProviderApiKey.mockClear();
+    logoutProvider.mockClear();
+    render(<ProvidersSettings />);
+    expect(await screen.findByTestId('prov-oauth-card')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('prov-add-model'));
+    fireEvent.change(await screen.findByTestId('prov-model-id-0'), { target: { value: 'new-model' } });
+    fireEvent.click(screen.getByTestId('prov-save'));
+
+    await waitFor(() => expect(setProviderConfig).toHaveBeenCalled());
+    expect(setProviderApiKey).not.toHaveBeenCalled();
+    expect(logoutProvider).not.toHaveBeenCalled();
+    expect(screen.getByTestId('prov-oauth-card')).toBeTruthy();
   }, 30000);
 
   it('adds a custom provider', async () => {
@@ -295,4 +380,82 @@ describe('ProvidersSettings', () => {
     expect(arg.IMAGE_MODEL).toBe('');
     expect(arg.SUBAGENT_MODEL_ALLOWLIST).toBe(JSON.stringify(['openai/gpt-4o']));
   }, 30000);
+});
+
+it('advanced JSON keeps invalid drafts, rejects save, uses model protocol and preserves fields across provider protocol switches',async()=>{
+ getProviderConfig.mockResolvedValueOnce({modelsJson:JSON.stringify({providers:{relay:{name:'Relay',api:'anthropic-messages',models:[{id:'m',api:'openai-completions',samplingParams:{top_p:0},promptCache:{short:0.5},future:'keep'}]}}}),authJson:'{}',agentDir:'/a'});
+ render(<ProvidersSettings/>);fireEvent.click(await screen.findByTestId('prov-item-relay'));fireEvent.click(screen.getByTestId('prov-model-expand-0'));
+ expect(screen.queryByTestId('advanced-0')).toBeNull();
+ const toggle = screen.getByTestId('prov-model-advanced-toggle-0');
+ expect(toggle.closest('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+ fireEvent.click(toggle);
+ let input=await screen.findByTestId('advanced-0-samplingParams');
+ fireEvent.change(input,{target:{value:'[1]'}});
+ fireEvent.click(toggle);
+ await waitFor(()=>expect(screen.queryByTestId('advanced-0')).toBeNull());
+ fireEvent.click(screen.getByTestId('prov-save'));
+ await screen.findAllByText(/必须是 JSON 对象/);expect(setProviderConfig).not.toHaveBeenCalled();
+ fireEvent.click(toggle);
+ input=await screen.findByTestId('advanced-0-samplingParams');
+ expect((input as HTMLTextAreaElement).value).toBe('[1]');
+ fireEvent.change(input,{target:{value:'{"top_p":0.8,"flag":false}'}});
+ fireEvent.click(toggle);
+ await waitFor(()=>expect(screen.queryByTestId('advanced-0')).toBeNull());
+ fireEvent.click(toggle);
+ input=await screen.findByTestId('advanced-0-samplingParams');
+ expect(JSON.parse((input as HTMLTextAreaElement).value)).toEqual({top_p:0.8,flag:false});
+ await pickApiType('OpenAI Responses');fireEvent.click(screen.getByTestId('prov-save'));
+ await waitFor(()=>expect(setProviderConfig).toHaveBeenCalled());const saved=JSON.parse(setProviderConfig.mock.calls.at(-1)![0]);
+ expect(saved.providers.relay.models[0]).toMatchObject({api:'openai-completions',samplingParams:{top_p:0.8,flag:false},promptCache:{short:0.5},future:'keep'});
+ expect(setProviderApiKey).not.toHaveBeenCalled();
+});
+
+it('edits built-in metadata as a sparse override and resets only that model without touching OAuth', async () => {
+  const other = { maxTokens: 42, future: 'keep' };
+  getProviderConfig.mockResolvedValueOnce({ modelsJson: JSON.stringify({ providers: { openai: {
+    modelOverrides: { 'gpt-other': other }, future: 'provider',
+  } } }), authJson: JSON.stringify({ openai: { type: 'oauth' } }), agentDir: '/a' });
+  listBuiltinModels.mockResolvedValueOnce([{ id: 'gpt-5', name: 'GPT fixture', api: 'openai-responses', reasoning: true, contextWindow: 200000, maxTokens: 16000, input: ['text', 'image'], compat: { supportsFastMode: true } }]);
+  render(<ProvidersSettings />);
+  await screen.findByTestId('prov-builtin-row-gpt-5');
+  const id = screen.getByTestId('prov-model-id-builtin-gpt-5') as HTMLInputElement;
+  expect(id.readOnly).toBe(true);
+  expect(screen.queryByTestId('prov-model-del-builtin-gpt-5')).toBeNull();
+  fireEvent.change(screen.getByTestId('prov-model-context-builtin-gpt-5'), { target: { value: '100000' } });
+  fireEvent.click(screen.getByTestId('prov-model-fast-builtin-gpt-5'));
+  fireEvent.click(screen.getByTestId('prov-save'));
+  await waitFor(() => expect(setProviderConfig).toHaveBeenCalled());
+  let saved = JSON.parse(setProviderConfig.mock.calls.at(-1)![0]);
+  expect(saved.providers.openai.modelOverrides).toEqual({ 'gpt-5': { contextWindow: 100000, compat: { supportsFastMode: false } }, 'gpt-other': other });
+  expect(saved.providers.openai.models).toBeUndefined();
+  expect(setProviderApiKey).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByTestId('prov-builtin-reset-gpt-5'));
+  fireEvent.click(screen.getByTestId('prov-save'));
+  await waitFor(() => expect(setProviderConfig).toHaveBeenCalledTimes(2));
+  saved = JSON.parse(setProviderConfig.mock.calls.at(-1)![0]);
+  expect(saved.providers.openai.modelOverrides).toEqual({ 'gpt-other': other });
+  expect(saved.providers.openai.future).toBe('provider');
+  expect(setProviderApiKey).not.toHaveBeenCalled();
+});
+
+it('retries a failed built-in directory read without losing custom model editing', async () => {
+  listBuiltinModels.mockRejectedValueOnce(new Error('目录读取失败')).mockResolvedValueOnce([{ id: 'gpt-fixture', api: 'openai-responses' }]);
+  render(<ProvidersSettings />);
+  await screen.findByTestId('prov-builtin-retry');
+  fireEvent.click(screen.getByTestId('prov-add-model'));
+  fireEvent.change(screen.getByTestId('prov-model-id-0'), { target: { value: 'custom' } });
+  fireEvent.click(screen.getByTestId('prov-builtin-retry'));
+  await screen.findByTestId('prov-builtin-row-gpt-fixture');
+  expect((screen.getByTestId('prov-model-id-0') as HTMLInputElement).value).toBe('custom');
+});
+
+it('preserves saved overrides when another provider is edited',async()=>{
+ const override={compat:{supportsFastMode:true},future:'keep',samplingParams:{top_p:0}};
+ getProviderConfig.mockResolvedValueOnce({modelsJson:JSON.stringify({providers:{openai:{modelOverrides:{'gpt-5':override}},relay:{name:'Relay',api:'openai-completions',models:[{id:'m'}]}}}),authJson:'{}',agentDir:'/a'});
+ render(<ProvidersSettings/>);await screen.findByTestId('prov-apikey');
+ expect(screen.queryByTestId('builtin-advanced')).toBeNull();
+ fireEvent.click(screen.getByTestId('prov-item-relay'));
+ fireEvent.change(screen.getByTestId('prov-name'),{target:{value:'Renamed'}});fireEvent.click(screen.getByTestId('prov-save'));
+ await waitFor(()=>expect(setProviderConfig).toHaveBeenCalled());const saved=JSON.parse(setProviderConfig.mock.calls.at(-1)![0]);
+ expect(saved.providers.openai.modelOverrides['gpt-5']).toEqual(override);expect(saved.providers.openai.models).toBeUndefined();expect(setProviderApiKey).not.toHaveBeenCalled();
 });

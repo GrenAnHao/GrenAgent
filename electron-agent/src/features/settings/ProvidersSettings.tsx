@@ -1,9 +1,10 @@
 import { Icon } from '@lobehub/ui';
-import { Input, Popconfirm, Select } from 'antd';
+import { Button, Input, Popconfirm, Radio, Select } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { pi } from '../../lib/pi';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { pi, type ProviderCredentialStatus, type ProviderOAuthCapability } from '../../lib/pi';
+import { ProviderOAuthLoginModal } from './ProviderOAuthLoginModal';
 import { invalidateAvailableModels } from './availableModelsCache';
 import { loadState, modelsWithApiThinkingLevels, serializeState, withDefaultUserAgent, type UiModel, type UiProvider } from './providerConfigAdapter';
 import { invalidateProviderList } from './providerListCache';
@@ -13,6 +14,7 @@ import { hydrateSettingsValues } from './useSettingsForm';
 import { ProviderDiagnostics } from './ProviderDiagnostics';
 import { ModelSyncModal } from './ModelSyncModal';
 import { SortableModelCards } from './SortableModelCards';
+import { BuiltinModelEditor } from './BuiltinModelEditor';
 
 const API_OPTIONS: { value: ApiType; label: string }[] = [
   { value: 'openai-completions', label: 'OpenAI Completions 兼容' },
@@ -310,7 +312,32 @@ function findEmptyModelId(ps: EditProvider[]): EditProvider | undefined {
   return ps.find((p) => p.models.some((m) => !m.id.trim()));
 }
 
+/** 官方 loginLabel 是英文；界面统一用中文，是否支持 OAuth 仍以运行时探测为准。 */
+const OAUTH_LOGIN_LABELS_ZH: Record<string, string> = {
+  anthropic: '使用 Claude Pro / Max 订阅登录',
+  openai: '使用 ChatGPT 订阅登录',
+  'openai-codex': '使用 ChatGPT Plus / Pro 登录',
+  'github-copilot': '使用 GitHub Copilot 登录',
+  openrouter: '使用 OpenRouter 授权登录',
+  'kimi-coding': '使用 Kimi Code 订阅登录',
+  meta: '使用 Meta Muse 订阅登录',
+  xai: '使用 SuperGrok / X Premium 登录',
+};
+
+const loginLabelZh = (capability: ProviderOAuthCapability) =>
+  OAUTH_LOGIN_LABELS_ZH[capability.providerId] ?? `使用 ${capability.name} 登录`;
+
+/** 凭据状态查询不可用时降级为「未登录」/「无 OAuth 入口」，设置页仍可编辑 API Key。 */
+async function loadCredentials(): Promise<ProviderCredentialStatus[]> {
+  try { return await pi.getProviderCredentials(); } catch { return []; }
+}
+
+async function loadOAuthCapabilities(): Promise<ProviderOAuthCapability[]> {
+  try { return await pi.getProviderOAuthCapabilities(); } catch { return []; }
+}
+
 export function ProvidersSettings() {
+  const [needsRefresh, setNeedsRefresh] = useState(false);
   const [providers, setProviders] = useState<EditProvider[]>([]);
   const [activeId, setActiveId] = useState('openai');
   const [saving, setSaving] = useState(false);
@@ -322,20 +349,45 @@ export function ProvidersSettings() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // 保存被空模型 ID 拦下后才标红，刚添加的空卡片不一上来就红。
   const [markEmptyModelIds, setMarkEmptyModelIds] = useState(false);
+  /** 加载时各内置供应商的 API Key；保存时只对显式改动过的发凭据写入命令。 */
+  const initialApiKeys = useRef<Record<string, string | undefined>>({});
+  const [credentials, setCredentials] = useState<ProviderCredentialStatus[]>([]);
+  const [oauthCapabilities, setOAuthCapabilities] = useState<ProviderOAuthCapability[]>([]);
+  const [authModes, setAuthModes] = useState<Record<string, 'api_key' | 'oauth'>>({});
+  const [loginProviderId, setLoginProviderId] = useState<string | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
+
+  const refreshCredentials = useCallback(async () => {
+    setCredentials(await loadCredentials());
+    invalidateProviderList();
+    invalidateAvailableModels();
+  }, []);
+
+  /** 必须稳定：授权弹层用它作为重启登录的依赖，变化会重复发起授权。 */
+  const onLoginDone = useCallback(() => { void refreshCredentials(); }, [refreshCredentials]);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [cfg, settings] = await Promise.all([pi.getProviderConfig(), pi.getSettings()]);
+      const [cfg, settings, creds, caps] = await Promise.all([
+        pi.getProviderConfig(), pi.getSettings(), loadCredentials(), loadOAuthCapabilities(),
+      ]);
       let ps = loadState(cfg.modelsJson, cfg.authJson, PROVIDER_PRESETS);
-      // 一次性迁移：旧的 OPENAI_API_KEY（runtime-settings）→ auth.json，再从 settings 移除。
+      initialApiKeys.current = Object.fromEntries(
+        ps.filter((p) => p.builtIn).map((p) => [p.id, p.apiKey]),
+      );
+      if (alive) {
+        setCredentials(creds);
+        setOAuthCapabilities(caps);
+      }
+      // 一次性迁移：旧的 OPENAI_API_KEY（runtime-settings）→ 官方凭据存储，再从 settings 移除。
       const legacy = (settings.OPENAI_API_KEY ?? '').trim();
       if (legacy) {
         const openai = ps.find((p) => p.id === 'openai');
         if (openai && !openai.apiKey) {
           ps = ps.map((p) => (p.id === 'openai' ? { ...p, apiKey: legacy } : p));
-          const { modelsJson, authJson } = serializeState(ps);
-          await pi.setProviderConfig(modelsJson, authJson);
+          await pi.setProviderApiKey('openai', legacy);
+          initialApiKeys.current.openai = legacy;
           invalidateProviderList();
           invalidateAvailableModels();
         }
@@ -376,6 +428,41 @@ export function ProvidersSettings() {
     setProviders((ps) => ps.map((p) => (p.id === active?.id ? { ...p, ...patch } : p)));
   };
 
+  const capabilityFor = (id: string) => oauthCapabilities.find((c) => c.providerId === id);
+  const credentialFor = (id: string) => credentials.find((c) => c.providerId === id);
+  const modeFor = (id: string): 'api_key' | 'oauth' =>
+    authModes[id] ?? (credentialFor(id)?.type === 'oauth' ? 'oauth' : 'api_key');
+  const activeCapability = active ? capabilityFor(active.id) : undefined;
+  const activeCredential = active ? credentialFor(active.id) : undefined;
+  const activeMode: 'api_key' | 'oauth' = active ? modeFor(active.id) : 'api_key';
+
+  // 官方 CredentialStore 一个 provider 只存一份凭据：切换方式就是替换，先让用户确认。
+  const applyModeChange = (next: 'api_key' | 'oauth') => {
+    if (!active) return;
+    setAuthModes((m) => ({ ...m, [active.id]: next }));
+    setPendingSwitch(null);
+    if (next === 'api_key') patchActive({ apiKey: '' });
+  };
+
+  const requestModeChange = (next: 'api_key' | 'oauth') => {
+    if (!active) return;
+    const current = activeCredential?.type;
+    if (current && next !== current) { setPendingSwitch(`${active.id}:${next}`); return; }
+    applyModeChange(next);
+  };
+
+  const logoutActive = async () => {
+    if (!active) return;
+    try {
+      await pi.logoutProvider(active.id);
+      await refreshCredentials();
+      // 留在订阅方式：退出通常是为了换账号或重新登录，不该被弹回 API Key。
+      setLoginProviderId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const renameActiveId = (nextId: string) => {
     touch();
     const from = active?.id;
@@ -403,7 +490,8 @@ export function ProvidersSettings() {
     setActiveId(id);
   };
 
-  // 持久化给定供应商列表：写 models.json/auth.json + 热更各 workspace（switch_session 重建 runtime）。
+  // 持久化给定供应商列表：models.json + 显式改动过的内置 API Key + 热更各 workspace。
+  // auth.json 里的 OAuth 凭据归官方运行时所有，这里绝不整份重写。
   // 接收显式 list（而非读 state）以便删除后用「删除后的列表」立即落盘，绕开 setState 的异步。
   const persist = async (list: EditProvider[]): Promise<boolean> => {
     const idErr = validateProviderIds(list);
@@ -428,15 +516,27 @@ export function ProvidersSettings() {
     setSaved(false);
     setSyncInfo(null);
     try {
-      const { modelsJson, authJson } = serializeState(stripModelUids(list));
-      const res = await pi.setProviderConfig(modelsJson, authJson);
+      const { modelsJson } = serializeState(stripModelUids(list));
+      const res = await pi.setProviderConfig(modelsJson);
+      // 只对用户显式改动过的内置供应商写凭据；未改动的不发任何写入请求，
+      // 这样编辑模型后保存不会替换掉已登录的 OAuth 凭据。
+      const keyWrites = list
+        .filter((p) => p.builtIn && (p.apiKey ?? '') !== (initialApiKeys.current[p.id] ?? ''))
+        .map((p) => pi.setProviderApiKey(p.id, (p.apiKey ?? '').trim() || null));
+      await Promise.all(keyWrites);
+      initialApiKeys.current = Object.fromEntries(
+        list.filter((p) => p.builtIn).map((p) => [p.id, p.apiKey]),
+      );
       // 供应商配置已变更：定向失效缓存，让模型/供应商下拉重新读取。
       invalidateProviderList();
       invalidateAvailableModels();
       if (res.failed.length > 0) {
-        setError(`部分工作区刷新失败：${res.failed.map((f) => f.workspace).join(', ')}`);
+        setError(`已保存，但部分工作区未生效：${res.failed.map((f) => `${f.workspace}：${f.error}`).join(', ')}`);
+        setNeedsRefresh(true);
+        setDirty(false);
       } else {
         setSaved(true);
+        setNeedsRefresh(false);
         setDirty(false);
       }
       return true;
@@ -495,7 +595,7 @@ export function ProvidersSettings() {
       : saved
         ? '已保存并生效'
         : dirty
-          ? '写入 models.json / auth.json，热生效'
+          ? '模型参数写入 models.json；凭据仅在显式修改时保存'
           : '';
   const footerColor = error ? cssVar.colorError : cssVar.colorSuccess;
 
@@ -515,7 +615,7 @@ export function ProvidersSettings() {
       <span className={styles.itemName}>{p.name}</span>
       <span
         className={styles.dot}
-        style={{ background: p.apiKey ? cssVar.colorSuccess : cssVar.colorFillSecondary }}
+        style={{ background: (credentialFor(p.id)?.configured || !!p.apiKey) ? cssVar.colorSuccess : cssVar.colorFillSecondary }}
       />
     </button>
   );
@@ -572,6 +672,15 @@ export function ProvidersSettings() {
             >
               {saving ? '保存中…' : '保存'}
             </button>
+            {needsRefresh ? <Button data-testid="prov-refresh-only" loading={saving} onClick={async () => {
+              setSaving(true);
+              try {
+                const result = await pi.refreshModelRegistry();
+                if (result.failed.length) setError(`已保存，但部分工作区未生效：${result.failed.map((item) => `${item.workspace}：${item.error}`).join(', ')}`);
+                else { setNeedsRefresh(false); setError(null); setSaved(true); }
+              } catch (error) { setError(`已保存；重试刷新失败：${error instanceof Error ? error.message : String(error)}`); }
+              finally { setSaving(false); }
+            }}>仅重试生效</Button> : null}
           </div>
           <div className={styles.detailScroll}>
             {!active ? (
@@ -612,16 +721,66 @@ export function ProvidersSettings() {
 
                 <div className={styles.group}>
                   <div className={styles.groupTitle}>凭据</div>
-                  <div className={styles.field}>
-                    <div className={styles.label}>API Key</div>
-                    <Input.Password
-                      data-testid="prov-apikey"
-                      value={active.apiKey ?? ''}
-                      placeholder="sk-..."
-                      variant="filled"
-                      onChange={(e) => patchActive({ apiKey: e.target.value })}
-                    />
-                  </div>
+                  {activeCapability ? (
+                    <div className={styles.field}>
+                      <div className={styles.label}>登录方式</div>
+                      <Radio.Group
+                        data-testid="prov-oauth-mode"
+                        value={activeMode}
+                        onChange={(e) => requestModeChange(e.target.value as 'api_key' | 'oauth')}
+                      >
+                        <Radio value="api_key" data-testid="prov-oauth-mode-api">API Key</Radio>
+                        <Radio value="oauth" data-testid="prov-oauth-mode-oauth">{loginLabelZh(activeCapability)}</Radio>
+                      </Radio.Group>
+                      {activeCapability.isSubscription ? (
+                        <div className={styles.desc}>订阅账号登录，与 API Key 互斥。</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {pendingSwitch?.startsWith(`${active.id}:`) ? (
+                    <div className={styles.field} data-testid="prov-oauth-switch-confirm">
+                      <div className={styles.desc}>切换将替换当前凭据，未保存的模型编辑会保留。</div>
+                      <Button
+                        size="small"
+                        data-testid="prov-oauth-switch-ok"
+                        onClick={() => applyModeChange(pendingSwitch.split(':')[1] as 'api_key' | 'oauth')}
+                      >确认切换</Button>
+                      <Button size="small" type="text" onClick={() => setPendingSwitch(null)}>取消</Button>
+                    </div>
+                  ) : null}
+                  {activeCapability && activeMode === 'oauth' ? (
+                    <div className={styles.field} data-testid="prov-oauth-card">
+                      <div className={styles.label}>{activeCredential?.type === 'oauth' ? '已登录（OAuth）' : '未登录'}</div>
+                      {activeCredential?.type === 'oauth' ? (
+                        <>
+                          <div className={styles.desc}>来源：{activeCredential.source ?? activeCapability.name}</div>
+                          <div className={styles.desc}>
+                            到期：{activeCredential.expiresAt ? new Date(activeCredential.expiresAt).toLocaleString() : '未知'}
+                          </div>
+                          {activeCredential.isSubscription ? <div className={styles.desc}>订阅制账号</div> : null}
+                          <Button data-testid="prov-oauth-logout" onClick={() => void logoutActive()}>退出登录</Button>
+                          <Button type="link" onClick={() => setLoginProviderId(active.id)}>重新登录</Button>
+                        </>
+                      ) : (
+                        <Button
+                          type="primary"
+                          data-testid="prov-oauth-login"
+                          onClick={() => setLoginProviderId(active.id)}
+                        >{loginLabelZh(activeCapability)}</Button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={styles.field}>
+                      <div className={styles.label}>API Key</div>
+                      <Input.Password
+                        data-testid="prov-apikey"
+                        value={active.apiKey ?? ''}
+                        placeholder="sk-..."
+                        variant="filled"
+                        onChange={(e) => patchActive({ apiKey: e.target.value })}
+                      />
+                    </div>
+                  )}
                   {active.builtIn ? (
                     <div className={styles.desc}>Base URL 由 Pi 内置管理，无需填写。</div>
                   ) : (
@@ -686,11 +845,13 @@ export function ProvidersSettings() {
                   </div>
                 )}
 
+                {active.builtIn ? <BuiltinModelEditor key={active.id} provider={active} onChange={(modelOverrides) => patchActive({ modelOverrides })} /> : null}
+
                 <div className={styles.group}>
                   <div className={styles.groupTitle}>{active.builtIn ? '自定义追加模型' : '模型'}</div>
                   <div className={styles.desc}>
                     {active.builtIn
-                      ? '内置模型由 Pi 提供（配 Key 后自动出现在对话）；此处仅添加额外模型'
+                      ? '内置模型由 Pi 提供；同 ID 自定义条目是替换模型，保留在此处，不会转为目录覆盖。'
                       : '至少添加一个模型；ID 需与服务端一致。同一协议下，每个模型可单独配置思考协议、档位映射和兼容项。'}
                   </div>
                   <SortableModelCards
@@ -722,6 +883,7 @@ export function ProvidersSettings() {
                   </div>
                 </div>
 
+
               </>
             )}
           </div>
@@ -747,6 +909,15 @@ export function ProvidersSettings() {
           existingIds={models.map((m) => m.id).filter(Boolean)}
           onClose={() => setSyncOpen(false)}
           onConfirm={addSyncedModels}
+        />
+      ) : null}
+      {loginProviderId && capabilityFor(loginProviderId) ? (
+        <ProviderOAuthLoginModal
+          providerId={loginProviderId}
+          providerName={providers.find((p) => p.id === loginProviderId)?.name ?? loginProviderId}
+          capability={capabilityFor(loginProviderId)!}
+          onDone={onLoginDone}
+          onClose={() => setLoginProviderId(null)}
         />
       ) : null}
     </div>

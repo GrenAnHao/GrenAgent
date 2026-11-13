@@ -1,0 +1,18 @@
+{
+  "requests": 1,
+  "bodyBytes": 25586,
+  "limits": {
+    "images": {
+      "maxPerRequest": 1,
+      "resize": {
+        "maxWidth": 8,
+        "maxHeight": 8,
+        "maxBytes": 100000,
+        "jpegQuality": 80
+      },
+      "maxPerMessage": 1
+    },
+    "maxRequestBytes": 100
+  },
+  "layer": "AgentSession.prompt → actual provider serializer → injected fetch (local 400)"
+}

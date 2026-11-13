@@ -1,0 +1,295 @@
+{
+  "requestCount": 2,
+  "currentSessionId": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+  "coldReport": {
+    "totals": {
+      "input": 17,
+      "output": 8,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 25,
+      "cost": 0.015009999999999999,
+      "sessions": 2,
+      "messages": 2,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 25,
+        "cost": 0.015009999999999999
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "fixture",
+        "model": "fixture-model",
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "messages": 2
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "name": null,
+        "tokens": 25,
+        "cost": 0.015009999999999999,
+        "sessions": 2
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-session-workflow-ipc-rM3rSM-workspace--\\2026-11-10T05-18-55-423Z_b0712d4c-7f91-40a5-9baa-01ced3f9c083.jsonl",
+        "timestamp": "2026-11-10T05:18:55.423Z",
+        "tokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "id": "01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\fixture\\2026-11-10T05-18-46-815Z_01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686.jsonl",
+        "timestamp": "2026-11-10T05:18:46.815Z",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:56.102Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": "physical",
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:46.818Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 10,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "warmingCalls": [],
+    "warmingTotals": {
+      "cost": 0,
+      "messages": 0,
+      "totalTokens": 0
+    },
+    "recordedCost": {
+      "assistantCost": 0.015009999999999999,
+      "warmingCost": 0,
+      "totalCost": 0.015009999999999999,
+      "sourceBreakdown": {
+        "provider": 0,
+        "catalog": 0.015009999999999999,
+        "unknown": 0
+      }
+    }
+  },
+  "recoveredReport": {
+    "totals": {
+      "input": 24,
+      "output": 11,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 35,
+      "cost": 0.015019999999999999,
+      "sessions": 2,
+      "messages": 3,
+      "cacheHitRate": 0
+    },
+    "byDay": [
+      {
+        "date": "2026-11-10",
+        "tokens": 35,
+        "cost": 0.015019999999999999
+      }
+    ],
+    "byModel": [
+      {
+        "provider": "fixture",
+        "model": "fixture-model",
+        "tokens": 35,
+        "cost": 0.015019999999999999,
+        "messages": 3
+      }
+    ],
+    "byProject": [
+      {
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "name": null,
+        "tokens": 35,
+        "cost": 0.015019999999999999,
+        "sessions": 2
+      }
+    ],
+    "recentSessions": [
+      {
+        "id": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-session-workflow-ipc-rM3rSM-workspace--\\2026-11-10T05-18-55-423Z_b0712d4c-7f91-40a5-9baa-01ced3f9c083.jsonl",
+        "timestamp": "2026-11-10T05:18:55.423Z",
+        "tokens": 20,
+        "cost": 0.000019999999999999998
+      },
+      {
+        "id": "01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686",
+        "name": null,
+        "cwd": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\workspace",
+        "path": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-workflow-ipc-rM3rSM\\agent\\sessions\\fixture\\2026-11-10T05-18-46-815Z_01a1c3e4-fe1e-73ac-b5e5-46b63a8b7686.jsonl",
+        "timestamp": "2026-11-10T05:18:46.815Z",
+        "tokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "calls": [
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:19:00.465Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": null,
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:56.102Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 10,
+        "cost": 0.000009999999999999999
+      },
+      {
+        "responseModel": "physical",
+        "costSource": "catalog",
+        "timestamp": "2026-11-10T05:18:46.818Z",
+        "provider": "fixture",
+        "model": "fixture-model",
+        "input": 10,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 15,
+        "cost": 0.015
+      }
+    ],
+    "warmingCalls": [],
+    "warmingTotals": {
+      "cost": 0,
+      "messages": 0,
+      "totalTokens": 0
+    },
+    "recordedCost": {
+      "assistantCost": 0.015019999999999999,
+      "warmingCost": 0,
+      "totalCost": 0.015019999999999999,
+      "sourceBreakdown": {
+        "provider": 0,
+        "catalog": 0.015019999999999999,
+        "unknown": 0
+      }
+    }
+  },
+  "origins": [
+    {
+      "entryId": "8d0fd295",
+      "responseId": "fixture-1",
+      "usage": {
+        "input": 9999,
+        "output": 5,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 9999,
+        "cost": {
+          "input": 0.01,
+          "output": 0.005,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 999
+        }
+      },
+      "origin": {
+        "kind": "unverified"
+      },
+      "ledgerKey": null
+    },
+    {
+      "entryId": "f2be67ac",
+      "responseId": "fixture-1",
+      "usage": {
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 10,
+        "cost": {
+          "input": 0.000007,
+          "output": 0.000003,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0.000009999999999999999,
+          "totalFromProvider": false
+        }
+      },
+      "origin": {
+        "kind": "unverified"
+      },
+      "ledgerKey": null
+    },
+    {
+      "entryId": "b2e02c90",
+      "responseId": "fixture-2",
+      "usage": {
+        "input": 7,
+        "output": 3,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 10,
+        "cost": {
+          "input": 0.000007,
+          "output": 0.000003,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0.000009999999999999999,
+          "totalFromProvider": false
+        }
+      },
+      "origin": {
+        "kind": "local-origin",
+        "originSessionId": "b0712d4c-7f91-40a5-9baa-01ced3f9c083",
+        "originEntryId": "b2e02c90"
+      },
+      "ledgerKey": "r:fixture:fixture-2"
+    }
+  ]
+}

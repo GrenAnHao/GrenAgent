@@ -1,3 +1,12 @@
+import { workflowHistoryMessages, legacyExclusions, derivedSelection } from './sessionWorkflowData.js';
+import { parseContextExclusionPulse } from '../../../extensions/compaction-policy/exclusion.js';
+import { join, isAbsolute } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { SessionWorkflowOwner } from './sessionWorkflowOwner.js';
+import { SessionPortability } from './sessionPortability.js';
+import { prepareSessionCandidate } from './sessionCandidate.js';
+import { ensureLegacyRoster } from '../../../extensions/usage-ledger/legacyRoster.js';
+import type { SessionWorkflowRequest, SessionWorkflowAck } from './sessionWorkflowContracts.js';
 import { createReadStream, existsSync } from 'node:fs';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
@@ -33,6 +42,9 @@ import { deleteAskUserDraft, readAskUserDraft, writeAskUserDraft, type AskUserDr
 import { completeAskUser, finishCompleteAskUser } from '../agent/completeAskUser.js';
 import { withEstimatedContextUsage } from './contextUsageEstimate.js';
 import { cancelQueuedSteer } from './cancelQueuedSteer.js';
+import { syncLocalModelCompactionBudgets } from '../../../cli/src/model-compaction-control.js';
+import { syncWorkerModelCompactionBudgets } from '../../../extensions/multi-agent/worker-session.js';
+import type { BudgetSyncResult } from '../../../extensions/_shared/model-compaction-budgets.js';
 import { syncSessionFromDisk, type SessionFileSync } from './syncSessionFromDisk.js';
 
 type PiCommand = keyof typeof commandTypes;
@@ -87,13 +99,13 @@ export interface AgentHostPort {
   /** 同一项目里同时活着的 handle。没有时退回 get。 */
   list?(workspace: string): WorkspaceHandlePort[];
   /** 再开一个 handle，不替换当前前景。 */
-  openAdditional?(workspace: string, cwd: string): Promise<WorkspaceHandlePort>;
+  openAdditional?(workspace: string, cwd: string, candidatePath?: string): Promise<WorkspaceHandlePort>;
   focus?(workspace: string, handle: WorkspaceHandlePort): void;
   /** 只拆这一个 handle；前景是它时落到剩下的那个。 */
   evict?(workspace: string, handle: WorkspaceHandlePort): Promise<void>;
 }
 export type WorkspaceHandlePort = Pick<WorkspaceHandle,
-  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'reload' | 'ui' | 'currentTurnOrigin' | 'dispose'>;
+  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'reload' | 'ui' | 'currentTurnOrigin' | 'dispose'> & Partial<Pick<WorkspaceHandle, 'publishCandidate' | 'activateCandidate'>>;
 
 /** 第 3 份已删除 client 接缝：会话操作一律走 runOnHandle。 */
 interface SessionOps {
@@ -146,6 +158,21 @@ interface ActiveTurn {
   turnId: string;
 }
 
+/**
+ * 用户点停止后的收口等待上限。SDK 的 `abort()` 是「发出中止 + 等这一轮真正 idle」，本身没有超时；
+ * 回合卡在不会响应中止的等待里时（工具、扩展钩子不返回），这个 await 永不完成，界面上的停止
+ * 就一直「没反应」。到点后先把用户看到的运行态收掉，SDK 那边继续等，闲下来照常发终态事件。
+ */
+const ABORT_SETTLE_TIMEOUT_MS = 10_000;
+
+/** agent_abort 的回执：到点仍未 idle 时如实带 reason，调用方据此决定是否做二次提示。 */
+export interface AbortResult {
+  stopped: boolean;
+  aborted: boolean;
+  reason?: 'timeout';
+  isStreaming?: boolean;
+}
+
 export interface PiRuntimeOptions {
   agentDir: string;
   runtimeConfigPath?: string;
@@ -176,6 +203,11 @@ export interface PiRuntimeOptions {
 }
 
 export class PiRuntimeService {
+  async syncModelCompactionBudgets(): Promise<BudgetSyncResult> {
+    const local = await syncLocalModelCompactionBudgets();
+    const workers = await syncWorkerModelCompactionBudgets().catch((error) => ({ sessions: [{ workspace: 'worker', error: error instanceof Error ? error.message : String(error) }] }));
+    return { sessions: [...local.sessions, ...workers.sessions] };
+  }
   private readonly activeTurns = new Map<string, ActiveTurn>();
   private readonly assistantItems = new Map<string, string>();
   private readonly itemPayloads = new Map<string, Record<string, unknown>>();
@@ -192,7 +224,133 @@ export class PiRuntimeService {
   /** 同一目标会话正在进行的 openAdditional（并发请求共用一次打开）。 */
   private readonly targetOpens = new Map<string, Promise<WorkspaceHandlePort>>();
   private exclusionPulseRev = 0;
-  constructor(private readonly options: PiRuntimeOptions) {}
+  private readonly workflows: SessionWorkflowOwner;
+  private readonly portability = new SessionPortability();
+  constructor(private readonly options: PiRuntimeOptions) { this.workflows = new SessionWorkflowOwner(options.agentDir); }
+
+  /** Production WorkspaceHandle delegates here; older fork-only ports keep their existing contract. */
+  async stagedFork(workspace: string, handle: WorkspaceHandlePort, entryId: string, options?: {position?:'before'|'at'}): Promise<{cancelled:boolean;selectedText?:string;sessionPath?:string}> {
+    if (this.options.agentHost.get(workspace) !== handle) throw new Error('SESSION_STALE');
+    await this.awaitPreferenceWrites(workspace, handle.session.sessionId);
+    const tree=this.workflows.tree(handle.session);
+    const ack=await this.sessionWorkflow(workspace,{...tree,action:'fork',entryId,position:options?.position ?? 'before'},{notifyFork:false});
+    return {...ack,cancelled:ack.status==='cancelled',selectedText:ack.editorText};
+  }
+
+  /** One explicit owner across tree, edit and portability commands. Paths are granted by main, never by renderer. */
+  async sessionWorkflow(workspace: string, request: SessionWorkflowRequest, options: {notifyFork?:boolean} = {}): Promise<SessionWorkflowAck> {
+    const auth = await this.authorize(workspace, 'agent_session_workflow', {action:request.action,targetSessionPath:request.targetSessionPath});
+    if (auth.status !== 'allowed') throw new Error('SESSION_OPERATION_DENIED');
+    const handle = request.targetSessionPath ? this.handleOwningPath(workspace, request.targetSessionPath) : await this.resolveHandle(workspace);
+    if (!handle) throw new Error('SESSION_STALE: 请重新打开目标会话');
+    const session = handle.session;
+    if (request.action === 'tree') return this.workflows.execute(session, request);
+    if (request.action === 'reload') return this.workflows.reload(session, request);
+    if (request.action === 'cancel-summary') return this.workflows.execute(session, request);
+    if (handle !== this.options.agentHost.get(workspace)) throw new Error('SESSION_STALE: 前景会话已切换');
+    await this.awaitPreferenceWrites(workspace, session.sessionId);
+    if (handle.session !== session || handle !== this.options.agentHost.get(workspace)) throw new Error('SESSION_STALE');
+    const key = this.sessionKey(workspace, session.sessionId);
+    if (this.activeTurns.has(key) || (this.queuedTurns.get(key)?.length ?? 0) > 0) throw new Error('SESSION_BUSY');
+    if (request.action === 'fork-preview' || request.action === 'clone-preview') {
+      return this.workflows.withTarget(session,request,async()=>{
+        if(!session.sessionFile||!existsSync(session.sessionFile))throw new Error('会话尚未落盘，发送第一条消息后才能分叉或复制');
+        const config=await this.runtimeConfigSnapshot(),rawPulse=config[contextExclusionConfigKey(workspace)],pulse=parseContextExclusionPulse(rawPulse);
+        if(rawPulse?.trim()&&(!pulse||legacyExclusions(session.sessionManager.getEntries()).has(pulse.ts)!==(pulse.op==='add')))throw new Error('SESSION_EXCLUSION_PENDING: 请重开原会话完成旧排除，再重新预览');
+        this.workflows.assertSnapshot(session,request);
+        const operation=request.action==='clone-preview'?'clone':'fork';
+        const selection=derivedSelection(session.sessionManager,operation,request.entryId,request.position??'before');
+        const all=this.workflows.tree(session);const flatten=(nodes:typeof all.nodes):typeof all.nodes=>nodes.flatMap(node=>[node,...flatten(node.children)]);const nodes=new Map(flatten(all.nodes).map(node=>[node.id,node]));
+        return {status:'ok',tree:all,targetLeafId:selection.leafId,editorText:selection.editorText,nodeCount:selection.entries.length,scope:operation==='clone'?'复制当前分支（非完整会话树）':request.position==='at'?'根至所选节点（包含目标）':'所选用户消息之前（不含目标）',preview:selection.entries.map(entry=>({id:entry.id,type:entry.type,role:entry.type==='message'?entry.message.role:undefined,preview:nodes.get(entry.id)?.preview??entry.type})),requestedPreferences:this.preferencesOf(handle)};
+      });
+    }
+    if (request.action === 'fork' || request.action === 'clone' || request.action === 'import') {
+      return this.workflows.withTarget(session, request, async () => {
+        const registry = ensureLegacyRoster(this.options.agentDir);
+        const sourcePreferences = this.preferencesOf(handle);
+        const config = await this.runtimeConfigSnapshot();
+        const rawPulse = config[contextExclusionConfigKey(workspace)];
+        const pulse = parseContextExclusionPulse(rawPulse);
+        if (rawPulse?.trim() && !pulse) throw new Error('SESSION_EXCLUSION_PENDING: 旧排除 pulse 无法确认，请重新预览');
+        this.workflows.assertSnapshot(session, request);
+        if (request.action !== 'import' && pulse && legacyExclusions(session.sessionManager.getEntries()).has(pulse.ts) !== (pulse.op === 'add')) throw new Error('SESSION_EXCLUSION_PENDING: 请重开原会话完成旧排除，再重新预览');
+        let document: ReturnType<SessionPortability['takeImport']> | undefined;
+        let leafId = session.sessionManager.getLeafId();
+        let editorText: string | undefined;
+        let cwd = session.sessionManager.getCwd();
+        if (request.action === 'import') {
+          if (!request.cwd || !isAbsolute(request.cwd) || !(await stat(request.cwd)).isDirectory()) throw new Error('请确认有效本地工作目录');
+          if (request.preferenceChoice !== 'file' && request.preferenceChoice !== 'current') throw new Error('请确认导入请求偏好');
+          cwd = request.cwd; document = this.portability.takeImport(request.ticket ?? '');
+        } else {
+          if (!session.sessionFile || !existsSync(session.sessionFile)) throw new Error('会话尚未落盘，发送第一条消息后才能分叉或复制');
+          const selection=derivedSelection(session.sessionManager,request.action as 'fork'|'clone',request.entryId,request.position??'before');
+          leafId=selection.leafId;editorText=selection.editorText;
+        }
+        const imported = document && request.preferenceChoice === 'file' ? readSessionPreferences(document.entries as never) : {};
+        const preferences = {...sourcePreferences,...parseSessionPreferencesPatch(imported),...(request.action === 'import' ? parseSessionPreferencesPatch(request.confirmedPreferences) : {}),revision:sourcePreferences.revision + 1};
+        // Only current local approval/mode may become active; file declarations remain history.
+        if (request.action === 'import') { preferences.mode = sourcePreferences.mode ?? 'ask'; preferences.approval = sourcePreferences.approval ?? 'readonly'; }
+        if (request.action !== 'import') {
+          const selected = request.action === 'clone' ? session.sessionManager.getLeafId() : request.entryId;
+          if (selected && session.extensionRunner.hasHandlers('session_before_fork')) {
+            const before = await session.extensionRunner.emit({type:'session_before_fork',entryId:selected,position:request.action === 'clone' ? 'at' : request.position ?? 'before'});
+            if (before?.cancel) return {status:'cancelled'};
+          }
+          if (!session.isIdle) throw new Error('SESSION_BUSY');
+        }
+        const targetWorkspace = request.action === 'import' ? cwd : workspace;
+        const directory = request.action === 'import' ? SessionManager.create(cwd).getSessionDir() : session.sessionManager.getSessionDir();
+        const candidate = await prepareSessionCandidate({source:request.action === 'import' ? undefined : session.sessionManager,document,leafId,kind:request.action as 'fork' | 'clone' | 'import',directory,cwd,registry,preferences,pulseRev:pulse?.rev ?? 0});
+        const host = this.options.agentHost; let next: WorkspaceHandlePort | undefined; let published = false;
+        try {
+          if (!host.openAdditional || !host.focus) throw new Error('CANDIDATE_HANDOFF_UNAVAILABLE');
+          next = await host.openAdditional(targetWorkspace, cwd, candidate.stagingPath);
+          if (next.session.sessionId !== candidate.sessionId || !next.publishCandidate || !next.activateCandidate) throw new Error('CANDIDATE_IDENTITY_MISMATCH');
+          // Candidate canonical exists before bindExtensions; no source teardown and no prompt/warming.
+          if (handle !== host.get(workspace) || handle.session !== session) throw new Error('SESSION_STALE');
+          this.workflows.assertSnapshot(session, request);
+          await candidate.publish(); published = true;
+          await next.publishCandidate(candidate.finalPath);
+          await this.workflows.savePosition(next.session);
+          host.focus(targetWorkspace, next);
+          await this.refreshCurrentSession(targetWorkspace, this.handleOps(next));
+          await candidate.selected();
+          if (request.action !== 'import' && options.notifyFork !== false) await this.syncSessionFork(workspace, session.sessionId, candidate.sessionId);
+          next.activateCandidate();
+          return {status:'ok',sessionId:candidate.sessionId,sessionPath:candidate.finalPath,cwd,editorText,tree:this.workflows.tree(next.session)};
+        } catch (error) {
+          host.focus?.(workspace, handle);
+          if (next) await host.evict?.(targetWorkspace, next).catch(() => {});
+          await candidate.abort();
+          throw new Error(`CANDIDATE_FAILED${published ? '_PERSISTED' : ''}: ${String(error)}; 源会话仍可用`);
+        }
+      });
+    }
+    if (request.action === 'export-preview' || request.action === 'export' || request.action === 'import-preview') {
+      return this.workflows.withTarget(session, request, async () => {
+        if (request.action === 'export-preview' || request.action === 'export') {
+          const config = await this.runtimeConfigSnapshot();
+          const rawPulse = config[contextExclusionConfigKey(workspace)];
+          const pulse = parseContextExclusionPulse(rawPulse);
+          if (rawPulse?.trim() && (!pulse || legacyExclusions(session.sessionManager.getEntries()).has(pulse.ts) !== (pulse.op === 'add'))) throw new Error('SESSION_EXCLUSION_PENDING: 请重开原会话完成旧排除，再重新预览');
+          this.workflows.assertSnapshot(session, request);
+        }
+        const tree = this.workflows.tree(session);
+        if (request.action === 'export') return this.portability.export(session, tree, request);
+        const preview = request.action === 'export-preview'
+          ? await this.portability.previewExport(session, tree, request)
+          : await this.portability.previewImport(request.source ?? '');
+        this.workflows.assertSnapshot(session, request);
+        return preview;
+      });
+    }
+    const preferences = this.preferencesOf(handle);
+    return this.workflows.execute(session, request, async () => {
+      await this.applySessionPreferencesNow(workspace, handle, preferences, {}, {sessionId:session.sessionId,sessionPath:session.sessionFile});
+    });
+  }
+
 
   async openWorkspace(workspace: string): Promise<{ restoredSession: null; sessionFile: string | null; sessionId?: string | null }> {
     const ops = this.handleOps(await this.openInteractive(workspace));
@@ -315,6 +473,7 @@ export class PiRuntimeService {
   }
 
   async send(workspace: string, command: string, rawArgs: Record<string, unknown>): Promise<unknown> {
+    if (command === 'agent_session_workflow') return this.sessionWorkflow(workspace, rawArgs as unknown as SessionWorkflowRequest);
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
     // targetSessionPath 只是路由提示：渲染层说明这条命令属于哪份会话。它不参与 resolveSession，
@@ -364,7 +523,8 @@ export class PiRuntimeService {
       }
       if (!owner) {
         // 目标会话已经不在任何 handle 上：停止 / 取引导没有可作用的回合，不能落到别的会话。
-        if (command === 'agent_abort') return undefined;
+        // 停止仍要回一个可用回执：没有承载它的 handle 就没有在跑的回合，界面据此收掉运行态。
+        if (command === 'agent_abort') return { stopped: true, aborted: false } satisfies AbortResult;
         if (command === 'agent_take_steering') return { steering: [] };
         if (command === 'agent_cancel_steer') return { cancelled: false };
         // 要快照的会话已经不在 handle 上（后台跑完被拆了）：读它自己的会话文件，不能拿前景那份顶替。
@@ -425,7 +585,7 @@ export class PiRuntimeService {
       if (!entryId) throw new Error(`no message with timestamp ${String(args.timestamp)} in session`);
       const result = await ops.run('agent_rewind_to', { entryId });
       if (isCancelledResult(result)) return result;
-      const targetIdentity = await this.refreshCurrentSession(workspace, ops);
+      const targetIdentity = await this.refreshCurrentSession(workspace, isRecord(result) && typeof result.sessionPath === 'string' ? this.handleOps(await this.resolveHandle(workspace)) : ops);
       if (targetIdentity?.sessionId) ops.setSessionIdentity?.(targetIdentity.sessionId, targetIdentity.sessionPath);
       const targetSessionId = targetIdentity?.sessionId ?? this.currentSessionByWorkspace.get(workspace)?.sessionId;
       if (sourceSessionId && targetSessionId && sourceSessionId !== targetSessionId) {
@@ -434,6 +594,7 @@ export class PiRuntimeService {
       return result;
     }
     if (command === 'agent_truncate_to') {
+      this.workflows.assertSendable(handle.session);
       return this.truncateSessionTo(handle, rpcArgs);
     }
     if (command === 'ask_user_draft_read' || command === 'ask_user_draft_write' || command === 'ask_user_draft_delete') {
@@ -498,7 +659,7 @@ export class PiRuntimeService {
           this.workspaceThreads.delete(this.sessionKey(workspace, this.currentSessionByWorkspace.get(workspace)?.sessionId));
         }
         const isSessionFork = command === 'agent_fork' || command === 'agent_clone';
-        const targetIdentity = await this.refreshCurrentSession(workspace, ops);
+        const targetIdentity = await this.refreshCurrentSession(workspace, isRecord(result) && typeof result.sessionPath === 'string' ? this.handleOps(await this.resolveHandle(workspace)) : ops);
         if (targetIdentity?.sessionId) {
           ops.setSessionIdentity?.(targetIdentity.sessionId, targetIdentity.sessionPath);
         }
@@ -508,7 +669,7 @@ export class PiRuntimeService {
             await this.syncSessionFork(workspace, sourceSessionId, targetSessionId);
             // 派生会话可能落在锚点之前、没带上 canonical 条目（锚点之后才保存的偏好不会出现在分支里）。
             // 这时把源会话的请求值补进新身份，别让新会话悄悄回落到 SDK 默认。
-            await this.seedForkedPreferences(workspace, handle);
+            if (!(isRecord(result) && typeof result.sessionPath === 'string')) await this.seedForkedPreferences(workspace, handle);
           }
         }
       }
@@ -578,7 +739,8 @@ export class PiRuntimeService {
     const identity = await readSessionIdentity(sessionPath, workspace);
     if (!existsSync(identity.sessionPath)) return { messages: [] };
     const manager = SessionManager.open(identity.sessionPath);
-    return { messages: messagesWithEntryIds(manager.buildSessionProjection() as unknown as SessionProjectionLike) };
+    await this.workflows.restoreReadOnlyPosition(manager, identity.sessionPath);
+    return { messages: workflowHistoryMessages(manager) };
   }
 
   private contextOf(handle: WorkspaceHandlePort): SessionContext {
@@ -631,6 +793,10 @@ export class PiRuntimeService {
     const eventSessionId = typeof sessionOrMetadata === 'string' ? sessionOrMetadata : sessionOrMetadata?.sessionId ?? readOptionalString(raw.sessionId);
     const eventSource = source ?? (typeof sessionOrMetadata === 'object' ? sessionOrMetadata?.source : undefined);
     if (eventSource === 'subagent') return;
+    if (raw.type === 'agent_settled' && eventSessionId) {
+      const owner=this.handlesOf(workspace).find(h=>h.session.sessionId===eventSessionId);
+      if(owner) await this.workflows.checkpoint(owner.session);
+    }
     const stateKey = this.findEventKey(workspace, eventSessionId);
     if (!stateKey) {
       // 没有登记回合（未接 threadStore 或斜杠命令）时，后台会话跑完也要释放它的 handle。
@@ -649,6 +815,15 @@ export class PiRuntimeService {
     if (eventSource && eventSource !== active.source) return;
     const session: SessionContext = { sessionId: active.sessionId, sessionPath: active.sessionPath, source: eventSource ?? active.source };
     this.emitRuntimeEvent(workspace, session, raw);
+    // agent_settled 是这一轮真正的收尾（晚于 agent_end）。adaptPiEvent 不为它产出投影，
+    // 以前到这里就 return，回合登记只能靠 agent_end 清；agent_end 一旦丢（拆除时不再转发、
+    // 订阅器报错丢掉单条），activeTurns 就永远留着，listRunningTurns 把已结束的会话继续报成在跑，
+    // 渲染层重载后侧栏又亮起来、停止又没有可停的回合。这里兜底收口。
+    if (raw.type === 'agent_settled') {
+      const settled = await this.settleOnAgentSettled(workspace, session, active, raw);
+      if (settled) await this.releaseIdleParked(workspace, session).catch(() => {});
+      return;
+    }
     const normalized = this.withStableItemId(stateKey, raw);
     // adaptPiEvent 现在只是内部投影器：把 pi 原始事件归一成 turn/item 语义，供下面的
     // threads/turns/items 持久化分支使用。它不再对外广播，也不再写 app_events（AppEvent 已移除）。
@@ -671,28 +846,75 @@ export class PiRuntimeService {
     }
     if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.cancelled') {
       const data = isRecord(event.data) ? event.data : {};
-      await this.options.threadStore?.updateTurn(active.turnId, {
-        status: event.type === 'turn.completed' ? 'completed' : event.type === 'turn.cancelled' ? 'cancelled' : 'failed',
-        completedAt: event.timestamp,
-        ...(event.type === 'turn.failed' ? { error: readOptionalString(data.errorMessage) ?? readOptionalString(data.error) ?? 'Pi turn failed' } : {}),
-      });
-      this.activeTurns.delete(stateKey);
-      this.assistantItems.delete(stateKey);
-      for (const key of this.itemPayloads.keys()) if (key.startsWith(`${active.turnId}:`)) this.itemPayloads.delete(key);
+      const status = event.type === 'turn.completed' ? 'completed' : event.type === 'turn.cancelled' ? 'cancelled' : 'failed';
       try {
-        await this.options.onTurnSettled?.({
-          workspace,
-          ...(active.sessionId ? { sessionId: active.sessionId } : {}),
-          ...(active.sessionPath ? { sessionPath: active.sessionPath } : {}),
-          turnId: active.turnId,
-          status: event.type === 'turn.completed' ? 'completed' : event.type === 'turn.cancelled' ? 'cancelled' : 'failed',
-          summary: summarizeTurn(raw, event),
+        await this.settleTurn(workspace, session, active, status, summarizeTurn(raw, event), {
+          completedAt: event.timestamp,
+          ...(event.type === 'turn.failed' ? { error: readOptionalString(data.errorMessage) ?? readOptionalString(data.error) ?? 'Pi turn failed' } : {}),
         });
       } finally {
-        await this.drainQueuedTurn(workspace, session).catch(() => {});
         await this.releaseIdleParked(workspace, session).catch(() => {});
       }
     }
+  }
+
+  /**
+   * 回合终态收口：落 turn 状态、清登记、发 onTurnSettled、跑排队的下一条。
+   * `agent_end` 的投影和兜底的 `agent_settled` 都走这里，两边不会各自漏一部分。
+   */
+  private async settleTurn(
+    workspace: string,
+    session: SessionContext,
+    active: ActiveTurn,
+    status: 'completed' | 'failed' | 'cancelled',
+    summary: string,
+    patch: { completedAt?: number; error?: string } = {},
+  ): Promise<void> {
+    const stateKey = this.sessionKey(workspace, active.sessionId);
+    await this.options.threadStore?.updateTurn(active.turnId, {
+      status,
+      ...(patch.completedAt !== undefined ? { completedAt: patch.completedAt } : {}),
+      ...(patch.error ? { error: patch.error } : {}),
+    });
+    this.activeTurns.delete(stateKey);
+    this.assistantItems.delete(stateKey);
+    for (const key of this.itemPayloads.keys()) if (key.startsWith(`${active.turnId}:`)) this.itemPayloads.delete(key);
+    try {
+      await this.options.onTurnSettled?.({
+        workspace,
+        ...(active.sessionId ? { sessionId: active.sessionId } : {}),
+        ...(active.sessionPath ? { sessionPath: active.sessionPath } : {}),
+        turnId: active.turnId,
+        status,
+        summary,
+      });
+    } finally {
+      await this.drainQueuedTurn(workspace, session).catch(() => {});
+    }
+  }
+
+  /**
+   * `agent_settled` 兜底把还登记着的回合收掉（正常情况 `agent_end` 已经收过了）。
+   * 返回 true 表示这次真的收了口。
+   */
+  private async settleOnAgentSettled(
+    workspace: string,
+    session: SessionContext,
+    active: ActiveTurn,
+    raw: Record<string, unknown>,
+  ): Promise<boolean> {
+    if (this.activeTurns.get(this.sessionKey(workspace, active.sessionId)) !== active) return false;
+    const aborted = raw.aborted === true;
+    const status = aborted ? 'cancelled' : 'completed';
+    await this.settleTurn(
+      workspace,
+      session,
+      active,
+      status,
+      aborted ? 'Turn cancelled.' : 'Turn settled without an agent_end projection.',
+      { completedAt: Date.now() },
+    );
+    return true;
   }
 
   /** Convert an unexpected Pi process exit into a terminal turn result. */
@@ -1013,6 +1235,7 @@ export class PiRuntimeService {
     const expectedSessionId = typeof handle.session.sessionId === 'string' ? handle.session.sessionId : undefined;
     const expectedSessionPath = this.sessionPathOf(handle);
     const key = this.sessionKey(workspace, expectedSessionId);
+    if (this.workflows.isLocked(handle.session)) throw new Error('SESSION_BUSY');
     const previous = this.preferenceWrites.get(key) ?? Promise.resolve();
     const task = previous
       .catch(() => {})
@@ -1613,13 +1836,14 @@ export class PiRuntimeService {
 
   private async runOnHandle(handle: WorkspaceHandlePort, command: PiCommand, args: Record<string, unknown>, origin: 'main' | 'goal'): Promise<unknown> {
     const s = handle.session;
+    if (PROMPT_COMMANDS.has(command)) this.workflows.assertSendable(s);
     const images = Array.isArray(args.images) ? (args.images as ImageContent[]) : undefined;
     switch (command) {
       case 'agent_prompt':
         return handle.prompt(readInput(args), { images, ...(args.streamingBehavior ? { streamingBehavior: args.streamingBehavior as 'steer' | 'followUp' } : {}) }, origin);
       case 'agent_steer': await s.steer(readInput(args), images); return undefined;
       case 'agent_follow_up': await s.followUp(readInput(args), images); return undefined;
-      case 'agent_abort': await s.abort(); return undefined;
+      case 'agent_abort': return this.abortSession(s);
       case 'agent_take_steering': {
         const restored = s.clearQueue();
         for (const item of restored.followUp) await s.followUp(item);
@@ -1637,7 +1861,7 @@ export class PiRuntimeService {
       case 'agent_get_available_models': return {
         models: s.modelRuntime.getAvailableSnapshot().map((m) => snapshotSessionModel(m) ?? m),
       };
-      case 'agent_compact': return s.compact(typeof args.customInstructions === 'string' ? args.customInstructions : undefined);
+      case 'agent_compact': this.workflows.assertSendable(s); return s.compact(typeof args.customInstructions === 'string' ? args.customInstructions : undefined);
       case 'agent_set_auto_compaction': s.setAutoCompactionEnabled(args.enabled === true); return undefined;
       case 'agent_abort_retry': s.abortRetry(); return undefined;
       case 'agent_get_session_stats': {
@@ -1656,7 +1880,7 @@ export class PiRuntimeService {
       case 'agent_get_messages': {
         const build = s.sessionManager?.buildSessionProjection;
         if (typeof build === 'function') {
-          return { messages: messagesWithEntryIds(build.call(s.sessionManager)) };
+          return { messages: typeof s.sessionManager.getBranch === 'function' ? workflowHistoryMessages(s.sessionManager) : messagesWithEntryIds(build.call(s.sessionManager)) };
         }
         return { messages: s.messages };
       }
@@ -1669,12 +1893,12 @@ export class PiRuntimeService {
         return undefined;
       }
       case 'agent_new_session': return handle.newSession();
-      case 'agent_switch_session': return handle.switchSession(String(args.sessionPath ?? ''));
+      case 'agent_switch_session': { const result = await handle.switchSession(String(args.sessionPath ?? '')); if (!result.cancelled) await this.workflows.restorePosition(handle.session); return result; }
       case 'agent_fork': return { ...(await handle.fork(String(args.entryId ?? ''))), };
       case 'agent_clone': {
         const leafId = s.sessionManager.getLeafId();
         if (!leafId) throw new Error('Cannot clone session: no current entry selected');
-        return { cancelled: (await handle.fork(leafId, { position: 'at' })).cancelled };
+        return handle.fork(leafId, { position: 'at' });
       }
       case 'agent_rewind_to': return handle.fork(String(args.entryId ?? ''));
       case 'agent_truncate_to': throw new Error('agent_truncate_to must run through truncateSessionTo');
@@ -1796,6 +2020,7 @@ export class PiRuntimeService {
   private foregroundIsBusy(workspace: string): boolean {
     const handle = this.options.agentHost.get(workspace);
     if (handle?.session.isStreaming) return true;
+    if (handle && (handle.session.isIdle === false || this.workflows.isLocked(handle.session))) return true;
     const sessionId = typeof handle?.session.sessionId === 'string' ? handle.session.sessionId : undefined;
     return [...this.activeTurns.values()].some((turn) => {
       if (turn.workspace !== workspace || turn.source !== 'interactive') return false;
@@ -1880,6 +2105,31 @@ export class PiRuntimeService {
       status: event.type === 'item.updated' ? (raw.isError === true ? 'failed' : 'completed') : event.type === 'item.delta' ? 'streaming' : 'started',
       payload,
     });
+  }
+
+  /**
+   * 发出停止并把用户看到的运行态收掉，但不让调用方无限等 SDK 闲下来。
+   *
+   * SDK 的 abort 本身幂等（没有在跑的回合立即返回），这里只补一个上限：
+   * - 正常：这一轮在窗口内结束，回报 stopped。
+   * - 超时：中止请求已经发出（`agent.abort()` 已执行完毕），但回合仍未 idle。仍然回报
+   *   `stopped: true`，因为用户点停止的语义就是「别再显示在跑了」；同时如实给出
+   *   `reason: 'timeout'` 和当时的 isStreaming，调用方可以据此继续观察。
+   * 后台的 abort 不取消：SDK 那边继续等，闲下来后照常发 agent_end / agent_settled。
+   */
+  private async abortSession(s: WorkspaceHandlePort['session']): Promise<AbortResult> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), ABORT_SETTLE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    try {
+      const outcome = await Promise.race([s.abort().then(() => 'settled' as const), timeout]);
+      if (outcome === 'settled') return { stopped: true, aborted: true };
+      return { stopped: true, aborted: true, reason: 'timeout', isStreaming: s.isStreaming === true };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private async flushFollowUp(workspace: string, session: SessionContext): Promise<unknown> {
@@ -2273,3 +2523,4 @@ async function findEntryIdByTimestamp(sessionFile: string, timestamp: unknown): 
   }
   return found;
 }
+

@@ -1,3 +1,5 @@
+import type {BudgetSyncResult} from '../_shared/model-compaction-budgets.js';
+import {requestObservations,type RequestObservation} from '../_shared/requestObservation.js';
 // 子代理 worker 后端的宿主这一侧（子代理重新设计阶段 3）。
 // 每个子代理一个常驻 worker 进程（不做池），同时活着的 worker 超过上限就排队（SUBAGENT_MAX_WORKERS，默认 2）。
 // worker 里跑的是和进程内后端同一份建会话代码（worker-host.ts）；这里给出一个代理会话，接口和进程内的
@@ -72,6 +74,20 @@ interface WorkerConnection {
   stderrTail: () => string;
 }
 
+const budgetWorkers=new Map<ChildProcess,{peer:RpcPeer;workspace:string;sessionPath?:string;state:'starting'|'ready'|'exited'}>();
+/** Transport-only ACK aggregation; budget calculation remains in the session owner. */
+export async function syncWorkerModelCompactionBudgets():Promise<BudgetSyncResult> {
+  const rows=await Promise.all([...budgetWorkers.entries()].map(async([child,worker])=>{
+    const fail=(error:string)=>[{workspace:worker.workspace,...(worker.sessionPath?{sessionPath:worker.sessionPath}:{}),error}];
+    if(worker.state==='exited'||child.connected===false)return fail('WORKER_DISCONNECTED');
+    if(worker.state!=='ready')return fail('WORKER_NOT_READY');
+    if(!worker.sessionPath)return fail('WORKER_SESSION_NOT_READY');
+    try{const result=await worker.peer.request<BudgetSyncResult>('modelCompaction.sync');return result?.sessions?.length?result.sessions:fail('WORKER_NO_BUDGET_ACK');}
+    catch(error){return fail(error instanceof Error?error.message:String(error));}
+  }));
+  return {sessions:rows.flat()};
+}
+
 function startWorker(cwd: string, ownerCwd: string, runtimeConfigPath: string | undefined): Promise<WorkerConnection> {
   const { cmd, baseArgs } = resolvePiCommand();
   const child = spawn(cmd, [...baseArgs, "--mode", "subagent"], {
@@ -95,6 +111,8 @@ function startWorker(cwd: string, ownerCwd: string, runtimeConfigPath: string | 
   });
   // 带回调发：通道已关时不回调就会在 child 上抛 error 事件，没人接会让 agent-host 崩掉。退出由 exit 统一处理。
   const peer = new RpcPeer({ send: (message: WireMessage) => void child.send(message, () => {}) });
+  budgetWorkers.set(child,{peer,workspace:ownerCwd,state:'starting'});
+  child.once("exit",()=>{const entry=budgetWorkers.get(child);if(entry)entry.state='exited';});
   child.on("error", () => {});
   child.on("message", (message) => peer.receive(message));
   const exitMessage = (code: number | null, signal: NodeJS.Signals | null) =>
@@ -105,6 +123,7 @@ function startWorker(cwd: string, ownerCwd: string, runtimeConfigPath: string | 
     const off = peer.onEvent((channel) => {
       if (channel !== "ready") return;
       off();
+      budgetWorkers.get(child)!.state='ready';
       resolve({ child, peer, stderrTail: () => stderr });
     });
     child.once("error", (error) => reject(new Error(`sub-agent worker failed to start: ${error.message}`)));
@@ -194,7 +213,15 @@ class WorkerSessionProxy {
     /** 这个 worker 托管的子代理；冷恢复时打开后从会话的 subagent_meta 补上。 */
     public childId?: string,
   ) {
-    conn.peer.onEvent((channel, payload) => this.onEvent(channel, payload));
+    const generations=new Set<string>();
+    conn.peer.onEvent((channel,payload)=>{
+      if(channel==='request-observation'){
+        const event=payload as RequestObservation;generations.add(event.identity.runtimeGeneration);
+        requestObservations.acceptRemote(event,params=>conn.peer.request('observations',params));return;
+      }
+      this.onEvent(channel,payload);
+    });
+    conn.child.once('exit',()=>{for(const g of generations)requestObservations.disconnectRemote(g);});
     conn.child.once("exit", (code, signal) => this.onExit(code, signal));
   }
 
@@ -306,6 +333,7 @@ class WorkerSessionProxy {
   dispose(): void {
     if (this.disposing) return;
     this.disposing = true;
+    budgetWorkers.delete(this.conn.child);
     this.forwardUi = false;
     const { child } = this.conn;
     if (!this.exitedWith) void this.call("dispose").catch(() => {});
@@ -321,6 +349,7 @@ class WorkerSessionProxy {
 
   kill(): void {
     this.disposing = true;
+    budgetWorkers.delete(this.conn.child);
     killProcessTree(this.conn.child);
   }
 
@@ -399,6 +428,7 @@ export const openWorkerChildSession: ChildSessionOpener = async (opts, prepared)
   proxy.state = opened.state;
   proxy.entries = opened.entries;
   proxy.meta = { ...(opened.sessionId ? { sessionId: opened.sessionId } : {}), sessionPath: opened.sessionPath, workspace: opened.workspace };
+  const workerBudget=budgetWorkers.get(conn.child);if(workerBudget){workerBudget.workspace=proxy.meta.workspace;workerBudget.sessionPath=proxy.meta.sessionPath;}
   const session = proxy.session(opened);
   const handle: OpenedEmbedded = {
     session: session as unknown as OpenedEmbedded["session"],
@@ -445,6 +475,7 @@ export async function resumeWorkerChildSession(sessionPath: string, childId?: st
   proxy.state = resumed.state;
   proxy.entries = resumed.entries;
   proxy.meta = { ...(resumed.sessionId ? { sessionId: resumed.sessionId } : {}), sessionPath, workspace: ctx.workspace };
+  const workerBudget=budgetWorkers.get(conn.child);if(workerBudget){workerBudget.workspace=proxy.meta.workspace;workerBudget.sessionPath=proxy.meta.sessionPath;}
   const agentId = lastSubagentMeta(resumed.entries)?.agentId;
   if (!proxy.childId && typeof agentId === "string" && agentId) proxy.childId = agentId;
   return {

@@ -10,14 +10,8 @@ vi.mock('../settings/SettingsPanel', () => ({ SettingsPanel: () => <div>SET_PANE
 vi.mock('../connections/ConnectionsPanel', () => ({ ConnectionsPanel: () => <div>CONN_PANEL</div> }));
 vi.mock('../extensions/ExtensionsPanel', () => ({ ExtensionsPanel: () => <div>EXT_PANEL</div> }));
 vi.mock('../usage/UsagePanel', () => ({ UsagePanel: () => <div>USAGE_PANEL</div> }));
-vi.mock('../repoWiki/RepoWikiWorkspace', () => ({ RepoWikiWorkspace: () => <div data-testid="repo-wiki-content">REPO_WIKI</div> }));
-vi.mock('../agentData/AgentDataCenter', () => ({
-  AgentDataCenter: ({ userId, initialProject, visible = true, requestedTab }: { userId?: string; initialProject?: string; visible?: boolean; requestedTab?: string }) => <div data-testid="agent-data-content" data-visible={visible} data-tab={requestedTab}>
-    <span>AGENT_DATA:{userId}:{initialProject}</span>
-    <input aria-label="Agent 数据搜索" defaultValue="" />
-  </div>,
-}));
-// 未打桩的话会渲染真实工作台（依赖 window.gren、zustand store 等），在 jsdom 下会炸。
+vi.mock('../codeIndex/CodeIndexWorkspace', () => ({ CodeIndexWorkspace: ({ initialProject }: { initialProject?: string }) => <div data-testid="code-index-content">CODE_INDEX:{initialProject}</div> }));
+// 开发工作台未打桩时会渲染真实组件（依赖 window.gren 等），jsdom 下会炸。
 vi.mock('../devtools/DevWorkbench', () => ({ DevWorkbench: () => <div>DEV_WORKBENCH</div> }));
 
 beforeEach(() => {
@@ -50,68 +44,17 @@ describe('ModuleContainer', () => {
     });
   }
 
-  it('passes the active workspace as the panel initial project', async () => {
-    useModuleStore.setState({ activeModule: 'agentData' });
+  it('mounts the code index module independently, with the active workspace', async () => {
+    useModuleStore.setState({ activeModule: 'codeIndex' });
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
-    expect(await screen.findByText('AGENT_DATA:local:/workspace')).toBeTruthy();
+    expect(await screen.findByText('CODE_INDEX:/workspace')).toBeTruthy();
   });
 
-  it('does not mount Agent Data before its first visit', async () => {
+  it('normalises a retired Agent Data module back to chat', async () => {
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
+    act(() => useModuleStore.getState().setActiveModule('agentData'));
+    expect(useModuleStore.getState().activeModule).toBe('chat');
+    expect(screen.getByText('CHAT_CONTENT')).toBeTruthy();
     expect(screen.queryByTestId('agent-data-content')).toBeNull();
-    act(() => useModuleStore.setState({ activeModule: 'settings' }));
-    await screen.findByText('SET_PANEL');
-    expect(screen.queryByTestId('agent-data-content')).toBeNull();
   });
-
-  it('redirects the former Repo Wiki module into the retained Agent Data center', async () => {
-    render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
-    const chat = screen.getByText('CHAT_CONTENT');
-    act(() => useModuleStore.getState().setActiveModule('repoWiki'));
-    const first = await screen.findByTestId('agent-data-content');
-    expect(first.dataset.tab).toBe('repoWiki');
-    act(() => useModuleStore.getState().setActiveModule('chat'));
-    expect(first.parentElement?.hidden).toBe(true);
-    expect(screen.getByText('CHAT_CONTENT')).toBe(chat);
-    act(() => useModuleStore.getState().setActiveModule('repoWiki'));
-    expect(await screen.findByTestId('agent-data-content')).toBe(first);
-  });
-
-  it('retains Agent Data input, scroll and nodes across module switches', async () => {
-    render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
-    const chat = screen.getByText('CHAT_CONTENT');
-    act(() => useModuleStore.setState({ activeModule: 'agentData' }));
-    const content = await screen.findByTestId('agent-data-content');
-    const input = screen.getByLabelText('Agent 数据搜索') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'retained query' } });
-    content.scrollTop = 128;
-
-    act(() => useModuleStore.setState({ activeModule: 'chat' }));
-    expect(screen.getByTestId('agent-data-content')).toBe(content);
-    expect(content.dataset.visible).toBe('false');
-    expect(content.parentElement?.hidden).toBe(true);
-    expect(screen.getByText('CHAT_CONTENT')).toBe(chat);
-
-    act(() => useModuleStore.setState({ activeModule: 'agentData' }));
-    expect(screen.getByLabelText('Agent 数据搜索')).toBe(input);
-    expect(input.value).toBe('retained query');
-    expect(screen.getByTestId('agent-data-content')).toBe(content);
-    expect(content.scrollTop).toBe(128);
-    expect(content.dataset.visible).toBe('true');
-    expect(content.parentElement?.hidden).toBe(false);
-    expect(screen.getByText('CHAT_CONTENT')).toBe(chat);
-  });
-
-  it('snapshots the workspace on the first Agent Data visit', async () => {
-    render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
-    act(() => useSessionStore.setState({ activeWorkspace: '/before-open' }));
-    act(() => useModuleStore.setState({ activeModule: 'agentData' }));
-    expect(await screen.findByText('AGENT_DATA:local:/before-open')).toBeTruthy();
-
-    act(() => useModuleStore.setState({ activeModule: 'chat' }));
-    act(() => useSessionStore.setState({ activeWorkspace: '/later-project' }));
-    act(() => useModuleStore.setState({ activeModule: 'agentData' }));
-    expect(screen.getByText('AGENT_DATA:local:/before-open')).toBeTruthy();
-  });
-
 });

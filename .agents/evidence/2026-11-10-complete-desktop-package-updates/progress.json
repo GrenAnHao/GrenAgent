@@ -1,0 +1,229 @@
+{
+  "changeName": "complete-desktop-package-updates",
+  "changeDir": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\proposal.md"
+    ],
+    "specs": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\specs\\desktop-package-updates\\spec.md"
+    ],
+    "design": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\design.md"
+    ],
+    "tasks": [
+      "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 28,
+    "complete": 3,
+    "remaining": 25
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 实现前重读同主题 `.agents/notes/` 与当前 SDK，写或更新最小决策笔记，记录选官方安装器 + 隔离 stage 而不直接 update 的原因和恢复限制；验证笔记符合仓库模板并运行根目录 `npm run verify-notes`。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 7
+    },
+    {
+      "id": "2",
+      "description": "1.2 记录仓库各 package.json 中 SDK 精确 pin 及实际解析来源，新增使用临时目录、假 registry 和本地 git 远端的真实 SDK 1.5.1 fixture；验证精确 npm pin 被 update/check 跳过、update(source) 命中 user/project 两侧、git reset/依赖失败没有旧版事务恢复、object 来源替换保留 autoload/过滤；所有数据和执行均限测试 fixture，无真实用户设置。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 8
+    },
+    {
+      "id": "3",
+      "description": "1.3 扩充 package model / service 的只读 snapshot 和 scope key，读取已安装版本、git commit、缺失状态及覆盖关系；先补 `piPackageModel.test.ts` / `piPackageService.test.ts`，覆盖 user/project 同名、无项目、autoload delta、本地及内置包，再验证这些定向测试通过。",
+      "done": true,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 9
+    },
+    {
+      "id": "4",
+      "description": "1.4 为新增 DTO / 错误与操作状态写相邻契约说明，明确配置 pin、磁盘实际版本和运行时已加载三者含义；验证类型检查通过且既有 install/remove/setEnabled 调用形状未变。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 10
+    },
+    {
+      "id": "5",
+      "description": "2.1 实现独立 metadata checker：精确 npm 版本候选、稳定版默认与显式预发布、git 固定 ref / 分支及完整目标 commit；用假 registry/git 测试验证离线、超时、无更新、错误、不支持各状态及两个 scope 同时可见。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 14
+    },
+    {
+      "id": "6",
+      "description": "2.2 加入无执行断言：检查不调用安装、resolve、loader、包脚本、凭据写入或模型接口；用带无害脚本计数 fixture 和临时设置读回验证检查前后安装树 / entry 不变、脚本计数不变，命令参数及远端协议注入测试通过。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 15
+    },
+    {
+      "id": "7",
+      "description": "2.3 实现静态说明读取及受控渲染输入，支持合法 `pi.changelogPath`、空值禁用、缺失、版本无增量 git commit、首次包和非 extension 资源；测试包含越界相对路径、绝对路径、symlink、超大文件、脚本 HTML、外部媒体与危险协议，验证不读取包根外且不发外部媒体请求。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 16
+    },
+    {
+      "id": "8",
+      "description": "2.4 接通只读 IPC / `pi.ts` 预览契约并写包详情字段说明；定向 IPC 测试验证 scope / workspace 校验、无 token 泄露、完整 from/to 来自结构化快照而非 result.message，且不修改官方公告已读版本。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 17
+    },
+    {
+      "id": "9",
+      "description": "3.1 实现 upgrade / repair 预览和主进程 previewId，绑定旧 entry、实际 from、不可变目标、scope、安装单元及全部潜在消费者影响范围；单测验证先列同根包与受影响项目 / 会话再确认、取消零安装、entry或范围变化确认失效、修复不移 pin、精确 npm / git 目标无法被渲染器替换，首次确认前不执行包脚本；每次upgrade/repair须额外明确确认外部Pi/CLI已退出且期间不启动，未确认不准备/切换，不向旧install/remove/setEnabled增加新前提。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 21
+    },
+    {
+      "id": "10",
+      "description": "3.2 为包变更入口加入真实安装单元锁及并发检查，覆盖现有安装、移除、启停与新更新；并发测试验证同 scope npm 串行、user/project 不串写、外部 entry 修改不被覆盖、未信任项目不开始准备。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 22
+    },
+    {
+      "id": "11",
+      "description": "3.3 使用官方 SDK `install()` 在同卷 stage 准备 npm 整 scope root（含 manifest/lock/依赖），不复制凭据；真实 SDK fixture 验证目标精确版本、非目标直接包版本不变、包脚本只在确认后运行、依赖失败旧 root 未动，不能隔离的外部链接明确拒绝。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 23
+    },
+    {
+      "id": "12",
+      "description": "3.4 使用官方 SDK 在隔离 git 布局准备确认的完整 commit，并只读检测用户修改及越界链接；git fixture 验证 ref 移动仍固定获批 commit、相同 package version 仍识别变化、依赖失败不破坏 live checkout、脏 checkout 不被 reset/clean。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 24
+    },
+    {
+      "id": "13",
+      "description": "3.5 处理 SDK legacy global npm 解析的迁入 managed 安装，记录原实际路径但不修改系统全局包；fixture 验证成功后使用 managed 目标、失败回到原全局来源且原文件及版本不变；在相邻文档写清此行为。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 25
+    },
+    {
+      "id": "14",
+      "description": "4.1 实现仅含包及消费者恢复数据的操作记录、同卷 backup/stage 路径校验和阶段写入，记录实际安装单元、消费者范围及加载代次；故障注入测试验证每个持久化边界、磁盘不足、路径越界和 Windows rename 文件占用均不删除最后旧安装，记录不含 secrets。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 29
+    },
+    {
+      "id": "15",
+      "description": "4.2 实现 stage 安装单元切换与仅替换已确认 package entry 的提交，接入 settings flush/drainErrors 和读回；真实临时设置测试验证精确 pin 改为新版本、autoload/全部过滤保留、另一个 scope 与其他包不变、供应商及凭据无写入。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 30
+    },
+    {
+      "id": "16",
+      "description": "4.3 实现准备失败、rename 失败、配置失败和已提交后的显式恢复；fixture 验证恢复旧 root/lock、旧 npm version/git HEAD、旧 entry及加载路径，无法恢复时保留 backup 并报告 recovery-required，不声称 restored。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 31
+    },
+    {
+      "id": "17",
+      "description": "4.4 把未完成记录检查接到包 resolve / 资源加载之前，实施启动恢复；故障点退出再启动测试验证未提交切换先恢复、已提交操作可继续验证 / 恢复，半成品不加载，外部并发 entry 冲突不被自动覆盖；补最小本机恢复操作文档。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 32
+    },
+    {
+      "id": "18",
+      "description": "5.1 按实际安装单元建立全部潜在消费者映射并扩充 agent-host 回执：npm 同 scope root 内所有包的 handle/worker/进程，git 同 checkout；不改变旧广播 boolean 契约。定向测试验证 operationId、安装单元、各消费者预期代次与实际 loaded metadata/错误对应，应用内消费者不能完整枚举时拒绝切换而非返回空范围；外部Pi/CLI由用户明确退出/不启动前提承担，不声称自动枚举或门控，前提不满足拒绝，既有调用仍可用。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 36
+    },
+    {
+      "id": "19",
+      "description": "5.2 加入切换前全部消费者 waitForIdle、新回合 / 新 handle / reload 门及懒加载隔离，覆盖 user 跨项目与 project 同 root；运行时 fixture 验证回合不被中断、范围变化需重新确认、不共享安装单元的项目不重载、禁用包不临时启用。不能证明后台回调 / 模块缓存隔离的进程须空闲后安全关闭重建，做不到则拒绝切换 / 需重启；明确范围为空才显示下次启动验证。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 37
+    },
+    {
+      "id": "20",
+      "description": "5.3 实现 reload-pending、reload-failed、restart-required、complete 及重试 / 恢复后全单元复验；使用无模型请求的安全测试扩展，验证任一消费者失败不汇总为 complete、新回合门在全部消费者新代或恢复旧代确认前不开放、native module 无法热换明确需重启，并记录外部副作用不可撤回限制。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 38
+    },
+    {
+      "id": "21",
+      "description": "5.4 新增并行非目标包活跃的真实安装单元 fixture：同 user npm root 的 A/B 共享依赖，A 为升级目标、另一项目仅运行 B 并延迟加载依赖；验证确认包含 B 消费者、B 仍在执行回合时绝不 rename live、切换 / 刷新后不混代，B 刷新失败恢复覆盖全部消费者。加 project 同 root 和不共享 root 的对照、应用内消费者不可枚举 / 新增分支及外部退出前提未确认分支；核验 B 版本及所有非目标声明不变，并在恢复文档写明单位范围。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 39
+    },
+    {
+      "id": "22",
+      "description": "6.1 在真实 ExtensionsPanel 新增包导航及列表 / 详情，复用现有主题与宽窄布局；组件测试验证 scope、覆盖、配置 target / installed target 分离、检查按钮及不支持状态，并在对应用户说明写清“升级”和“修复”的区别。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 43
+    },
+    {
+      "id": "23",
+      "description": "6.2 接入检查、说明、明确目标及安装单元影响范围确认 / 取消与操作状态，切页返回能恢复进度，失败状态保留重试重载 / 恢复入口；组件测试验证先列同根包及全部受影响项目 / 会话、范围变化需重确认、重复点击不重复 apply、外部退出/期间不启动声明默认未确认且缺失不执行、说明不执行 HTML / 自动打开外链、安装完成不直接提示更新完成。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 44
+    },
+    {
+      "id": "24",
+      "description": "6.3 新增 `ui-harness/scenarios/package-updates.tsx` 和对应 probe，挂真实包 UI 及工作台入口、只桩主进程 I/O；运行 `cd electron-agent; npm run ui:check -- package-updates`，验证检查、版本/commit 差异、目标及同安装单元应用内消费者影响和外部退出前提确认/取消、并行非目标包等待空闲、禁用包、user/project 同名、更新失败旧版仍显示、单元内部分重载失败/全部恢复、深浅主题、窄列滚动及键盘操作，并实际检查该场景截图。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 45
+    },
+    {
+      "id": "25",
+      "description": "7.1 联通包 UI → IPC → 真实 SDK stage → 配置 → agent-host reload 的临时环境验收，用假 registry/git 和安全测试扩展走成功、失败恢复、无活跃运行时后重启三条路径；读回包内 package.json 实际版本、settings 精确来源及 from/to，验证仓库各 package.json 的 SDK pin / 解析来源保持原样、没有真实包或用户配置变动，保存最小可重跑证据。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 49
+    },
+    {
+      "id": "26",
+      "description": "7.2 按本功能实际引入的运行脚本 / 静态资源更新既有构建校验，在生产构建与打包入口的临时环境确认 SDK 可用、asar 外可写安装根及 adjacent/external 资源齐全；验证目标升级与恢复能走相同生产路径，不以开发目录替代，不默认做全平台发版。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 50
+    },
+    {
+      "id": "27",
+      "description": "7.3 运行本次 package model/service、metadata、stage/recovery、IPC、reload 定向测试及新增 `package-updates` harness，完成相关类型检查和根目录 `npm run verify-notes`；若确实改到共用 UI 先用 `npm run ui:check -- --changed --dry-run` 决定必要额外场景并说明原因，不默认全量。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 51
+    },
+    {
+      "id": "28",
+      "description": "7.4 对照规格的授权、外部用户前提/应用内自动保障边界、作用域、禁用、说明安全、旧版恢复和重载状态逐项核对最终 diff及证据，更新恢复文档与决策笔记的实现状态；运行 `openspec validate complete-desktop-package-updates --strict` 并报告真实未完成项，不自动提交、归档或更新任何第三方实际包。",
+      "done": false,
+      "sourcePath": "D:\\OneDrive\\Project Files\\Pi\\openspec\\changes\\complete-desktop-package-updates\\tasks.md",
+      "line": 52
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "ready",
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "root": {
+    "path": "D:\\OneDrive\\Project Files\\Pi",
+    "source": "nearest"
+  }
+}

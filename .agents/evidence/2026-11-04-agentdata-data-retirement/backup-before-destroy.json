@@ -1,0 +1,14 @@
+{
+ "threads": 621,
+ "turns": 1612,
+ "items": 96172,
+ "permission_rules": 17,
+ "tool_audit": 98309,
+ "plugin_state": 5,
+ "agent_jobs": 25,
+ "wiki_assets": 1,
+ "wiki_sources": 2,
+ "knowledge_build_items": 242,
+ "agent_audit": 8766,
+ "wiki_pages": 0
+}

@@ -224,8 +224,6 @@ export async function anySubDomains(
 
 // ---- tools -----------------------------------------------------------------
 
-type NetGuard = (toolName: string, ctx: { cwd?: unknown } | undefined) => Promise<AgentToolResult<Record<string, unknown>> | undefined>;
-
 function failure(error: unknown, extra: Record<string, unknown>): AgentToolResult<Record<string, unknown>> {
   const text = error instanceof AnySearchError ? error.message : redactCredentials(error instanceof Error ? error.message : String(error));
   return {
@@ -234,7 +232,7 @@ function failure(error: unknown, extra: Record<string, unknown>): AgentToolResul
   };
 }
 
-export function registerAnySearchTools(pi: ExtensionAPI, guard: NetGuard, fetchImpl: typeof fetch = fetch) {
+export function registerAnySearchTools(pi: ExtensionAPI, fetchImpl: typeof fetch = fetch) {
   pi.registerTool({
     name: "anysearch_search",
     label: "AnySearch",
@@ -254,9 +252,7 @@ export function registerAnySearchTools(pi: ExtensionAPI, guard: NetGuard, fetchI
       language: Type.Optional(Type.String({ description: "Preferred language, e.g. zh-CN or en" })),
       params: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: 'Extra parameters for the tag, e.g. {"ticker":"AAPL"}' })),
     }),
-    async execute(_id, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await guard("anysearch_search", ctx);
-      if (denied) return denied;
+    async execute(_id, params, signal, _update, _ctx): Promise<AgentToolResult<Record<string, unknown>>> {
       const query = params.query.trim();
       if (!query) return failure(new AnySearchError("query 不能为空。", 400), { query });
       try {
@@ -293,9 +289,7 @@ export function registerAnySearchTools(pi: ExtensionAPI, guard: NetGuard, fetchI
     parameters: Type.Object({
       domains: Type.Array(Type.String(), { minItems: 1, description: "Domains to look up, e.g. [\"code\", \"finance\"]" }),
     }),
-    async execute(_id, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await guard("anysearch_sub_domains", ctx);
-      if (denied) return denied;
+    async execute(_id, params, signal, _update, _ctx): Promise<AgentToolResult<Record<string, unknown>>> {
       try {
         const out = await anySubDomains(params.domains, signal ?? undefined, fetchImpl);
         return { content: [{ type: "text", text: out.text }], details: { provider: "anysearch", domains: out.domains } };

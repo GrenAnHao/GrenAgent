@@ -97,7 +97,7 @@ vi.mock('../../store', () => ({
 
 vi.mock('../../stores/chatDraftStore', () => ({
   useChatDraftStore: {
-    getState: () => ({ setDraft: vi.fn(), clearDraft: vi.fn(), getDraft: () => '' }),
+    getState: () => ({ resolveKey: (key: string) => key, setDraft: vi.fn(), clearDraft: vi.fn(), getDraft: () => ({text:''}) }),
   },
 }));
 

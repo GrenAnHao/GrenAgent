@@ -19,7 +19,7 @@ export async function runHostOneshot(
     ? request.reasoning as ThinkingLevel
     : undefined;
   const emit = (obj: unknown) => onLine?.(JSON.stringify(obj));
-  const input = { user, systemPrompt, provider, modelId, signal };
+  const input = { user, systemPrompt, provider, modelId, signal, ...(typeof request.requestId==='string'?{requestId:request.requestId}:{}) };
   try {
     if (request.stream === true) {
       for await (const ev of host.streamSimple(reasoning ? { ...input, reasoning } : input)) {

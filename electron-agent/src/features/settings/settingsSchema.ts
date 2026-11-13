@@ -1,4 +1,4 @@
-import { AudioLines, Bell, Bot, Cpu, Database, GitBranch, Globe, Image, Palette, Settings2, ShieldCheck, Sparkles } from 'lucide-react';
+import { AudioLines, Bell, Bot, Cpu, GitBranch, Globe, Image, Palette, Settings2, ShieldCheck, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { parseRepeatGuardConfig } from '@extensions/loop-guard/chain';
 import { NOTIFY_SETTING_DEFAULTS } from '../../../electron/app/attentionContract';
@@ -92,12 +92,6 @@ function validateBoundedInt(min: number, max: number): (value: string) => string
     if (n < min || n > max) return `须为 ${min} 到 ${max} 的整数`;
     return undefined;
   };
-}
-
-function validateWikiIngestMode(value: string): string | undefined {
-  const raw = value.trim();
-  if (!raw || raw === 'two-stage' || raw === 'single-stage') return undefined;
-  return '抽取模式只能是两段式或单段式';
 }
 
 export function allSettingFields(categories: SettingCategory[] = SETTINGS_SCHEMA): SettingField[] {
@@ -566,67 +560,6 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
               'Ultra 子代理还能显式自选哪些路由（provider/id）。留空＝只能使用上面配的 Ultra 默认 / 角色模型；' +
               'cheap 别名在 Ultra 里映射到 Scout 槽位、strong 映射到 Worker 槽位，Scout / Worker 留空时再回退 Ultra 默认（不冒用普通模式的 cheap / strong）。' +
               '不在当前目录里的条目会标「不可用」，可手动移除。',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'agentData',
-    title: 'AgentData',
-    group: '能力',
-    icon: Database,
-    sections: [
-      {
-        title: '模型',
-        fields: [
-          {
-            key: 'agentDataModel',
-            label: 'AgentData 模型',
-            type: 'model',
-            effect: 'instant',
-            placeholder: '留空＝应用默认模型',
-            description: '用于 Wiki 抽取。留空＝应用默认模型。',
-          },
-        ],
-      },
-      {
-        title: 'Wiki 抽取',
-        fields: [
-          {
-            key: 'KNOWLEDGE_WIKI_INGEST_MODE',
-            label: '抽取模式',
-            type: 'select',
-            effect: 'instant',
-            default: 'two-stage',
-            description: '两段式先分析再生成。单段式少一次模型调用。默认两段式。',
-            options: [
-              { value: 'two-stage', label: '两段式' },
-              { value: 'single-stage', label: '单段式' },
-            ],
-            validate: validateWikiIngestMode,
-          },
-          {
-            key: 'KNOWLEDGE_WIKI_INGEST_CONCURRENCY',
-            label: '抽取并发',
-            type: 'number',
-            effect: 'instant',
-            min: 1,
-            max: 10,
-            placeholder: '3',
-            description: '单个知识库抽取阶段的并行数。留空＝3，范围 1 到 10。',
-            validate: validateBoundedInt(1, 10),
-          },
-          {
-            key: 'KNOWLEDGE_LLM_GLOBAL_CONCURRENCY',
-            label: '模型并发',
-            type: 'number',
-            effect: 'instant',
-            min: 1,
-            max: 20,
-            placeholder: '5',
-            description: '抽取与合并共用的模型调用并行上限。留空＝5，范围 1 到 20。下一次抽取生效。',
-            validate: validateBoundedInt(1, 20),
           },
         ],
       },

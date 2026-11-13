@@ -64,12 +64,3 @@ describe('AgentDataStorage', () => {
   });
 });
 
-it('upgrades schema 6 twice without losing existing knowledge items', () => {
-  const storage = new AgentDataStorage(':memory:');
-  try {
-    storage.db.exec("CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(6); CREATE TABLE knowledge_build_items(task_id TEXT NOT NULL,phase TEXT NOT NULL,item_id TEXT NOT NULL,state TEXT NOT NULL,attempt INTEGER NOT NULL,input_hash TEXT NOT NULL,output_hash TEXT,payload TEXT,evidence TEXT NOT NULL DEFAULT '[]',dependencies TEXT NOT NULL DEFAULT '[]',error TEXT,revision INTEGER NOT NULL DEFAULT 0,source_task_id TEXT,updated_at INTEGER NOT NULL,PRIMARY KEY(task_id,phase,item_id)); INSERT INTO knowledge_build_items(task_id,phase,item_id,state,attempt,input_hash,updated_at) VALUES('old','generate','page','running',1,'in',1)");
-    storage.migrate(); storage.migrate();
-    expect(storage.schemaVersion()).toBe(7);
-    expect(storage.db.prepare("SELECT task_id,stage_kind FROM knowledge_build_items WHERE task_id='old'").get()).toMatchObject({ task_id: 'old', stage_kind: null });
-  } finally { storage.close(); }
-});

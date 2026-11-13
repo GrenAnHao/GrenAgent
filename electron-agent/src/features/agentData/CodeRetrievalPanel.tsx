@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Input, Segmented, Tag, Typography, type InputRef } from 'antd';
+import { ArrowLeft, Database, FileSearch, Search } from 'lucide-react';
 import { agentDataApi, type CodeGraphProject, type CodeGraphStatus, type CodeRetrievalRequest, type ResourceNavigation } from '../../lib/agentData';
 import { pathsEquivalent } from '../../lib/pathUtils';
-import { useAgentDataTaskMonitor } from './AgentDataTaskProvider';
 import { CodeProjectList } from './CodeProjectList';
 import { CodeRelations, CodeResultContent, codeRequestError } from './CodeRelations';
 import { CodeSourceDetail } from './CodeSourceDetail';
 import { appendCodeResultPage, CODE_PAGE_SIZE, decodeCodeResult, retainedCodeResult, type CodeResultRow, type CodeResultView } from './codeResult';
 import { codeStyles as styles } from './codeStyles';
 import { useProjectOptions } from './useProjectOptions';
-import { taskStatusLabels } from './operationsPresentation';
-import { codeIndexPresentation, codeIndexSyncActive } from './codeIndexPresentation';
+import { codeIndexPresentation, codeIndexSyncActive, codeIndexWatcherPending } from './codeIndexPresentation';
 import { formatRelative } from '../../lib/relativeTime';
 import { openPath } from '../../platform/runtime';
 import { PageHeader } from './workbench/PageHeader';
@@ -27,8 +26,7 @@ interface CodeRetrievalPanelProps {
   refreshToken?: number;
   navigation?: Extract<ResourceNavigation, { view: 'code' }>;
   navigationRequest?: number;
-  onOpenTask?: (id: string) => void;
-}
+  onOpenTask?: (id: string) => void;}
 /** loadingMore：文件列表正在取下一页；整个 QueryState 被新查询替换时它自然归零。 */
 interface QueryState { workspace: string; result?: CodeResultView; retained?: CodeResultView; error?: string; loading: boolean; loadingMore?: boolean }
 const jobStateLabels = { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' };
@@ -38,7 +36,6 @@ function projectKey(workspace: string): string { return workspace.replace(/\\/g,
 
 export function CodeRetrievalPanel({ initialProject, visible = true, refreshToken = 0, navigation, navigationRequest = 0, onOpenTask }: CodeRetrievalPanelProps) {
   const options = useProjectOptions();
-  const monitor = useAgentDataTaskMonitor();
   const initial = useRef(initialProject);
   const initialMatch = options.find((option) => initial.current && pathsEquivalent(option.cwd, initial.current))?.cwd;
   const initialized = useRef(Boolean(initialMatch));
@@ -137,7 +134,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
       .then((value) => { if (!cancelled) setIndexState(value); })
       .catch((cause) => { if (!cancelled) setIndexError(`索引参考读取失败：${errorText(cause)}`); });
     return () => { cancelled = true; };
-  }, [visible, monitor.watchedTaskVersion, reload]);
+  }, [visible, reload]);
 
   useEffect(() => {
     const epoch = ++statusEpoch.current;
@@ -156,11 +153,11 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
       .catch((cause) => { if (epoch === statusEpoch.current) setStatusError(codeRequestError(cause)); })
       .finally(() => { if (epoch === statusEpoch.current) setChecking(false); });
     return () => { statusEpoch.current++; };
-  }, [project, visible, monitor.watchedTaskVersion, reload]);
+  }, [project, visible, reload]);
 
-  // 同步在跑或排队时静默轮询：不动 checking，失败也不弹错，只在项目没变时替换状态。
+  // 同步在跑或排队、或监听还没落定时静默轮询：不动 checking，失败也不弹错，只在项目没变时替换状态。
   useEffect(() => {
-    if (!visible || !project || !syncActive || checking || statusError) return;
+    if (!visible || !project || (!syncActive && !codeIndexWatcherPending(currentStatus)) || checking || statusError) return;
     const epoch = statusEpoch.current;
     const timer = setTimeout(() => {
       void agentDataApi.code.status(project)
@@ -187,7 +184,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
         if (epoch === queryEpoch.current) setQueryState((old) => ({ ...old, workspace: project, error: codeRequestError(cause), loading: false }));
       });
     return () => { queryEpoch.current++; };
-  }, [project, canQuery, queryText, queryTool, visible, monitor.watchedTaskVersion, reload]);
+  }, [project, canQuery, queryText, queryTool, visible, reload]);
 
   useEffect(() => {
     const epoch = ++nodeEpoch.current;
@@ -203,7 +200,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
         if (epoch === nodeEpoch.current) setNodeState((old) => ({ ...old, workspace: project, error: codeRequestError(cause), loading: false }));
       });
     return () => { nodeEpoch.current++; };
-  }, [project, selected?.id, selected?.symbol, selected?.file, selectionVersion, canQuery, visible, monitor.watchedTaskVersion]);
+  }, [project, selected?.id, selected?.symbol, selected?.file, selectionVersion, canQuery, visible, reload]);
 
   useEffect(() => {
     if (selected || !restoreFocus.current || !visible) return;
@@ -279,11 +276,9 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
   async function sync() {
     if (!project || syncing || !visible || view.primary === 'none') return;
     const targetProject = project;
-    const trackCreated = monitor.track;
     setSyncing(true); setTaskError(undefined);
     try {
       const job = await agentDataApi.jobs.create({ kind: 'codegraph.sync', workspace: targetProject });
-      trackCreated(job.id);
       if (mounted.current) setCreatedTask({ id: job.id, workspace: job.workspace });
     } catch (cause) {
       if (mounted.current) setTaskError(`任务创建失败 · ${nameOf(targetProject)}（${targetProject}）：${errorText(cause)}`);
@@ -291,17 +286,17 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
   }
 
   function nameOf(workspace: string) { return options.find((option) => pathsEquivalent(option.cwd, workspace))?.name ?? workspace; }
-  const trackedJob = monitor.jobs.find((job) => job.id === createdTask?.id);
-  const trackedTask = monitor.tasks?.find((task) => task.ref.source === 'user' && task.ref.id === createdTask?.id);
-  let taskSummary: string | undefined;
-  if (trackedTask) {
-    const progress = typeof trackedTask.progress === 'number' ? `${trackedTask.progress}%` : trackedTask.stage || '进度未提供';
-    const label = trackedTask.cancellationRequested ? '正在取消 · 等待确认' : taskStatusLabels[trackedTask.status];
-    taskSummary = `${label} · ${progress}${trackedTask.error ? ` · ${trackedTask.error}` : ''}`;
-  } else if (trackedJob) taskSummary = `${jobStateLabels[trackedJob.state]} · ${trackedJob.progress}%${trackedJob.error ? ` · ${trackedJob.error}` : ''}`;
+  // 同步状态直接来自 status 轮询，不再经任务列表。
+  const taskSummary = createdTask
+    ? (statusError
+        ? `状态获取失败：${statusError}`
+        : currentStatus
+          ? `${view.label} · ${typeof currentStatus.files === 'number' ? `${currentStatus.files} 个文件` : '进度未提供'}`
+          : '等待状态更新')
+    : undefined;
 
   const errorItems: BannerItem[] = [];
-  if (createdTask && monitor.error) errorItems.push({ message: `任务状态刷新失败：${monitor.error}；显示的旧状态不是最新结果。` });
+  // status 失败已由 view.banner 展示（见 codeIndexPresentation），此处不再重复。
   if (taskError) errorItems.push({ message: taskError });
   if (indexError) errorItems.push({ message: indexError });
   const bannerMessage = view.banner?.message ?? '';
@@ -311,10 +306,18 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
     <PageHeader title="代码索引"
       extra={<>
         <CodeProjectList options={options} project={project} indexState={indexState} status={statusError ? undefined : currentStatus} onSelect={selectProject} />
-        {project ? <Tag color={view.color} data-testid="code-index-state" title={syncProgress ? `${syncProgress.stage}${syncProgress.total ? ` ${syncProgress.processed ?? 0}/${syncProgress.total}` : ''}` : undefined}>{view.label}</Tag> : null}
-        {project && currentStatus?.indexed ? <span className={styles.stats}>
-          <span>{currentStatus.files ?? '未提供'} 文件</span><span>{currentStatus.nodes ?? '未提供'} 节点</span><span>{currentStatus.edges ?? '未提供'} 边</span>
-          {currentStatus.lastIndexedAt ? <span title={new Date(currentStatus.lastIndexedAt).toLocaleString()}>同步于 {formatRelative(currentStatus.lastIndexedAt)}</span> : null}
+        {project ? <span className={styles.statusCluster}>
+          <Tag color={view.color} data-testid="code-index-state" title={syncProgress ? `${syncProgress.stage}${syncProgress.total ? ` ${syncProgress.processed ?? 0}/${syncProgress.total}` : ''}` : undefined}>{view.label}</Tag>
+          {/* 新鲜度独立显示：索引可查但落后时，用户仍应看到“可能过期”。 */}
+          {view.freshness !== 'current' ? (
+            <Tag color={view.freshness === 'stale' ? 'warning' : 'default'} data-testid="code-index-freshness">
+              {view.freshness === 'stale' ? '可能已过期' : '新鲜度未知'}
+            </Tag>
+          ) : null}
+          {currentStatus?.indexed ? <span className={styles.stats}>
+            <span>{currentStatus.files ?? '未提供'} 文件</span><span>{currentStatus.nodes ?? '未提供'} 节点</span><span>{currentStatus.edges ?? '未提供'} 边</span>
+            {currentStatus.lastIndexedAt ? <span title={new Date(currentStatus.lastIndexedAt).toLocaleString()}>同步于 {formatRelative(currentStatus.lastIndexedAt)}</span> : null}
+          </span> : null}
         </span> : null}
       </>}
       actions={project ? <>
@@ -323,37 +326,51 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
           onSelect={(key) => { if (key === 'status') setStatusVersion((v) => v + 1); if (key === 'open') void openPath(project).catch((cause) => setTaskError(errorText(cause))); }} />
       </> : null} />
     {errorItems.length ? <PageBanner type="error" items={errorItems} /> : null}
-    {createdTask ? <PageBanner type="info" items={[{ message: <>{`已加入任务 · ${nameOf(createdTask.workspace)} · ${createdTask.workspace} · `}<span>{taskSummary ? `${monitor.error ? '上次获取：' : ''}${taskSummary}` : '任务状态未获取'}</span></> }]}
-      action={<Button autoInsertSpace={false} onClick={() => onOpenTask?.(createdTask.id)} disabled={!onOpenTask}>查看任务</Button>} /> : null}
+    {createdTask ? <PageBanner type="info" items={[{ message: <>{`已开始同步 · ${nameOf(createdTask.workspace)} · ${createdTask.workspace} · `}<span>{taskSummary ?? '等待状态更新'}</span></> }]} /> : null}
     {view.banner ? <PageBanner type={view.banner.type} items={[{ message: view.banner.message }]}
       action={view.banner.sync ? <Button size="small" autoInsertSpace={false} onClick={() => void sync()}>同步</Button> : undefined} /> : null}
     {showExtraMessage ? <PageBanner type="error" items={[{ message: currentStatus!.message! }]} /> : null}
     {!project ? <Empty description="请选择一个项目" /> : view.primary === 'build' ? <div className={w.empty}>
-      这个项目还没有索引
-      <Typography.Text type="secondary">{project}</Typography.Text>
+      <span className={w.emptyIcon}><Database size={20} /></span>
+      <span className={w.emptyTitle}>这个项目还没有索引</span>
+      <span className={w.emptyText}>{project}</span>
       <Button type="primary" disabled={!visible || syncing} onClick={() => void sync()}>建立索引</Button>
     </div> : <div className={`${w.panel} ${styles.fill}`}>
       <div className={w.panelToolbar}>
-        <Input ref={queryInput} aria-label="搜索代码" placeholder={mode === 'search' ? '搜索符号或文件名；留空浏览文件' : '描述要找的功能'} value={query} onChange={(event) => changeQuery(event.target.value)} disabled={!canQuery} style={{ flex: 1 }} />
+        <Input ref={queryInput} aria-label="搜索代码" prefix={<span className={styles.searchIcon}><Search size={14} /></span>} allowClear placeholder={mode === 'search' ? '搜索符号或文件名；留空浏览文件' : '描述要找的功能'} value={query} onChange={(event) => changeQuery(event.target.value)} disabled={!canQuery} style={{ flex: 1 }} />
         <Segmented value={mode} disabled={!canQuery} onChange={(value) => changeMode(value as 'search' | 'explore')} options={[{ value: 'search', label: '符号' }, { value: 'explore', label: '相关上下文', disabled: !query.trim() }]} />
       </div>
       <SplitPane className={styles.split} detailOpen={Boolean(selected)}
         side={<div className={styles.column} data-code-list>
-          {currentResult?.result ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{currentResult.result.page?.total ?? currentResult.result.rows.length} 个结果</Typography.Text> : null}
+          {currentResult?.result ? <div className={styles.listHeader}>{currentResult.result.page?.total ?? currentResult.result.rows.length} 个结果</div> : null}
           {currentResult?.loading ? <Typography.Text type="secondary" role="status">正在查询代码…</Typography.Text> : null}
           {currentResult?.error ? <Alert type="error" showIcon title={`${currentResult.error}${currentResult.result ? ' 当前显示上次成功读取的结果。' : ''}`} /> : null}
           {currentResult?.result ? <CodeResultContent key={`${project}\0${queryTool}\0${queryText}`} result={currentResult.result} retained={currentResult.retained} onSelect={selectResult} selected={selected} tool={queryTool} more={moreFiles} /> : null}
         </div>}
-        main={selected ? <div className={styles.column} aria-label="代码详情">
-          <div className={w.detailHeader}><Typography.Title level={5} style={{ margin: 0 }}>{selected.symbol ?? selected.file ?? '代码详情'}</Typography.Title><Button className={w.spacer} onClick={closeDetail}>返回结果列表</Button></div>
-          {selected.file ? <CodeSourceDetail workspace={project} file={selected.file} line={selected.line} visible={visible && canQuery} reloadVersion={reload + monitor.watchedTaskVersion} /> : <Typography.Text type="secondary">未提供文件位置，无法打开源码。</Typography.Text>}
-          {currentNode?.loading ? <Typography.Text type="secondary" role="status">正在读取符号上下文…</Typography.Text> : null}
-          {currentNode?.error ? <Alert type="error" showIcon title={currentNode.error} /> : null}
-          {currentNode?.result ? <details open={currentNode.result.isError || undefined}><summary>符号上下文</summary><CodeResultContent result={currentNode.result} retained={currentNode.retained} /></details> : null}
-          {selected.symbol ? <CodeRelations workspace={project} symbol={selected.symbol} nodeId={selected.id} file={selected.file} visible={visible && canQuery} reloadVersion={reload + monitor.watchedTaskVersion} /> : <Typography.Text type="secondary">未提供符号，无法查询调用关系。</Typography.Text>}
-        </div> : <div className={w.empty}>搜索符号或文件，选择结果查看源码与调用关系</div>} />
+        main={selected ? <div className={styles.detailColumn} aria-label="代码详情">
+          <div className={styles.detailHeader}>
+            <Button type="text" size="small" aria-label="返回结果列表" title="返回结果列表" icon={<ArrowLeft size={16} />} onClick={closeDetail} />
+            <span className={styles.detailTitle}>
+              <Typography.Title level={5}>{selected.symbol ?? baseName(selected.file) ?? '代码详情'}</Typography.Title>
+              {selected.file ? <span className={styles.detailPath} title={selected.file}>{selected.file}</span> : null}
+            </span>
+            {selected.kind ? <Tag>{selected.kind}</Tag> : null}
+          </div>
+          {selected.file ? <CodeSourceDetail workspace={project} file={selected.file} line={selected.line} visible={visible && canQuery} reloadVersion={reload} /> : <Typography.Text type="secondary">未提供文件位置，无法打开源码。</Typography.Text>}
+          {selected.symbol ? <div className={styles.contextSection}>
+            {currentNode?.loading ? <Typography.Text type="secondary" role="status">正在读取符号上下文…</Typography.Text> : null}
+            {currentNode?.error ? <Alert type="error" showIcon title={currentNode.error} /> : null}
+            {currentNode?.result ? <details className={styles.raw} open={currentNode.result.isError || undefined}><summary>符号上下文</summary><CodeResultContent result={currentNode.result} retained={currentNode.retained} /></details> : null}
+            <CodeRelations workspace={project} symbol={selected.symbol} nodeId={selected.id} file={selected.file} visible={visible && canQuery} reloadVersion={reload} />
+          </div> : null}
+        </div> : <div className={w.empty}>
+          <span className={w.emptyIcon}><FileSearch size={20} /></span>
+          <span className={w.emptyTitle}>未选择结果</span>
+          <span className={w.emptyText}>搜索符号或文件，选择结果查看源码与调用关系</span>
+        </div>} />
     </div>}
   </section>;
 }
 
 function errorText(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause); }
+function baseName(file?: string): string | undefined { return file ? file.replace(/\\/g, '/').split('/').pop() || file : undefined; }

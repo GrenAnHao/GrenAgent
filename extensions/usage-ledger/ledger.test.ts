@@ -105,3 +105,17 @@ describe("UsageLedger", () => {
     expect(ledger.report().totals.messages).toBe(0);
   });
 });
+
+it('preserves SDK total and boolean source independently, records warm outside assistant rollup', () => {
+ const ledger=open();
+ const message={role:'assistant',provider:'p',model:'alias',responseModel:'actual',timestamp:88,usage:{input:1,output:2,cost:{total:0.12,input:0.1,totalFromProvider:true}}};
+ const c=callFromMessage(message,'s',null)!;
+ expect(c).toMatchObject({cost:0.12,responseModel:'actual',costSource:'provider'});
+ ledger.record(c,'live'); ledger.record({...c,cost:999,responseModel:'poison'},'import');
+ const warm={sessionId:'s',entryId:'w',timestamp:'2026-11-10T00:00:00Z',kind:'cache_warm' as const,provider:'p',attributedModel:'actual',input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:0.03,costSource:'catalog' as const};
+ expect(ledger.recordWarm(warm)).toBe(true);expect(ledger.recordWarm({...warm,sessionId:'copy'})).toBe(false);
+ const r=ledger.report();expect(r.totals.messages).toBe(1);expect(r.totals.cost).toBe(0.12);expect(r.warmingTotals).toMatchObject({cost:0.03,messages:1});expect(r.recordedCost.totalCost).toBe(0.15);
+ expect(r.calls[0]).toMatchObject({model:'alias',responseModel:'actual',costSource:'provider',cost:0.12});
+ expect(callFromMessage({...message,usage:{cost:{total:0,totalFromProvider:false}}},'s',null)).toMatchObject({cost:0,costSource:'catalog'});
+ expect(callFromMessage({...message,usage:{cost:{total:0}}},'s',null)).toMatchObject({cost:0,costSource:'catalog'});
+});

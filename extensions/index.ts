@@ -34,7 +34,6 @@ import codeExec from "./code-exec/index.js";
 import hashline from "./hashline/index.js";
 import dap from "./dap/index.js";
 import fableBehavior from "./fable-behavior/index.js";
-import gptWithTaste from "./gpt-with-taste/index.js";
 import diagramHint from "./diagram-hint/index.js";
 import safety from "./safety/index.js";
 import approval from "./approval/index.js";
@@ -47,8 +46,7 @@ import webFetch from "./web-fetch/index.js";
 import webSearch, { pluginManifest as webSearchManifest } from "./web-search/index.js";
 import resourceManager from "./resource-manager/index.js";
 import codeRetrieval from "./code-retrieval/index.js";
-import wikiRag from "./wiki-rag/index.js";
-import { wikiRagManifest, codeRetrievalManifest } from "./agent-data-manifests.js";
+import { codeRetrievalManifest } from "./agent-data-manifests.js";
 
 export {
   fastMode,
@@ -69,7 +67,6 @@ export {
   dap,
   diagramHint,
   fableBehavior,
-  gptWithTaste,
   goal,
   sessionMemory,
   webFetch,
@@ -91,7 +88,6 @@ export {
   visualCompanion,
   afterToolFeedback,
   codeRetrieval,
-  wikiRag,
 };
 
 // Order roughly by general usefulness; safety first so guardrails intercept earliest.
@@ -114,7 +110,6 @@ export const allExtensions = [
   dap,
   diagramHint,
   fableBehavior,
-  gptWithTaste,
   goal,
   sessionMemory,
   webFetch,
@@ -136,7 +131,6 @@ export const allExtensions = [
   visualCompanion,
   afterToolFeedback,
   codeRetrieval,
-  wikiRag,
 ];
 
 // 名→工厂映射（与 allExtensions 同序）：供 sidecar 按 EXTENSIONS_PROFILE 过滤加载（真对话模式裁重扩展）。
@@ -162,7 +156,6 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "dap", factory: dap },
   { name: "diagram-hint", factory: diagramHint },
   { name: "fable-behavior", factory: fableBehavior },
-  { name: "gpt-with-taste", factory: gptWithTaste },
   { name: "goal", factory: goal },
   { name: "session-memory", factory: sessionMemory },
   { name: "web-fetch", factory: webFetch },
@@ -185,7 +178,6 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "visual-companion", factory: visualCompanion },
   { name: "after-tool-feedback", factory: afterToolFeedback },
   { name: "code-retrieval", factory: codeRetrieval },
-  { name: "wiki-rag", factory: wikiRag },
 ];
 
 export type ExtensionCapability = "agent" | "tool" | "mcp" | "provider" | "ui" | "event-subscriber";
@@ -201,7 +193,6 @@ const builtinManifests = new Map<string, ExtensionManifest>([
   [goalManifest.id, goalManifest],
   [webSearchManifest.id, webSearchManifest],
   [mcpManifest.id, mcpManifest],
-  [wikiRagManifest.id, wikiRagManifest],
   [codeRetrievalManifest.id, codeRetrievalManifest],
 ]);
 

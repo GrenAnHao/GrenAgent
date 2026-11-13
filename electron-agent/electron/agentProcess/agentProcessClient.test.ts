@@ -47,6 +47,7 @@ function setup(over: {
   methods?: (child: FakeChild) => Record<string, MethodHandler>;
   hostMethods?: Record<string, MethodHandler>;
   autoReady?: boolean;
+  log?: ((stream: 'stdout' | 'stderr', line: string) => void) | null;
   now?: () => number;
   killTree?: (pid: number) => Promise<void>;
   shutdownTimeoutMs?: number;
@@ -77,7 +78,7 @@ function setup(over: {
     onEvent: (channel, payload) => events.push([channel, payload]),
     onExit: (exit) => exits.push(exit),
     spawn,
-    log: (stream, line) => logs.push(`${stream}:${line}`),
+    ...(over.log === null ? {} : { log: over.log ?? ((stream, line) => { logs.push(`${stream}:${line}`); }) }),
     ...(over.now ? { now: over.now } : {}),
     ...(over.killTree ? { killTree: over.killTree } : {}),
     ...(over.shutdownTimeoutMs !== undefined ? { shutdownTimeoutMs: over.shutdownTimeoutMs } : {}),
@@ -313,6 +314,57 @@ describe('AgentProcessClient', () => {
       });
       await expect(client.request('ping')).resolves.toBe('pong');
       expect(logs.some((line) => line.includes('process tree guard unavailable') && line.includes('AssignProcessToJobObject'))).toBe(true);
+    });
+  });
+
+  describe.each(['console', 'callback'] as const)('%s 日志错误隔离', (target) => {
+    it.each(['stdout', 'stderr'] as const)('%s 同步 EPIPE 不打断后续行、RPC 或错误尾巴', async (stream) => {
+      const attempts: string[] = [];
+      const brokenLog = (line: string) => {
+        attempts.push(line);
+        throw Object.assign(new Error('broken pipe, write'), { code: 'EPIPE' });
+      };
+      const spy = target === 'console'
+        ? vi.spyOn(console, stream === 'stderr' ? 'error' : 'log').mockImplementation(brokenLog)
+        : undefined;
+      const { client, children, exits } = setup({
+        log: target === 'console' ? null : (_stream, line) => brokenLog(line),
+        methods: () => ({ ping: () => 'pong' }),
+      });
+      try {
+        await client.start();
+        const output = children[0]![stream];
+        expect(() => output.emit('data', 'first\nsecond\r\n')).not.toThrow();
+        expect(() => output.emit('data', 'third\nlast')).not.toThrow();
+        expect(() => output.emit('end')).not.toThrow();
+        expect(attempts).toEqual(target === 'console'
+          ? ['[agent-host] first', '[agent-host] second', '[agent-host] third', '[agent-host] last']
+          : ['first', 'second', 'third', 'last']);
+        await expect(client.request('ping')).resolves.toBe('pong');
+        await client.shutdown();
+        expect(exits).toHaveLength(1);
+        expect(exits[0]).toMatchObject({ expected: true, code: 0,
+          stderrTail: stream === 'stderr' ? 'first\nsecond\r\nthird\nlast' : '' });
+      } finally {
+        spy?.mockRestore();
+        await client.shutdown();
+      }
+    });
+
+    it('非 EPIPE 日志异常保持原对象抛出', async () => {
+      const error = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      const fail = () => { throw error; };
+      const spy = target === 'console' ? vi.spyOn(console, 'error').mockImplementation(fail) : undefined;
+      const { client, children } = setup({ log: target === 'console' ? null : fail });
+      try {
+        await client.start();
+        let caught: unknown;
+        try { children[0]!.stderr.emit('data', 'warn\n'); } catch (failure) { caught = failure; }
+        expect(caught).toBe(error);
+      } finally {
+        spy?.mockRestore();
+        await client.shutdown();
+      }
     });
   });
 

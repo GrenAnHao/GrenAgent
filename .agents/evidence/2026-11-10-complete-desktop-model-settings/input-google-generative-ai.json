@@ -1,0 +1,25 @@
+{
+  "role": "assistant",
+  "content": [],
+  "api": "google-generative-ai",
+  "provider": "fixture",
+  "model": "A",
+  "usage": {
+    "input": 0,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 0,
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "total": 0
+    }
+  },
+  "stopReason": "error",
+  "timestamp": 1794282192099,
+  "errorMessage": "Custom fetch is not supported by the Google Generative AI adapter",
+  "durationMs": 0
+}

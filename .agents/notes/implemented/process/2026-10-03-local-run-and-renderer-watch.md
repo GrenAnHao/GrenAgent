@@ -22,6 +22,10 @@ Status: implemented
 
 渲染层的 chokidar 只放下 `src/`（不含 `*.test.*` / `*.spec.*`）、`index.html` 和 `electron.vite.config.ts`。其余路径直接 `ignored`。另加一个 `hotUpdate` 插件：漏进模块图的非前端文件返回空更新，不再整页刷新。`electron-vite dev` 默认不 watch 主进程和 preload，这次不打开。
 
+### Windows 开发服务用 IPv4 回环，保留 localhost 页面地址
+
+`electron-vite dev` 在 Windows 启动时让 Node 优先解析 IPv4，Vite 因此绑定 `127.0.0.1`，Electron 仍打开 `http://localhost:31415`。本机的 IPv6 回环连接返回 `EACCES` 时，旧服务仍显示监听 `::1`，但页面和源码模块都取不到。此设置只进入 Windows 开发进程；本机预览和安装包仍从文件加载。
+
 ### 涉及文件
 
 - `electron-agent/electron.vite.config.ts`
@@ -48,6 +52,7 @@ Status: implemented
 - 只在插件里丢掉事件、目录照样全量侦测：`electron/` 和 `out/` 的写入仍会进回调，Windows 上容易漏进刷新。
 - 关掉渲染层热更：前端改动也要整页刷新，启动页照样闪。
 - 给 main / preload 打开 watch：改主进程会杀掉 Electron 再拉起，比渲染层刷新更闪。
+- 直接设置 `server.host: "127.0.0.1"` 也能稳定绑定 IPv4，但 electron-vite 同时会改页面 URL，导致原 `localhost` 的草稿和界面偏好留在旧 origin。
 
 ## Consequences
 
@@ -63,4 +68,7 @@ Status: implemented
 
 ## Verification
 
-verify: n/a 回填的历史决定，源记录（docs/decisions）未记录验证
+- 历史启动与监听范围的决定从 `docs/decisions` 回填，原记录没有验证证据。
+- 2026-11-13：用 `electron-vite.resolveConfig` 和 `vite.createServer` 在独立端口实跑，开发监听为 `127.0.0.1`，通过 `localhost` 请求首页、Vite 客户端和先前失败的 `ArchivedSessions.tsx` 均返回 200；`localrun` 配置不改变 DNS 顺序。
+- 现场用同样的 IPv4 绑定补起开发渲染服务，在不重启 Electron 的情况下重载，原会话正文、输入框和执行中的任务恢复显示。
+- 实测记录：`.agents/evidence/2026-11-13-dev-loopback/renderer-check.txt`

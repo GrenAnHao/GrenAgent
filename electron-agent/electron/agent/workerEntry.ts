@@ -23,11 +23,6 @@ export function resolveAgentDataHostEntry(input: EntryInput): string {
   return resolveMainScript('agentdata-host.js', input);
 }
 
-/** RepoWiki owns its engine and SQLite in an independent RunAsNode process. */
-export function resolveRepoWikiHostEntry(input: EntryInput): string {
-  return resolveMainScript('repo-wiki-host.cjs', input);
-}
-
 /** codegraph-host 子进程：CodeGraph SDK 的索引与查询都在这里跑，不占主线程。 */
 export function resolveCodeGraphHostEntry(input: EntryInput): string {
   return resolveMainScript('codegraph-host.js', input);

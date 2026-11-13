@@ -1,0 +1,3 @@
+Change: advanced request parameters join existing model-card Collapse items, default collapsed, consistent typography and responsive fields. No SDK/config semantics change.
+Verify: targeted renderer tests for closed/reopen draft and validation; model-advanced-settings, builtin-model-settings, model-visibility Electron scenarios only; targeted typecheck, production build and note validation.
+No real credentials, login or model network requests.

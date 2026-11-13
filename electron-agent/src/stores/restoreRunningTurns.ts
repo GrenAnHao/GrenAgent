@@ -3,7 +3,13 @@ import { pathsEquivalent } from '../lib/pathUtils';
 import { useSessionStore } from '../store';
 import { agentStoreRegistry, useAgentRegistryStore } from './agentStoreRegistry';
 import type { ChatMessage } from './agentReducer';
-import { captureRunningEpochs, reconcileRunningSessions, workspacesMovedSince } from './runningSessions';
+import {
+  captureRunningEpochs,
+  reconcileRunningSessions,
+  runningSessionKey,
+  sessionsMovedSince,
+  workspacesMovedSince,
+} from './runningSessions';
 
 export interface RunningTurn {
   workspace: string;
@@ -100,6 +106,8 @@ export async function restoreRunningTurns(): Promise<void> {
 
   const planned = planRunningRestore(turns, epochs, (workspace) => agentStoreRegistry.get(workspace)?.getStreamEpoch());
   const live = new Set(planned.map((turn) => turn.workspace));
+  /** 快照里仍在跑的会话；快照外的会话一律按已结束处理。 */
+  const liveSessions = planned.filter((turn) => turn.sessionPath);
   const nextPaths = { ...useAgentRegistryStore.getState().runningPaths };
   let pathsChanged = false;
   const sessionState = useSessionStore.getState();
@@ -149,13 +157,23 @@ export async function restoreRunningTurns(): Promise<void> {
   }
 
   if (pathsChanged) useAgentRegistryStore.setState({ runningPaths: nextPaths });
-  // 快照期间纪元变过的 workspace 以实时事件为准，其余按主进程快照对账。
-  // 后台会话的事件不进前景 store 的纪元，另看 runningSessions 自己的纪元。
+  // 快照期间整个项目退出过 / 前景 store 的流式纪元变过：以实时事件为准。
   const moved = workspacesMovedSince(runningEpochs);
   for (const [workspace, before] of epochs) {
     if (agentStoreRegistry.get(workspace)?.getStreamEpoch() !== before) moved.add(workspace);
   }
-  reconcileRunningSessions(turns, moved);
+  // 会话级保护：等待期间自己收到过运行态事件的会话由事件决定（包括刚刚点亮 / 刚刚熄灭）。
+  const keepPaths = sessionsMovedSince(runningEpochs);
+  for (const turn of liveSessions) {
+    if (keepPaths.has(runningSessionKey(turn.workspace, turn.sessionPath!))) continue;
+    // 画面上的 store 纪元变过说明这条实时流刚动过，同样不能用旧快照覆盖。
+    const store = agentStoreRegistry.get(turn.workspace);
+    const epochBefore = epochs.get(turn.workspace);
+    if (store && epochBefore !== undefined && epochBefore !== store.getStreamEpoch()) {
+      keepPaths.add(runningSessionKey(turn.workspace, turn.sessionPath!));
+    }
+  }
+  reconcileRunningSessions(turns, moved, keepPaths);
 }
 
 const hot = (import.meta as ImportMeta & { hot?: { accept: (cb: () => void) => void } }).hot;
