@@ -50,7 +50,7 @@ import type { CodeGraphSyncEvent } from "./app/codeGraph/hostContract";
 
 import type { MethodHandler } from "./agentProcess/rpcPeer";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
-import { resolveAgentDataHostEntry, resolveAgentHostEntry, resolveCodeGraphHostEntry, resolveCodeGraphWorkerEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
+import { resolveAgentHostEntry, resolveCodeGraphHostEntry, resolveCodeGraphWorkerEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
 import { agentDataPipePath } from "./agentData/pipePath";
 import { MinimalExtensionEndpoint } from "./agentData/minimalEndpoint";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
@@ -189,7 +189,7 @@ if (!process.env.VITEST && singleInstance) {
       jobGuardExe,
       execPath: process.execPath,
     };
-    // 必须留在主进程的 socket 方法（审批 UI、渲染层广播、问 agent-host）。child 模式下由 agentdata-host 经反向 RPC 调回来。
+    // 进程内运行时调用的宿主方法：审批 UI、渲染层广播和 agent-host 查询。
     const mainMethods: AgentDataMainMethods = {
       'turn.start': (params) => agent.pi.enqueueTurn(
         readRpcString(params, 'workspace'),
@@ -466,9 +466,8 @@ if (!process.env.VITEST && singleInstance) {
       if (shutdownStarted) return;
       shutdownStarted = true;
       void (async () => {
-        // agent-host 收尾时扩展还会经 AgentData 记账（记忆、回合状态），必须先于 agentData.stop。
+        // 先结束 agent-host，再关闭索引任务执行器和共享数据运行时。
         await agentProcess?.shutdown();
-        // child 模式：agentdata-host 自己先停 CodeGraph 同步与模型任务、再关库；inproc 模式在这里做同样的事。
         await inprocAgentData?.close();
         indexTasks.close();
         await agentData.stop();

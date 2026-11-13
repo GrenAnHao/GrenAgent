@@ -390,7 +390,7 @@ describe('createEnhancePrompt 实验路径', () => {
     expect(chunks).toEqual(['改写稿']);
   });
 
-  it('wiki.search 空结果仍能改写', async () => {
+  it('代码检索空结果仍能改写', async () => {
     const request = vi.fn().mockResolvedValue([]);
     let round = 0;
     async function* impl() {
@@ -400,7 +400,7 @@ describe('createEnhancePrompt 实验路径', () => {
           type: 'done',
           message: {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: '登录' } }],
+            content: [{ type: 'toolCall', id: '1', name: 'codegraph_explore', arguments: { query: '登录' } }],
             reason: 'toolUse',
           },
         };
@@ -412,7 +412,7 @@ describe('createEnhancePrompt 实验路径', () => {
     const { service, request: req } = projectSetup(impl, request);
     await expect(service.run({ workspace: '/ws', text: '修登录' }, () => {}))
       .resolves.toEqual({ ok: true, content: '贴合项目的改写' });
-    expect(req).toHaveBeenCalledWith('wiki.search', expect.objectContaining({ workspace: '/ws', query: '登录' }));
+    expect(req).toHaveBeenCalledWith('codeRetrieval.call', { workspace: '/ws', tool: 'codegraph_explore', args: { query: '登录' } });
   });
 
   it('第 9 次工具调用被拒绝；超过 4 轮不再带 tools', async () => {
@@ -428,8 +428,8 @@ describe('createEnhancePrompt 实验路径', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'toolCall', id: `a${round}`, name: 'wiki_search', arguments: { query: 'q' } },
-              { type: 'toolCall', id: `b${round}`, name: 'wiki_search', arguments: { query: 'q' } },
+              { type: 'toolCall', id: `a${round}`, name: 'codegraph_explore', arguments: { query: 'q' } },
+              { type: 'toolCall', id: `b${round}`, name: 'codegraph_explore', arguments: { query: 'q' } },
             ],
             reason: 'toolUse',
           },
@@ -453,8 +453,8 @@ describe('createEnhancePrompt 实验路径', () => {
         message: {
           role: 'assistant',
           content: [
-            { type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: 'q' } },
-            { type: 'toolCall', id: '2', name: 'wiki_search', arguments: { query: 'q' } },
+            { type: 'toolCall', id: '1', name: 'codegraph_explore', arguments: { query: 'q' } },
+            { type: 'toolCall', id: '2', name: 'codegraph_explore', arguments: { query: 'q' } },
           ],
           reason: 'toolUse',
         },
@@ -482,7 +482,7 @@ describe('createEnhancePrompt 实验路径', () => {
           type: 'done',
           message: {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: '1', name: 'wiki_read', arguments: { page: 'p' } }],
+            content: [{ type: 'toolCall', id: '1', name: 'codegraph_explore', arguments: { query: 'p' } }],
             reason: 'toolUse',
           },
         };
@@ -512,7 +512,7 @@ describe('createEnhancePrompt 实验路径', () => {
         type: 'done',
         message: {
           role: 'assistant',
-          content: [{ type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: 'q' } }],
+          content: [{ type: 'toolCall', id: '1', name: 'codegraph_explore', arguments: { query: 'q' } }],
           reason: 'toolUse',
         },
       };
@@ -533,7 +533,7 @@ describe('createEnhancePrompt 实验路径', () => {
           type: 'done',
           message: {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: 'q' } }],
+            content: [{ type: 'toolCall', id: '1', name: 'codegraph_explore', arguments: { query: 'q' } }],
             reason: 'toolUse',
           },
         };
@@ -578,7 +578,7 @@ describe('createEnhancePrompt 实验路径', () => {
     }));
   });
 
-  it('暴露给模型的工具名不含点号，且 wiki_search 映射回 wiki.search', async () => {
+  it('只向模型暴露代码检索和最近一轮，并拒绝退役工具', async () => {
     const request = vi.fn().mockResolvedValue([]);
     const toolNames: string[][] = [];
     let round = 0;
@@ -602,9 +602,9 @@ describe('createEnhancePrompt 实验路径', () => {
     const { service, request: req } = projectSetup(impl, request);
     await expect(service.run({ workspace: '/ws', text: 'x' }, () => {})).resolves.toMatchObject({ ok: true });
     // 网关/上游会拒绝带 `.` 的工具名（实测 400 → 503），所以对外必须是无点号名。
-    expect(toolNames[0]).toEqual(['wiki_search', 'wiki_read', 'codegraph_explore', 'read_recent_turn']);
+    expect(toolNames[0]).toEqual(['codegraph_explore', 'read_recent_turn']);
     for (const name of toolNames.flat()) expect(name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
-    expect(req).toHaveBeenCalledWith('wiki.search', expect.objectContaining({ query: '登录' }));
+    expect(req).not.toHaveBeenCalled();
   });
 
   it('read_recent_turn 把点击时的最近一轮交给模型，并按步骤上报状态', async () => {

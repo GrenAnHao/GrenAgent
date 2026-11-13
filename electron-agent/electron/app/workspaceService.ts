@@ -645,7 +645,7 @@ async function parseSessionRecord(path: string): Promise<SessionRecord | null> {
     };
   }
 
-  // pi sidecar no longer writes a session header; infer metadata from path.
+  // Infer session metadata from the path when no header metadata is present.
   const cwd = inferCwdFromSessionPath(path);
   if (!cwd) return null;
   const timestamp = inferTimestampFromFilename(path);

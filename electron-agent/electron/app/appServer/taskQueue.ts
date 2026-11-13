@@ -113,12 +113,14 @@ export class TaskQueue {
     let settling: (() => number) | undefined;
     try {
       const definition = this.options.registry.get(task.kind);
+      // Recovery can encounter tasks persisted before their kind was retired.
+      if (!definition) throw new Error('service task kind is not registered');
       const executed = await withTimeout(
         this.options.execute({ ...started, threadId, system }, {
           onUsage: (report) => this.recordUsage(task.id, report),
           onRawOutput: (text) => { rawOutput = text; },
         }),
-        definition?.timeoutMs ?? 30_000,
+        definition.timeoutMs,
       );
       settling = agentDataTiming.start();
       const output = this.options.registry.validateOutput(task.kind, executed);

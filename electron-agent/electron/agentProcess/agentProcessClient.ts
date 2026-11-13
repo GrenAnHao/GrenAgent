@@ -37,7 +37,7 @@ export interface AgentProcessExit {
 export interface AgentProcessClientOptions {
   entry: string;
   execPath: string;
-  /** 函数形式每次拉起（含崩溃重拉）时调用，带上当时的状态（agentdata-host 的令牌表）。 */
+  /** 函数形式在每次拉起时读取最新环境。 */
   env: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
   /**
    * 放在入口脚本前面的 Node 参数（调试用）。生产构建的入口是字节码，缓存里记着编译时的 V8 参数指纹：

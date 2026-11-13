@@ -46,7 +46,6 @@ installBridge({
       case 'agentData_code_call':
         track(`call:${String(args.tool)}`)
         return { content: [{ type: 'text', text: `${fileRows.length} rows` }], isError: false, structuredContent: { schemaVersion: 1, rows: fileRows, nodes: [], edges: [], extra: { page: { offset: 0, total: fileRows.length } } } }
-      case 'agentData_tasks_list': return { items: [], activeCount: 0 }
       case 'read_file': return 'export const x = 1'
       default: throw new Error(`unstubbed invoke: ${command}`)
     }

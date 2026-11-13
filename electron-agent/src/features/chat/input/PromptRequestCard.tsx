@@ -6,7 +6,7 @@ import { extensionUiRespond, pi } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useUiPromptStore } from '../../../stores/uiPromptStore';
 
-/** sidecar 审批选项。点按钮即回传，不再走「请选择」单选题。 */
+/** 会话宿主 审批选项。点按钮即回传，不再走「请选择」单选题。 */
 const APPROVAL_ACTIONS = new Set(['允许本次', '总是允许', '允许', '拒绝']);
 const APPROVAL_TEST_IDS: Record<string, string> = {
   允许本次: 'allow-once',

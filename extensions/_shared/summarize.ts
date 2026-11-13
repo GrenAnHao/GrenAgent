@@ -1,5 +1,5 @@
 // 进程内「摘要成一行短标题」原语：复用 auto-title 验证过的做法——用标题模型在已鉴权的常驻
-// sidecar 内直接 completeSimple（无子进程、无 MCP 冷启动、关推理求快）。auto-title（会话标题）、
+// 扩展宿主 内直接 completeSimple（无子进程、无 MCP 冷启动、关推理求快）。auto-title（会话标题）、
 // 生成物标题（语音/图片）等共用这一个原语，避免各处重复一份模型解析 + 鉴权 + 清洗逻辑。
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";

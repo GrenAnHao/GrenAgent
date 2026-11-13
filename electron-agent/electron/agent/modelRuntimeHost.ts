@@ -44,7 +44,7 @@ export interface ModelRuntimeHostOptions {
 }
 
 /**
- * 本进程内唯一的 ModelRuntime。主进程一份（记忆 / 知识库 / 增强提示词等短调用），
+ * 本进程内唯一的 ModelRuntime。主进程一份（供应商测活 / 增强提示词等短调用），
  * agent-host 子进程一份（各 WorkspaceHandle 共用）。改 provider 配置时两份都要 refresh。
  */
 export class ModelRuntimeHost {

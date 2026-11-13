@@ -1,7 +1,7 @@
 /**
  * 工具授权的跨进程契约。
  *
- * sidecar 侧在 extensions/_shared/desktop-control.ts 中重复声明结构相同的类型：
+ * 扩展宿主 侧在 extensions/_shared/desktop-control.ts 中重复声明结构相同的类型：
  * 两个包不能互相 import（见 app/wikiSyncService.ts 的注释），字段名必须逐字一致。
  */
 
@@ -11,7 +11,7 @@ export type RuleScope = 'session' | 'workspace' | 'global';
 export type MatcherKind = 'any' | 'command_prefix' | 'path_glob' | 'mcp_server';
 export type ApprovalPreset = 'readonly' | 'ask' | 'auto' | 'workspace' | 'full';
 
-/** sidecar 提取的调用特征。主进程不重新解析命令或路径，只消费这些布尔量。 */
+/** 扩展宿主 提取的调用特征。主进程不重新解析命令或路径，只消费这些布尔量。 */
 export interface ToolCallFlags {
   /** isDangerousBash：rm -rf 之类 */
   dangerousCommand: boolean;
@@ -85,6 +85,6 @@ export interface ToolDecision {
   decision: ToolEffect;
   /** 命中的规则 id；内置规则形如 builtin.dangerous-command */
   ruleId?: string;
-  /** 审计行 id，sidecar 在用户应答后回传它以更新 resolution */
+  /** 审计行 id，扩展宿主 在用户应答后回传它以更新 resolution */
   auditId: string;
 }

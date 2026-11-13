@@ -32,7 +32,7 @@ function optionalString(value: unknown, field: string): string | undefined {
  * 八个特征必须全部到齐，缺一个就拒收整个请求。
  *
  * 不要把缺失项当作 false：那等于静默宣称「这不是危险命令」，与整条链路
- * fail-closed 的方向相反，而且不留痕迹。缺失只可能来自 sidecar 与主进程
+ * fail-closed 的方向相反，而且不留痕迹。缺失只可能来自 扩展宿主 与主进程
  * 版本不一致，属于契约违约，应当显式失败——调用方 evaluateToolCall 的
  * catch 会把它转成 deny，用户能看到拒绝理由，不会被无声放行。
  */
@@ -89,7 +89,7 @@ function readRule(value: unknown): ToolRuleInput {
 /**
  * 构造一组绑定到某个工作区的 RPC 处理函数。
  *
- * `owner` 来自调用方 token 所属的工作区，不是 sidecar 自报的值：调用方无法
+ * `owner` 来自调用方 token 所属的工作区，不是 扩展宿主 自报的值：调用方无法
  * 借伪造 workspace 去读写别的工作区的规则与审计。token 没有绑定工作区时全部拒绝。
  */
 export function toolPermissionMethods(

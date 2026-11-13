@@ -18,8 +18,7 @@ export interface CodeGraphClientOptions {
 }
 
 /**
- * codegraph-host 子进程的客户端。inproc 模式由主进程持有，child 模式由 agentdata-host 持有
- * （codegraph-host 是它的子进程）；拉起方式、崩溃预算、进程树守卫两边一样。
+ * 主进程持有的 codegraph-host 客户端，负责拉起、崩溃预算与进程树守卫。
  */
 export function createCodeGraphClient(options: CodeGraphClientOptions): CodeGraphHostClient {
   return new CodeGraphHostClient({

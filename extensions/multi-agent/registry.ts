@@ -14,7 +14,7 @@ export type SubAgentStatus = "running" | "done" | "error" | "cancelled";
 
 // progress() 的最小落盘间隔：运行期 `--mode json` 约每 150ms 一帧，但消费方（右坞子代理日志 /
 // 任务托盘）轮询 registry 仅 ~2.5s 一次，没必要每帧都把最多 64KB 的 transcript 同步写进 SQLite。
-// DatabaseSync 是同步的，高频大写入会阻塞 sidecar 事件循环并与只读轮询争锁。把落盘收敛到最多每
+// DatabaseSync 是同步的，高频大写入会阻塞宿主事件循环并与只读轮询争锁。把落盘收敛到最多每
 // PROGRESS_PERSIST_MS 一次，足够喂饱 2.5s 的轮询；终态完整 transcript 由 finish() 兜底写一次。
 const PROGRESS_PERSIST_MS = 1000;
 
@@ -241,7 +241,7 @@ export class SubAgentRegistry {
     if (now - (this.lastProgressAt.get(id) ?? 0) < PROGRESS_PERSIST_MS) return;
     this.lastProgressAt.set(id, now);
     // best-effort：本方法在子进程 stdout 流泵的 onUpdate 回调里被调用，写失败绝不能抛进流处理器
-    // 变成 uncaughtException（会打断子代理流、扰乱 sidecar）。丢这一帧即可，下一帧再写。
+    // 变成 uncaughtException（会打断子代理流、扰乱宿主）。丢这一帧即可，下一帧再写。
     try {
       // 写入侧统一截断：运行期 transcript 随 `--mode json` 的 message_update 呈 O(n^2) 膨胀，只留尾部
       // 定长片段（与主对话内联流同口径），避免 DB 写超大 TEXT、前端轮询读全量经 IPC 卡顿。

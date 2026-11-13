@@ -15,7 +15,7 @@ export type RpcResponse =
 export interface AgentDataEndpoint {
   host: string;
   port: number;
-  /** 命名管道 / Unix socket 路径。有它时连它，host/port 不用（agentdata-host 子进程模式）。 */
+  /** 命名管道 / Unix socket 路径。有它时连它，host/port 不用。 */
   path?: string;
   token: string;
 }

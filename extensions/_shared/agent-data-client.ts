@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getConfig } from './runtime-config.js';
 import { encodeRequestFrames } from './request-frames.js';
 
-// path：AgentData 跑在 agentdata-host 子进程里时的命名管道 / Unix socket；没有时是环回 TCP。
+// path：命名管道 / Unix socket；没有 path 时使用环回 TCP。
 interface Endpoint { host?: string; port?: number; path?: string; token: string }
 function endpoint(): Endpoint | undefined {
   try {

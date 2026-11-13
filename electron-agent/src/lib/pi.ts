@@ -568,7 +568,7 @@ export const pi = {
 };
 
 /**
- * 回传 extension UI 响应（confirm/select/input...）到 pi sidecar。
+ * 回传 extension UI 响应（confirm/select/input...）到 pi 会话宿主。
  * 形状须符合 pi RPC：{ type: "extension_ui_response", id, value|confirmed|cancelled }。
  */
 export const extensionUiRespond = (workspace: string, response: Record<string, unknown>) =>

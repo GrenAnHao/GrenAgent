@@ -31,7 +31,7 @@
 
 子代理（`PI_IS_SUBAGENT=1`）**禁止**再开网关或微信长轮询，否则每个 oneshot 子进程都会抢端口 / 抢 ilink。
 
-微信另有跨进程文件锁（`im-platforms/lock.ts`），避免多个 sidecar 各回一条。
+微信另有跨进程文件锁（`im-platforms/lock.ts`），避免多个进程各回一条。
 
 ### 桌面 UI（接回时再挂上）
 

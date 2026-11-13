@@ -66,7 +66,7 @@ export function ConnectionsPanel() {
     }
   }, [wechatEnabled, wechat.loggedIn, wechat.status, wechat.qrLink]);
 
-  // 接入开关与网络配置：均热更新（persist 写盘 → sidecar watchConfig 重连），无需重启。
+  // 接入开关与网络配置：均热更新（persist 写盘 → 会话宿主 watchConfig 重连），无需重启。
   const toggleWechat = async (on: boolean) => {
     setValue('WECHAT_OC_ENABLE', on ? '1' : '0');
     await persist();

@@ -48,7 +48,7 @@ export function visualOwnerOf(e: PiUiRequestEnvelope): VisualOwner {
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
 
-/** notify 文本字段名因 sidecar 而异，按优先级取第一个非空字符串。 */
+/** notify 文本字段名因 会话宿主 而异，按优先级取第一个非空字符串。 */
 function notifyText(request: Record<string, unknown>): string | undefined {
   for (const key of ['message', 'title', 'text', 'content']) {
     const v = request[key];
@@ -57,7 +57,7 @@ function notifyText(request: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-/** notify 级别字段名因 sidecar 而异，归一到 antd message 的四个级别，默认 info。 */
+/** notify 级别字段名因 会话宿主 而异，归一到 antd message 的四个级别，默认 info。 */
 function notifyLevel(request: Record<string, unknown>): MessageLevel {
   for (const key of ['level', 'type', 'severity', 'kind']) {
     const v = request[key];
@@ -72,7 +72,7 @@ function notifyLevel(request: Record<string, unknown>): MessageLevel {
  *  - notify    → toast 提示
  *  - confirm / select / input → 写 uiPromptStore，由 ChatInput 上方的 PromptRequestCard
  *    内联渲染为选项卡片（不再弹 Modal）。用户应答仍经 `extension_ui_response` 回传，
- *    否则 sidecar 端 ctx.ui.* 的 promise 永不 resolve、该回合会挂起。
+ *    否则 会话宿主 端 ctx.ui.* 的 promise 永不 resolve、该回合会挂起。
  *
  * 本组件只做事件分发（无可见 UI），故 return null。
  */

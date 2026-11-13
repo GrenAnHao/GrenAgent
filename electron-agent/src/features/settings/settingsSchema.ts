@@ -13,7 +13,7 @@ export interface SelectOption {
   label: string;
 }
 
-/** 生效方式：instant=App 后端实时读；hot=扩展运行时读(改完即生效)；restart=需重启 sidecar。省略＝hot。 */
+/** 生效方式：instant=App 后端实时读；hot=扩展运行时读(改完即生效)；restart=需重启 会话宿主。省略＝hot。 */
 export type SettingEffect = 'instant' | 'hot' | 'restart';
 
 export interface SettingField {
@@ -670,7 +670,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
 ];
 
 /** 微信（ilink/clawbot 官方 AI bot）接入字段。扫码登录 + 长轮询，无需公网/端口。
- *  连接在 sidecar 启动时建立，改动需「保存并重启」生效（restart 类）。 */
+ *  连接在 会话宿主 启动时建立，改动需「保存并重启」生效（restart 类）。 */
 export const WECHAT_FIELDS: SettingField[] = [
   { key: 'WECHAT_OC_ENABLE', label: '启用微信(ilink 官方 bot)', type: 'boolean', description: '微信智能对话开放接口；扫码登录、长轮询收发，无需公网', effect: 'restart' },
   { key: 'WECHAT_OC_TOKEN', label: 'bot_token（留空则扫码登录）', type: 'password', description: '已有 token 可直接填；留空则启动后在通知中给出扫码链接', effect: 'restart' },

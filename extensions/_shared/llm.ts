@@ -4,7 +4,7 @@
 //
 // `completeSimple` is imported lazily (dynamic import) so the pure helpers below
 // (parseJsonLoose / resolveModel) can be unit-tested without loading the heavy
-// pi-ai runtime. At sidecar build time bun bundles the dynamic import.
+// pi-ai runtime.
 import type { Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 

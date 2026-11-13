@@ -23,18 +23,18 @@ const service = (options: Partial<ConstructorParameters<typeof AgentDataRuntime>
 
 describe('AgentDataService', () => {
   it('does not finish stopping until an existing executor has actually settled', async () => {
-    let release!: (value: string) => void;
-    const execute = vi.fn(() => new Promise<string>((resolve) => { release = resolve; }));
+    let release!: (value: { title: string }) => void;
+    const execute = vi.fn(() => new Promise<{ title: string }>((resolve) => { release = resolve; }));
     const instance = service({ executeServiceTask: execute });
     await instance.start();
-    const work = instance.runServiceTask({ id: 'drain-task', kind: 'wiki_page_generate', input: { source: 'A' } });
+    const work = instance.runServiceTask({ id: 'drain-task', kind: 'thread_title_generate', input: { source: 'A' } });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
     let stopped = false;
     const stop = instance.stop().then(() => { stopped = true; });
     try {
       await vi.waitFor(() => expect(instance.endpoint()).toBeUndefined());
       expect(stopped).toBe(false);
-    } finally { release('# done'); await work; await stop; }
+    } finally { release({ title: 'done' }); await work; await stop; }
     expect(stopped).toBe(true);
   });
 

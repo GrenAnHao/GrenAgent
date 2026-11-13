@@ -6,7 +6,7 @@ import { exposeData, installBridge, track } from '../stubs'
 
 /**
  * Agent 数据 · 代码索引：真实 CodeRetrievalPanel，主进程用桩。
- * 外面套和 AgentDataCenter 一样的 `styles.panel`（height: 100% + overflow: auto），才看得出页面会不会被结果撑长。
+ * 外面套定高的 `styles.panel`（height: 100% + overflow: auto），才看得出页面会不会被结果撑长。
  * 项目有 3000 个文件：搜索框留空时 codegraph_files 按 limit / offset 分页返回（每次请求记成事件，probe 断言没有一次返回超过一页），
  * 搜索返回 40 条符号（附带一大块 extra，让原始结果超长），源码有两份：400 行的小文件，和 12000 行的大文件
  * （每 200 行一条会折成好几行的长注释，行高不一）。
@@ -81,7 +81,6 @@ installBridge({
         if (args.tool === 'codegraph_search') return toolResult(symbolRows, { padding: 'x'.repeat(250_000) })
         return toolResult([])
       }
-      case 'agentData_tasks_list': return { items: [], activeCount: 0 }
       case 'read_file': return args.path === BIG_SOURCE_FILE ? bigSource : smallSource
       default: throw new Error(`unstubbed invoke: ${command}`)
     }

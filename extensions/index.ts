@@ -133,7 +133,7 @@ export const allExtensions = [
   codeRetrieval,
 ];
 
-// 名→工厂映射（与 allExtensions 同序）：供 sidecar 按 EXTENSIONS_PROFILE 过滤加载（真对话模式裁重扩展）。
+// 名→工厂映射（与 allExtensions 同序）：供 扩展宿主 按 EXTENSIONS_PROFILE 过滤加载（真对话模式裁重扩展）。
 // 扩展工厂本身无稳定 name，故在此显式标注，名称对齐各扩展目录名。
 export const namedExtensions: Array<{ name: string; factory: (typeof allExtensions)[number] }> = [
   { name: "safety", factory: safety },

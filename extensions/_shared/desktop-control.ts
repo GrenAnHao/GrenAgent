@@ -62,7 +62,7 @@ export interface ToolDecisionResult {
 
 /**
  * 连接层的失败（超时、拒连、半路断开）。主进程回了错误帧不算，那是它的判定。
- * ENOENT：命名管道 / Unix socket 不存在，即 agentdata-host 不在（崩溃后重拉的空档）。
+ * ENOENT：命名管道 / Unix socket 不存在，即本地授权端点不可达。
  */
 const TRANSPORT_CODES = new Set(['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'EPIPE', 'ENOENT']);
 /** 没人在监听：AgentData 子进程正在重拉（约几百毫秒），等一等再问，而不是立刻拒绝。 */
@@ -81,7 +81,7 @@ function isTransportFailure(error: unknown): boolean {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** 判定本进程 / 本回合身份。ALS 优先；无 ALS 时回退子进程 env（fork 与尚未删除的 sidecar）。 */
+/** 判定本进程 / 本回合身份。ALS 优先；无 ALS 时回退子进程 env（独立 CLI 或 worker）。 */
 export function resolveToolOrigin(): ToolOrigin {
   const ctx = currentWorkspaceContext();
   if (ctx) return ctx.origin;

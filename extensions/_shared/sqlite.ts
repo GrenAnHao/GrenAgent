@@ -1,11 +1,6 @@
 // Cross-runtime SQLite shim.
 //
-// The official Pi runtime is Node (>=22.5) where `node:sqlite` (DatabaseSync) is
-// built in. GrenAgent compiles this extension pack into a *bun*-compiled sidecar,
-// and bun does NOT implement `node:sqlite` (it ships `bun:sqlite` with a nearly
-// identical API). A static `import ... from "node:sqlite"` makes `bun build
-// --compile` fail with `Could not resolve "node:sqlite"`, and even a literal
-// `require("node:sqlite")` is statically analyzed.
+// Node/Electron uses node:sqlite; Bun consumers use bun:sqlite.
 //
 // So we pick the driver at runtime via a *variable* require (not statically
 // analyzable), and expose a single `DatabaseSync` class with the small surface

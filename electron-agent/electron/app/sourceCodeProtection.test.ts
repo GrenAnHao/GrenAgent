@@ -123,9 +123,9 @@ describe('source code protection: electron-builder', () => {
     expect(config.asarUnpack?.some((glob) => glob.startsWith('out/'))).toBe(false);
   });
 
-  it('unpacks the agentdata-host entry', () => {
-    expect(config.asarUnpack).toContain('out-pkg/main/agentdata-host.js');
-    expect(config.asarUnpack).toContain('out-pkg/main/agentdata-host.jsc');
+  it('does not unpack the retired agentdata-host entry', () => {
+    expect(config.asarUnpack).not.toContain('out-pkg/main/agentdata-host.js');
+    expect(config.asarUnpack).not.toContain('out-pkg/main/agentdata-host.jsc');
   });
 
   it('unpacks out/main/package.json beside the unpacked .js stubs so they load as commonjs', () => {

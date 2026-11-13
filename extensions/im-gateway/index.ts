@@ -6,7 +6,7 @@
 //
 // Hot-reloadable: a process-level watchConfig subscription reconciles the HTTP
 // server whenever IM_GATEWAY* changes — enable/disable/port/token take effect
-// without restarting the sidecar. Off by default (it opens a port).
+// without restarting the host. Off by default (it opens a port).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimImBinding, notifyImBoundElsewhere } from "../_shared/im-binding.js";
@@ -109,8 +109,8 @@ function reconcile(): void {
 
 export default function (pi: ExtensionAPI) {
   // A one-shot sub-agent (PI_IS_SUBAGENT=1) must NOT open the gateway port: it
-  // lives only in the long-running interactive sidecar. Sub-agents load every
-  // compiled extension, so without this guard each spawned child would try to
+  // lives only in the long-running interactive host. Sub-agents may load the same
+  // extension, so without this guard each spawned child could try to
   // bind the same port and fail (or fight the parent for it).
   if (bool(getConfig("PI_IS_SUBAGENT"))) return;
 

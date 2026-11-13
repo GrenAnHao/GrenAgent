@@ -107,6 +107,22 @@ describe('TaskQueue', () => {
     await vi.waitFor(() => expect(queue.get('queued-before-restart')).toMatchObject({ status: 'completed', output: { resumed: true } }));
   });
 
+  it('settles recovered Wiki tasks without invoking the executor', async () => {
+    const { storage, registry } = setup();
+    const execute = vi.fn();
+    const queue = new TaskQueue({ storage, registry, execute });
+    try {
+      const insert = storage.db.prepare('INSERT INTO service_tasks(id,kind,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?)');
+      for (const status of ['queued', 'running']) insert.run(status, 'wiki_page_generate', status, '{}', 0, 1, 1);
+      queue.recoverRunning();
+      await queue.whenIdle();
+      expect(execute).not.toHaveBeenCalled();
+      for (const id of ['queued', 'running']) {
+        expect(queue.get(id)).toMatchObject({ status: 'failed', error: 'service task kind is not registered' });
+      }
+    } finally { queue.stop(); await queue.whenIdle(); storage.close(); }
+  });
+
   it('does not retry empty content but still retries provider errors', async () => {
     const a = setup();
     const empty = vi.fn(async () => { throw new Error('empty content (stopReason=stop, blocks=thinking)'); });

@@ -1,4 +1,4 @@
-// 子级委派范围声明与拒绝文案。主进程（toolDecisionService）与 sidecar（safety / multi-agent）共用，
+// 子级委派范围声明与拒绝文案。主进程（toolDecisionService）与 扩展宿主（safety / multi-agent）共用，
 // 确保 ruleId 与措辞不在两处各维护一份。父会话能替子代理问人时，声明换成 delegationScopeWithApprovals。
 
 export const SUBAGENT_ASK_PINNED_RULE_ID = "builtin.subagent-ask-pinned";

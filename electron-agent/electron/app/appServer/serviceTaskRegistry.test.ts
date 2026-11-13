@@ -35,10 +35,10 @@ describe('ServiceTaskRegistry', () => {
     expect(() => registry.validateOutput('test', { ok: 'yes' })).toThrow('service task output does not match schema');
   });
 
-  it('registers wiki_page_generate with a 60s timeout and accepts markdown string output', () => {
+  it('rejects the retired Wiki task kind', () => {
     const registry = new ServiceTaskRegistry();
-    expect(registry.get('wiki_page_generate')).toMatchObject({ kind: 'wiki_page_generate', timeoutMs: 60_000 });
-    expect(() => registry.validateOutput('wiki_page_generate', '# md')).not.toThrow();
+    expect(registry.get('wiki_page_generate')).toBeUndefined();
+    expect(() => registry.validateOutput('wiki_page_generate', '# md')).toThrow('service task kind is not registered');
   });
 
 });

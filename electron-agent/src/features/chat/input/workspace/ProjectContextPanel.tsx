@@ -3,21 +3,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   agentDataApi,
   type CodeGraphStatus,
-  type WikiOverview,
 } from '../../../../lib/agentData';
 import { wsStyles as s } from './styles';
 
 interface ProjectContextPanelProps { active: boolean; workspace: string }
 
-interface ProjectSummary {
-  wiki: WikiOverview;
-  code: CodeGraphStatus;
-}
-
 export function ProjectContextPanel({ active, workspace }: ProjectContextPanelProps) {
   const name = workspace.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || workspace;
   const generation = useRef(0);
-  const [summary, setSummary] = useState<ProjectSummary>();
+  const [summary, setSummary] = useState<CodeGraphStatus>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -26,11 +20,8 @@ export function ProjectContextPanel({ active, workspace }: ProjectContextPanelPr
     setLoading(true);
     setError(undefined);
     try {
-      const [wiki, code] = await Promise.all([
-        agentDataApi.wiki.overview(),
-        agentDataApi.code.status(workspace),
-      ]);
-      if (generation.current === current) setSummary({ wiki, code });
+      const code = await agentDataApi.code.status(workspace);
+      if (generation.current === current) setSummary(code);
     } catch (cause) {
       if (generation.current === current) {
         setSummary(undefined);
@@ -67,12 +58,8 @@ export function ProjectContextPanel({ active, workspace }: ProjectContextPanelPr
         {!loading && summary ? (
           <div className={s.projectContextOverview}>
             <div>
-              <strong>{summary.wiki.pages} 个 Wiki 页面</strong>
-              <span>{summary.wiki.latestUpdatedAt ? `最近更新 ${new Date(summary.wiki.latestUpdatedAt).toLocaleString()}` : '暂无页面'}</span>
-            </div>
-            <div>
-              <strong>{summary.code.files ?? 0} 个文件</strong>
-              <span>{summary.code.connected && summary.code.indexed ? `${summary.code.nodes ?? 0} 个节点 · ${summary.code.edges ?? 0} 条边` : 'CodeGraph 尚未连接'}</span>
+              <strong>{summary.files ?? 0} 个文件</strong>
+              <span>{summary.connected && summary.indexed ? `${summary.nodes ?? 0} 个节点 · ${summary.edges ?? 0} 条边` : 'CodeGraph 尚未连接'}</span>
             </div>
           </div>
         ) : null}

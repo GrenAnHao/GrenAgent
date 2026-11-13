@@ -39,7 +39,7 @@ export function useSessionStats(workspace: string, refetchKey?: number, sessionP
   }, [workspace, sessionPath]);
 
   // 触发重拉：workspace 变 / refetch 重建，以及 refetchKey 变化——后者用于「打开旧会话时历史异步加载完成」
-  // 的场景：切 workspace 那一刻 sidecar 会话往往尚未就绪、首拉为 0，历史加载进 store 后须再拉一次才有数据。
+  // 的场景：切 workspace 那一刻 会话宿主 会话往往尚未就绪、首拉为 0，历史加载进 store 后须再拉一次才有数据。
   useEffect(() => {
     void refetch();
   }, [refetch, refetchKey]);

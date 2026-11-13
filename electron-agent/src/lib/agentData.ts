@@ -1,8 +1,6 @@
 import { invoke } from '../platform/runtime';
-import type { TaskRef, TaskView, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceNavigation } from '../../electron/agentData/operationsContracts';
 export type { TaskRef, TaskView, TaskStatus, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceRef, ResourceNavigation } from '../../electron/agentData/operationsContracts';
 export interface AgentDataStatus { state: 'ready' | 'closed'; version: number }
-export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
 export type AgentJobState = 'pending' | 'running' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 export interface AgentJob { id: string; kind: string; workspace: string; state: AgentJobState; progress: number; error?: string; createdAt: number; updatedAt: number; metadata?: JobMetadata }
 export interface AgentConfig { version: number; value: Record<string, unknown> }
@@ -45,11 +43,6 @@ export interface AgentDiagnostics { jobs: { total: number; failed: number }; aud
 
 
 export const agentDataApi = {
-  // 任务监视器仍在用：代码索引靠它取当前活动的同步任务。
-  tasks: {
-    list: (input: TaskListInput = {}) => invoke<TaskPage>('agentData_tasks_list', { ...input }),
-    read: (ref: TaskRef) => invoke<TaskDetail | undefined>('agentData_tasks_read', { ...ref }),
-  },
   code: {
     call: (input: CodeRetrievalRequest) => invoke<unknown>('agentData_code_call', { ...input }),
     status: (workspace: string) => invoke<CodeGraphStatus>('agentData_code_status', { workspace }),

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-/** 单条微信会话消息（与 sidecar im-platforms 的 ImTurn 对齐）。 */
+/** 单条微信会话消息（与 会话宿主 im-platforms 的 ImTurn 对齐）。 */
 export interface ImTurn {
   role: 'user' | 'assistant';
   text: string;
@@ -14,7 +14,7 @@ export interface ImConversation {
 }
 
 interface ImMessagesState {
-  /** 微信收发记录（由 sidecar im-platforms 扩展经 setStatus("wechat-messages") 推送）。 */
+  /** 微信收发记录（由 会话宿主 im-platforms 扩展经 setStatus("wechat-messages") 推送）。 */
   conversations: ImConversation[];
   setConversations: (conversations: ImConversation[]) => void;
 }

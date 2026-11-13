@@ -72,7 +72,7 @@ describe("buildFableBehaviorPrompt", () => {
     const p = buildFableBehaviorPrompt({ tier2: true, tier2P1: false });
     expect(p).toContain("Tool discipline");
     expect(p).not.toContain("Delegation");
-    expect(p).not.toContain("Terminal and sidecar harness");
+    expect(p).not.toContain("Terminal and runtime harness");
   });
 
   it("token budget stays under 1.5k for the default kernel", () => {

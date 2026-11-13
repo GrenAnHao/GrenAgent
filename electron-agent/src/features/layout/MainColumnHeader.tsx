@@ -32,7 +32,7 @@ export const MainHeaderActions = memo(function MainHeaderActions() {
   );
 });
 
-/** 规划/执行模式徽章，仅订阅 plan-mode 状态文本（由 sidecar setStatus 推送）。 */
+/** 规划/执行模式徽章，仅订阅 plan-mode 状态文本（由 会话宿主 setStatus 推送）。 */
 const PlanModeBadge = memo(function PlanModeBadge() {
   const status = usePlanModeStore((s) => s.status);
   if (!status) return null;

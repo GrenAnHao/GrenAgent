@@ -36,9 +36,8 @@ describe('ShortCallQueue', () => {
     expect(sawAbort).toEqual([true]);
   });
 
-  it('timeoutForKind：goal/wiki 60s，未知 kind 走 fallback', () => {
+  it('timeoutForKind：goal 60s，未知 kind 走 fallback', () => {
     expect(timeoutForKind('goal_judge')).toBe(60_000);
-    expect(timeoutForKind('wiki_page_generate')).toBe(60_000);
     expect(timeoutForKind('other', 5_000)).toBe(5_000);
   });
 });

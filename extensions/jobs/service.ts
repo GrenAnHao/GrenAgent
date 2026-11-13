@@ -1,4 +1,4 @@
-// 进程内 job 注册表：不落盘，随 sidecar 进程生灭。owner 用 sessionId 围栏。
+// 进程内 job 注册表：不落盘，随 扩展宿主 进程生灭。owner 用 sessionId 围栏。
 // 语义移植自 DSH packages/jobs/jobs-local/src/index.ts（LocalJobRegistry），去掉了 cordis scope / controller 分层：
 // 本进程只有一套组合，jobs 扩展总是随 sandbox / multi-agent 一起加载。
 import { startPump, type PumpHandle } from "./pump.js";

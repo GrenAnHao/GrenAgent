@@ -9,7 +9,7 @@ import type { ToolCallFacts, ToolDecision, ToolEffect, ToolRule, ToolRuleInput }
 
 /**
  * goal / subagent 没有交互 UI，ask 只能攒进队列等人处理。
- * 例外：子代理能把审批交给父会话的界面（approvalRoute），由 sidecar 当场问人并回填结果，不进队列。
+ * 例外：子代理能把审批交给父会话的界面（approvalRoute），由 扩展宿主 当场问人并回填结果，不进队列。
  */
 function isHeadless(call: ToolCallFacts): boolean {
   return call.origin !== 'main' && !(call.origin === 'subagent' && call.approvalRoute === true);

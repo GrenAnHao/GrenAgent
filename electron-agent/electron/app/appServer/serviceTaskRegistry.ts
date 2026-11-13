@@ -18,7 +18,6 @@ export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'context_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'goal_judge', inputSchema: anyObject, outputSchema: goalJudgeOutput, timeoutMs: KIND_TIMEOUT_MS.goal_judge, maxAttempts: 1, capabilities: ['llm_completion'] },
-  { kind: 'wiki_page_generate', inputSchema: anyObject, outputSchema: z.custom<unknown>(() => true), timeoutMs: KIND_TIMEOUT_MS.wiki_page_generate, maxAttempts: 2, capabilities: ['llm_completion'] },
 ];
 
 export class ServiceTaskRegistry {

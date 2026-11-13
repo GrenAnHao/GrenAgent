@@ -18,7 +18,7 @@ import type { MethodHandler } from './rpcPeer';
 
 export interface HostDeps {
   resolveWorkspace(path: string): Promise<string>;
-  /** AgentData 端点的 JSON 字符串。agentdata-host 模式下要先把令牌登记到子进程，所以可以是异步的。 */
+  /** 主进程最小扩展端点的 JSON 字符串，包含当前工作区的凭证。 */
   agentDataEndpoint(cwd: string): string | undefined | Promise<string | undefined>;
   mcpRuntime(workspace: string): Promise<McpServerEntry[]>;
   allowedPluginIds(): string[];

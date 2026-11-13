@@ -311,7 +311,7 @@ function UsageCard({
 export function ContextUsageTag() {
   const { workspace, store } = useAgentStoreContext();
   // 打开 / 切换会话时历史异步加载进 store；消息数变化即触发 stats 重拉，
-  // 解决「打开旧会话首拉为 0（sidecar 会话尚未就绪）后再不更新」。
+  // 解决「打开旧会话首拉为 0（会话宿主 会话尚未就绪）后再不更新」。
   const messageCount = store.useStore((s) => s.messages.length);
   const compacting = store.useStore((s) => Boolean(s.compacting));
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);

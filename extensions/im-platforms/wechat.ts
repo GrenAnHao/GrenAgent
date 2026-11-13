@@ -2,7 +2,7 @@
 // weixin_oc adapter. This is WeChat's official open bot interface served at
 // ilinkai.weixin.qq.com — NOT the Official-Account webhook. It is an OUTBOUND
 // long-poll client (no public IP / inbound port needed), which fits Pi's
-// single-owner sidecar:
+// single-owner process:
 //
 //   1. GET  ilink/bot/get_bot_qrcode?bot_type=3   -> QR for the user to scan
 //   2. GET  ilink/bot/get_qrcode_status?qrcode=.. -> long-poll until "confirmed"

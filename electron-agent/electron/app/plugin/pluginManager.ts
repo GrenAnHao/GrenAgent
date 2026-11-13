@@ -58,7 +58,7 @@ export type PluginManagerOptions = ({
   storage: Pick<AgentDataStorage, 'db'>;
   state?: never;
 } | {
-  /** 不直接碰库（agentdata-host 模式：库在子进程里）。 */
+  /** 通过状态端口持久化，不另开数据库连接。 */
   state: PluginStatePort;
   storage?: never;
 }) & {

@@ -90,8 +90,7 @@ export class AgentDataStorage {
     CREATE INDEX IF NOT EXISTS tool_audit_session ON tool_audit(session_id, created_at);
     CREATE INDEX IF NOT EXISTS tool_audit_pending ON tool_audit(resolution, created_at) WHERE resolution = 'queued';`);
     this.removeRetiredMemory();
-    // KnowledgeKernel 已迁到独立的 knowledge.sqlite（store.ts 自己建表）；
-    // 共享库不再创建 knowledge_* 表，避免清理后复活。
+    // 共享库不再创建已退役的知识生成表。
     if (this.schemaVersion() < 7) this.db.prepare('UPDATE schema_version SET version = ?').run(7);
   }
 

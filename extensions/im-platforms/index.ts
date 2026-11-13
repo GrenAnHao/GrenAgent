@@ -22,7 +22,7 @@
 //
 // Hot-reloadable: a process-level watchConfig subscription reconciles the WeChat
 // client whenever WECHAT_OC_* changes — enable/disable/reconnect take effect
-// without restarting the sidecar.
+// without restarting the host process.
 //
 // Config: WECHAT_OC_ENABLE, WECHAT_OC_TOKEN, WECHAT_OC_OWNER, WECHAT_OC_BOT_TYPE,
 //         WECHAT_OC_BASE_URL, IM_CTX_MAX, IM_MODEL, IM_TIMEOUT_MS
@@ -95,7 +95,7 @@ interface ImState {
   /** Guards one-time replay of crash-interrupted turns per login session. */
   replayed?: boolean;
   wechat?: WeixinOcHandle;
-  /** 本 sidecar 是否持有微信单实例锁（多 workspace 各一 sidecar，仅持锁者真正连微信）。 */
+  /** 本进程是否持有微信单实例锁（只有持锁者建立连接）。 */
   holdsLock?: boolean;
   /** 未持锁时的接管重试定时器（持锁者退出后由它接手连微信）。 */
   lockTimer?: ReturnType<typeof setInterval>;
@@ -395,7 +395,7 @@ function reflectSharedStatus(): void {
   });
 }
 
-// 未持锁时定期重试抢锁：持锁的 sidecar 退出后，由其它窗口接手连微信（故障转移）。
+// 未持锁时定期重试抢锁：持锁进程退出后，由其他实例接手连微信（故障转移）。
 function scheduleLockRetry(): void {
   const st = imState();
   if (st.lockTimer) return;
@@ -447,7 +447,7 @@ function stopWechat(): void {
 
 function startWechat(): void {
   const st = imState();
-  // 跨进程单实例：多 workspace 各一 sidecar，仅一个能真正连微信，否则同一条消息会被多实例各自
+  // 跨进程单实例：只有持锁实例能连接微信，否则同一条消息会被多实例各自
   // 收到并回复（"发给所有会话"）。抢不到锁就待命 + 反映共享状态，并定期重试接管。
   if (!acquireLock(weixinLockPath())) {
     st.holdsLock = false;
@@ -537,7 +537,7 @@ function reconcile(): void {
 
 export default function (pi: ExtensionAPI) {
   // A one-shot sub-agent (PI_IS_SUBAGENT=1) must NOT open its own WeChat
-  // connection: the gateway lives only in the long-running interactive sidecar.
+  // connection: only a long-running interactive host owns the connection.
   // Because runImTurn spawns children that load every compiled extension
   // (including this one), without this guard each turn would spin up a duplicate
   // ilink long-poll client fighting over the same state file — an infinite fan-out.

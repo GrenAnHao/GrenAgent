@@ -85,7 +85,7 @@ export function emptyContextStats(): ContextStats {
   };
 }
 
-/** 新开草稿尚未落盘会话：sidecar 仍挂着上一会话，不能把那份用量画到空草稿上。 */
+/** 新开草稿尚未落盘会话：会话宿主 仍挂着上一会话，不能把那份用量画到空草稿上。 */
 export function displayContextStats(stats: ContextStats | null, isDraft: boolean): ContextStats | null {
   if (isDraft) return emptyContextStats();
   return stats;

@@ -41,29 +41,6 @@ describe('SystemWorkerManager', () => {
     }
   });
 
-  it('wiki_page_generate 在执行前比对 expectedModel', async () => {
-    const complete = vi.fn(async () => '# page');
-    const manager = new SystemWorkerManager({
-      describeModel: async () => 'openai/gpt-x',
-      complete,
-    });
-    await expect(manager.run({ id: '1', kind: 'wiki_page_generate', input: { expectedModel: 'anthropic/other' } })).rejects.toThrow('MODEL_CHANGED');
-    expect(complete).not.toHaveBeenCalled();
-  });
-
-  it('expectedModel 一致时才调用 complete，并返回 Markdown 原文', async () => {
-    const complete = vi.fn(async (_input: CompleteInput) => '# Generated\n\nBody');
-    const manager = new SystemWorkerManager({
-      describeModel: async () => 'test/confirmed',
-      complete,
-    });
-    await expect(manager.run({ id: 'confirmed-wiki', kind: 'wiki_page_generate', input: { expectedModel: 'test/confirmed' } })).resolves.toBe('# Generated\n\nBody');
-    expect(complete).toHaveBeenCalledOnce();
-    const prompt = String(complete.mock.calls[0]![0].user);
-    expect(prompt).toContain('Markdown');
-    expect(prompt).not.toContain('JSON only');
-  });
-
   it('goal_judge 超时 abort', async () => {
     vi.useFakeTimers();
     try {
@@ -145,18 +122,18 @@ describe('SystemWorkerManager', () => {
           await new Promise<void>((r) => { release = r; });
           return '{"classification":"fact"}';
         }
-        order.push('wiki');
-        return '# Wiki';
+        order.push('title');
+        return '{"title":"Example"}';
       },
     });
     const classify = manager.run({ id: 'classify', kind: 'content_classify', input: {} });
-    const wiki = manager.run({ id: 'wiki', kind: 'wiki_page_generate', input: {} });
+    const title = manager.run({ id: 'title', kind: 'thread_title_generate', input: {} });
     await Promise.resolve();
     expect(order).toEqual(['classify']);
     release();
     await expect(classify).resolves.toEqual({ classification: 'fact' });
-    await expect(wiki).resolves.toBe('# Wiki');
-    expect(order).toEqual(['classify', 'wiki']);
+    await expect(title).resolves.toEqual({ title: 'Example' });
+    expect(order).toEqual(['classify', 'title']);
   });
 
   it('run 在解析前把模型原文交给 hooks.onRawOutput，解析失败也一样', async () => {

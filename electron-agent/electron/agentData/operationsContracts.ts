@@ -48,7 +48,6 @@ export interface DiagnosticItem {
 export interface DiagnosticReport { items: DiagnosticItem[]; checkedAt: number }
 export type ResourceNavigation =
   | { view: 'overview' }
-  | { view: 'wiki'; kbId?: string; pageId?: string; mode?: 'read' | 'create' }
   | { view: 'code'; workspace?: string; file?: string; line?: number }
   | { view: 'jobs'; task?: TaskRef }
   | { view: 'audit'; resource?: ResourceRef };

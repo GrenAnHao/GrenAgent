@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-/** 微信(ilink) 实时状态（由 sidecar im-platforms 扩展经 setStatus("wechat") 推送）。 */
+/** 微信(ilink) 实时状态（由 会话宿主 im-platforms 扩展经 setStatus("wechat") 推送）。 */
 export interface WechatStatus {
   enabled: boolean;
   loggedIn: boolean;

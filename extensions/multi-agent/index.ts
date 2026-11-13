@@ -241,7 +241,7 @@ function pickSubagentModel(
 }
 
 // 单会话仍占用的子代理数（按 sessionId；拿不到则退回按 cwd）。一次性任务结束就释放；
-// 可继续的子代理要等收尾、没有后续消息才释放。进程内状态，sidecar 重启清零。
+// 可继续的子代理要等收尾、没有后续消息才释放。进程内状态，扩展宿主 重启清零。
 const sessionSpawnCount = new Map<string, number>();
 
 function sessionCap(): number {
@@ -451,7 +451,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // 进程启动即回收上一个进程遗留的孤儿子代理（registry.db 里卡在 "running" 的行）并装好取消监听，
-  // 而不是仅靠 spawn_agent 懒触发 getRegistry。否则 sidecar 重启后只要主代理不再 spawn，遗留的
+  // 而不是仅靠 spawn_agent 懒触发 getRegistry。否则 扩展宿主 重启后只要主代理不再 spawn，遗留的
   // running 行没有任何路径会被清理：前端任务托盘直接读 registry.db，会一直显示"运行中"；面板上的
   // 取消（写 cancel-requests.jsonl）也因 watcher 未安装而无人消费。session_start 在打开/恢复/
   // 切换会话时触发，正好覆盖"刚重启"的时机；getRegistry 对同一 cwd 幂等，只在首次 load 时 reap 一次，
@@ -785,7 +785,7 @@ export default function (pi: ExtensionAPI) {
           const avail = discovered.map((x) => x.name).join(", ") || "none";
           if (discovered.length === 0) {
             // 一个 agent 都没发现，多为冷启动 seed 时机 / agentDir 偏移：打印运行时真实路径，
-            // 便于下次复现时直接拿到 sidecar 实际的 getAgentDir 与目录内容。
+            // 便于下次复现时直接拿到 扩展宿主 实际的 getAgentDir 与目录内容。
             try {
               const ad = getAgentDir();
               const udir = join(ad, "agents");

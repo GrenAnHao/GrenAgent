@@ -5,7 +5,7 @@
 //
 // 取代 Tauri 侧起一次性冷 `pi -p` 子进程的老做法——那种冷进程要加载全局 MCP
 // （deepwiki 等需 OAuth/网络）、且对 token-plan provider 无法在一次性进程里鉴权，
-// 会卡在 agent_start 之前永不返回。这里在已鉴权的常驻 sidecar 内直接用标题模型
+// 会卡在 agent_start 之前永不返回。这里在已鉴权的常驻 扩展宿主 内直接用标题模型
 // 生成（无子进程、无 MCP 冷启动），经 pi.setSessionName 写回——其内部会
 // appendSessionInfo + 广播 session_info_changed，Tauri 侧边栏据此刷新。
 //

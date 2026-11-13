@@ -3,7 +3,7 @@ import type { PluginStateRecord } from './pluginManager';
 
 /**
  * plugin_state 表的读写。PluginManager 只在构造时读一次全部记录，之后每次状态迁移写一行。
- * agentdata-host 模式下主进程不能打开 agent-data.db（只能有一个进程持有它），由子进程经 RPC 代读写。
+ * 生产路径由主进程内的运行时持有并提供数据库连接。
  */
 export class PluginStateStore {
   constructor(private readonly db: DatabaseSync) {}

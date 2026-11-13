@@ -11,9 +11,9 @@ export interface SettingsForm {
   /** 是否有未保存改动（手动保存模式）。 */
   dirty: boolean;
   setValue: (key: string, value: string) => void;
-  /** 手动保存：写 runtime-settings.json（扩展 fs.watch 热更新，不重启 sidecar）。 */
+  /** 手动保存：写 runtime-settings.json（扩展 fs.watch 热更新，不重启 会话宿主）。 */
   persist: () => Promise<void>;
-  /** 保存并重启 sidecar（仅 restart 类设置，如 im-gateway 连接需要）。 */
+  /** 保存并重新打开会话（仅 restart 类设置）。 */
   save: () => Promise<void>;
 }
 
@@ -121,7 +121,7 @@ export function useSettingsForm(options: { cacheWarming?: boolean } = {}): Setti
       if (rejectInvalid()) return;
       await persistValues();
       setDirty(false);
-      // restart 类设置：close + open 重启 sidecar 使其生效。
+      // restart 类设置：close + open 重新打开会话 使其生效。
       const ws = wsRef.current;
       await pi.closeWorkspace(ws);
       await pi.openWorkspace(ws);

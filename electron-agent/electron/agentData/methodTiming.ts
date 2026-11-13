@@ -3,7 +3,7 @@
  *
  * 只记同步段：方法被调用到它返回（或返回 promise）为止，加上应答的序列化与写出。async 方法 await 之后的续体
  * 不在其中；已知会在续体里做重活的地方（Wiki 索引重建、记忆定时器、任务队列结算、CodeGraph 查询）在调用点单独计时。
- * 段可以嵌套（例如 wiki.pageWrite 里的 wiki.rebuildPageIndex）：嵌套段照常进方法行，但不重复计入窗口合计。
+ * 段可以嵌套：嵌套段照常进方法行，但不重复计入窗口合计。
  */
 
 const TOP_METHODS = 15;

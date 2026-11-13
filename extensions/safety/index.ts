@@ -31,7 +31,7 @@ const WRITE_BYPASS_TOOLS = new Set<string>(WRITE_TOOLS);
 const CODE_EXEC = new Set<string>(CODE_EXEC_TOOLS);
 
 /**
- * 把一次调用压成主进程需要的事实特征。判定逻辑留在 sidecar，主进程只消费布尔量。
+ * 把一次调用压成主进程需要的事实特征。判定逻辑留在 扩展宿主，主进程只消费布尔量。
  *
  * 参数类型刻意声明得比 SDK 的 ToolCallEvent / Context 宽松：结构化类型让实参
  * 兼容，同时这个函数在单测里可以用普通对象调用，不必构造完整的 SDK 上下文。

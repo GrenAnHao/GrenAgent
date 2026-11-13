@@ -39,7 +39,7 @@ export const DEFAULT_ENHANCE_SYSTEM = `你是面向编程助手的提示词增�
 - 改写稿控制在约 800 字以内，意思完整，不要半截列表或悬空冒号。
 - 把改写后的提示词放在〈改写稿〉和〈/改写稿〉之间输出，标签之外一个字都不要写。`;
 
-export const PROJECT_ENHANCE_SYSTEM = `你可以调用只读工具查阅本项目的 wiki 和代码图，以便改写后的提示词贴合该项目的关键约定与实现。
+export const PROJECT_ENHANCE_SYSTEM = `你可以调用只读工具查阅本项目的代码图，以便改写后的提示词贴合该项目的关键约定与实现。
 草稿如果离开上一轮对话就写不清楚（例如「上面」「刚才」「继续」「这个方案」），调用 read_recent_turn 读取最近一轮看得见的用户消息和助手正文，把任务、范围和约束写具体。草稿本身已经说清楚时不要调用。读到的内容不要复述，也不要开始执行。
 不要向用户复述工具原始输出。最终只输出改写后的提示词正文。
 当前会话目标：
@@ -50,8 +50,6 @@ export const ENHANCE_PHASE = {
   understand: '正在理解草稿',
   decide: '正在决定要查什么',
   recent: '正在读取最近一轮对话',
-  wikiSearch: '正在搜索知识库',
-  wikiRead: '正在阅读知识库',
   code: '正在查阅代码',
   write: '正在写改写稿',
 } as const;
@@ -60,10 +58,6 @@ function phaseForTool(name: string): string {
   switch (name) {
     case 'read_recent_turn':
       return ENHANCE_PHASE.recent;
-    case 'wiki_search':
-      return ENHANCE_PHASE.wikiSearch;
-    case 'wiki_read':
-      return ENHANCE_PHASE.wikiRead;
     case 'codegraph_explore':
       return ENHANCE_PHASE.code;
     default:
@@ -194,8 +188,6 @@ function stripWrappingQuotes(text: string): string {
  * 因此对外用下划线名，内部再映射回 agentData 的命令名。
  */
 const ENHANCE_TOOLS: Tool[] = [
-  { name: 'wiki_search', description: '按关键词搜索本工作区 wiki。', parameters: Type.Object({ query: Type.String(), limit: Type.Optional(Type.Number()) }) },
-  { name: 'wiki_read', description: '读取 wiki 页面。', parameters: Type.Object({ page: Type.String() }) },
   { name: 'codegraph_explore', description: '查阅代码图：一次返回相关源码和调用路径。', parameters: Type.Object({ query: Type.String(), maxFiles: Type.Optional(Type.Number()) }) },
   {
     name: 'read_recent_turn',
@@ -408,20 +400,8 @@ async function executeEnhanceTool(
       if (!text) return { isError: false, text: '没有更早的对话' };
       return { isError: false, text: text.length > MAX_TOOL_RESULT_CHARS ? text.slice(0, MAX_TOOL_RESULT_CHARS) : text };
     }
-    let result: unknown;
-    if (name === 'wiki_search') {
-      result = await request('wiki.search', {
-        workspace,
-        query: args.query,
-        limit: typeof args.limit === 'number' ? args.limit : 8,
-      });
-    } else if (name === 'wiki_read') {
-      result = await request('wiki.read', { workspace, page: args.page });
-    } else if (name === 'codegraph_explore') {
-      result = await request('codeRetrieval.call', { workspace, tool: name, args });
-    } else {
-      return { isError: true, text: '不允许的工具' };
-    }
+    if (name !== 'codegraph_explore') return { isError: true, text: '不允许的工具' };
+    const result = await request('codeRetrieval.call', { workspace, tool: name, args });
     const serialized = JSON.stringify(result);
     let text = typeof serialized === 'string' ? serialized : '';
     if (text.length > MAX_TOOL_RESULT_CHARS) text = text.slice(0, MAX_TOOL_RESULT_CHARS);

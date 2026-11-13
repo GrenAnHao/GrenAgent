@@ -120,6 +120,8 @@ npx vitest run prompt-metadata.test.ts
 
 ### 现有场景
 
+- 项目上下文：`project-context`（真实 ProjectContextPanel；只请求当前工作区的 CodeGraph 状态，验证请求失败、点击重试、索引统计和无 Wiki 区块）
+
 - 内置模型参数：`builtin-model-settings`（真实 ProvidersSettings / ProviderModelCard / 稀疏覆盖适配器，主进程目录和磁盘用桩；完整纵向卡片列表、无目录 Select、显隐图标与展开同行（宽屏单行高≤72px，与自定义卡一致）、只读 ID 去输入底色、默认不显示恢复入口、改动后恢复、Tooltip/Tab 键盘聚焦、每张独立展开与恢复、固定 ID/协议、名称/上下文/输出/价格/档位/图片/Fast 与高级参数，false/0、只写修改叶子、跨卡片/供应商草稿、非法 JSON、保存/刷新失败与仅重试、重挂载与同 ID 替换排除，深浅主题和窄屏。只读目录 IPC 与真实 SDK 合并另由定向测试覆盖，不发真实模型请求。只跑 `npm run ui:check -- builtin-model-settings`）
 
 - 模型显示偏好：`model-visibility`（真实内置卡片、独立 localStorage 偏好、聊天合并模型/思考入口、旧模型入口、设置单选/路由多选/能力预设与供应商测活；只有后端 I/O 使用桩。精确 provider + ID 隐藏、全入口即时同步、全部隐藏空候选、保留当前模型/思考/Fast 与已有配置、不写 models/auth、持久化与真实页面重载、存储失败回滚、目录缺失/同 ID 替换仍可恢复、深浅主题。只跑 `npm run ui:check -- model-visibility`；参数编辑回归另点名 `builtin-model-settings`）

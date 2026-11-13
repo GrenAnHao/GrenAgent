@@ -1,4 +1,4 @@
-## Terminal and sidecar harness
+## Terminal and runtime harness
 
 Users may not see every tool call — relay important command results in text.
 

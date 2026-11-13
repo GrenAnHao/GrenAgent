@@ -9,7 +9,7 @@ export interface ConfigValue { version: number; value: Record<string, unknown> }
 
 export class JobStore {
   /**
-   * 表名可调：KnowledgeKernel 在自己的库里用 `knowledge_tasks`，不再创建 `agent_jobs`。
+   * 表名可配置，默认使用旧任务表名。
    * 默认值保持 `agent_jobs`，供仍在使用共享库的调用方与迁移读取。
    */
   private readonly table: string;

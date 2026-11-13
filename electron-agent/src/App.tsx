@@ -907,7 +907,7 @@ const Workspace = memo(function Workspace() {
 
   useEffect(() => {
     let un: (() => void) | undefined;
-    // 标题由 sidecar 内的 auto-title 扩展在 agent_end 时「进程内」生成并写回；写回时 pi
+    // 标题由 会话宿主 内的 auto-title 扩展在 agent_end 时「进程内」生成并写回；写回时 pi
     // 广播 session_info_changed。这里据此刷新侧边栏，让新标题立即显示（不再起冷子进程）。
     void onPiEvent((e) => {
       if (e.event.type !== 'session_info_changed') return;

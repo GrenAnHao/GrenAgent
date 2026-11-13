@@ -348,7 +348,7 @@ export class AgentDataRuntime {
 
   private adminMethod(name: string, params: Record<string, unknown>, trusted = false): AgentDataMethod | undefined {
     // agent_jobs/agent_config/agent_audit 已随任务面下线：admin.jobs.* 的写路径由各执行器端口处理，
-    // 读路径改走 admin.knowledge.task.*；codeRetrieval 是这里唯一保住的管理面。
+    // 代码索引状态与任务由 CodeGraph 端口及 IndexTaskStore 持有。
     if (name === 'codeRetrieval.admin.projects') return () => this.options.codeRetrieval?.projects() ?? [];
     if (name === 'codeRetrieval.admin.status') return (p) => {
       const workspace = typeof p.workspace === 'string' ? p.workspace : '';
