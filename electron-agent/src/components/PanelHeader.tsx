@@ -15,8 +15,9 @@ const styles = createStaticStyles(({ css }) => ({
     background: transparent;
   `,
   title: css`
-    font-size: 14px;
+    font-size: var(--gren-font-body);
     font-weight: 600;
+    letter-spacing: -0.015em;
     color: ${cssVar.colorText};
   `,
 }));

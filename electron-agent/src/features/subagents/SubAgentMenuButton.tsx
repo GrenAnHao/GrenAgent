@@ -196,7 +196,7 @@ export function SubAgentMenuButton() {
     return now - item.updatedAt <= FADE_MS;
   });
   const runningItems = visible.filter((i) => i.status === 'running');
-  const terminalItems = visible.filter((i) => i.status !== 'running');
+  const terminalItems = visible.filter((i) => i.status !== 'running').sort((a, b) => b.updatedAt - a.updatedAt);
   const shownTerminal = showAll ? terminalItems : terminalItems.slice(0, RECENT_TERMINAL);
   const hiddenCount = terminalItems.length - shownTerminal.length;
   const hasClearable = items.some((i) => isTerminalStatus(i.status) && i.updatedAt > clearCutoff);

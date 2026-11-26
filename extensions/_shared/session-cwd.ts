@@ -10,6 +10,7 @@
 
 import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { effectiveRecordedCwd, isTransferredSession } from "./session-project-transfer.js";
 
 export const WORKING_DIRECTORY_ENTRY = "working_directory";
 
@@ -19,6 +20,7 @@ export interface CwdSession {
   readonly sessionManager: {
     getCwd(): string;
     getEntries(): readonly unknown[];
+    getLeafId?(): string | null;
     appendCustomEntry(customType: string, data?: unknown): unknown;
   };
   readonly extensionRunner?: unknown;
@@ -115,7 +117,9 @@ export function attachSessionCwd(session: CwdSession): () => void {
     session.sessionManager.appendCustomEntry(WORKING_DIRECTORY_ENTRY, { cwd, ...extra });
   };
 
-  const recorded = recordedCwd(session.sessionManager.getEntries());
+  const entries = session.sessionManager.getEntries();
+  const transferred = isTransferredSession(entries);
+  const recorded = transferred ? effectiveRecordedCwd(entries, original(), session.sessionManager.getLeafId?.()) : recordedCwd(entries);
   if (recorded && !sameDirectory(recorded, currentOf(session))) {
     if (isDirectory(recorded)) {
       applyCwd(session, recorded);

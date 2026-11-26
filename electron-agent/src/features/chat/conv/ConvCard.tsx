@@ -32,6 +32,7 @@ const styles = createStaticStyles(({ css }) => ({
   tag: css`
     margin-inline-start: auto;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     text-transform: none;
     color: ${cssVar.colorTextQuaternary};
   `,

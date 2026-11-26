@@ -25,7 +25,8 @@ export function changesForTurn(segments: TimelineSegment[]): ChangeFile[] {
     const path = mutationPath(segment.args);
     const diff = fileDiffModel(segment.toolName, segment.args, segment.result, segment.status);
     if (!path || !diff) continue;
-    const key = fileKey(segment.cwd, path);
+    const cwd = segment.sourceRefs?.path ?? segment.sourceRefs?.file ?? segment.cwd;
+    const key = fileKey(cwd, path);
     const existing = index.get(key);
     if (existing === undefined) {
       index.set(key, files.length);
@@ -34,7 +35,7 @@ export function changesForTurn(segments: TimelineSegment[]): ChangeFile[] {
         display: fileNameFromPath(path),
         added: diff.added,
         deleted: diff.deleted,
-        ...(segment.cwd ? { cwd: segment.cwd } : {}),
+        ...(cwd ? { cwd } : {}),
       });
     } else {
       files[existing].added += diff.added;
@@ -61,14 +62,15 @@ export function presentedForTurn(segments: TimelineSegment[]): PresentedFile[] {
   for (const segment of segments) {
     if (segment.kind !== 'tool' || segment.toolName.toLowerCase() !== 'present' || segment.status !== 'done') continue;
     const details = getDetails(segment.result);
-    for (const file of asPresentFiles(details?.files)) {
+    for (const [fileIndex, file] of asPresentFiles(details?.files).entries()) {
+      const cwd = segment.sourceRefs?.[`files.${fileIndex}.path`] ?? segment.cwd;
       const next = {
         path: file.path,
         display: fileNameFromPath(file.path),
         ...(file.description ? { description: file.description } : {}),
-        ...(segment.cwd ? { cwd: segment.cwd } : {}),
+        ...(cwd ? { cwd } : {}),
       };
-      const key = fileKey(segment.cwd, file.path);
+      const key = fileKey(cwd, file.path);
       const existing = index.get(key);
       if (existing === undefined) {
         index.set(key, files.length);

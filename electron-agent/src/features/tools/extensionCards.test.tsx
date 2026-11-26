@@ -88,6 +88,19 @@ describe('renderExtensionCard', { timeout: 30_000 }, () => {
     expect(revealItemInDir).toHaveBeenCalledWith('/proj/.pi/images/img_42.png');
   });
 
+  it('keeps historical image/audio resources at their original root after transfer', () => {
+    render(<>{renderExtensionCard({ toolName: 'generate_image', args: {}, status: 'done',
+      result: { content: [], details: { paths: ['img/one.png', 'img/two.png'] } },
+      sourceCwd: '/old', sourceRefs: { 'paths.1': '/old/branch' } })}</>);
+    fireEvent.click(screen.getByTestId('reveal-file-generate_image'));
+    expect(revealItemInDir).toHaveBeenCalledWith('/old/img/one.png');
+    cleanup();
+    render(<>{renderExtensionCard({ toolName: 'speak', args: {}, status: 'done',
+      result: { content: [], details: { path: 'audio/voice.wav' } }, sourceCwd: '/old' })}</>);
+    fireEvent.click(screen.getByTestId('reveal-file-speak'));
+    expect(revealItemInDir).toHaveBeenCalledWith('/old/audio/voice.wav');
+  });
+
   it('spawn_agent shows sub-agent count', () => {
     renderCard('spawn_agent', { content: [{ type: 'text', text: 'out' }], details: { count: 3, failed: 1 } });
     expect(screen.getByTestId('card-spawn_agent').textContent).toContain('3');

@@ -54,6 +54,7 @@ export const cardStyles = createStaticStyles(({ css }) => ({
   `,
   toolName: css`
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     color: ${cssVar.colorTextSecondary};
   `,
   // 技能名：与输入框/消息里的技能 chip 同色（紫色），让「调用技能」一眼可辨。
@@ -63,10 +64,12 @@ export const cardStyles = createStaticStyles(({ css }) => ({
   `,
   paramKey: css`
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     color: ${cssVar.colorTextTertiary};
   `,
   paramValue: css`
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     color: ${cssVar.colorTextSecondary};
   `,
   terminalOutput: css`
@@ -76,6 +79,7 @@ export const cardStyles = createStaticStyles(({ css }) => ({
     border-radius: 6px;
     background: ${cssVar.colorFillTertiary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -96,6 +100,7 @@ export const cardStyles = createStaticStyles(({ css }) => ({
     align-items: flex-start;
     padding: 8px 10px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.6;
   `,
@@ -132,6 +137,7 @@ export const cardStyles = createStaticStyles(({ css }) => ({
     max-height: 320px;
     padding: 8px 10px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.6;
     color: ${cssVar.colorTextSecondary};

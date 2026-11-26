@@ -1,4 +1,5 @@
 import { createStaticStyles, cssVar } from 'antd-style';
+import { isSensitiveField } from './McpConfigValues';
 import { Minus, Plus } from 'lucide-react';
 
 export type KvPairs = Array<[string, string]>;
@@ -26,7 +27,8 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 9px;
     background: ${cssVar.colorFillQuaternary};
     color: ${cssVar.colorText};
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     font-size: 12px;
 
     &:focus {
@@ -84,6 +86,7 @@ export function KeyValueEditor({
           />
           <input
             className={styles.input}
+            type={testId.startsWith('mcp-') && isSensitiveField(pair[0]) ? 'password' : 'text'}
             data-testid={`${testId}-val-${i}`}
             placeholder={valuePlaceholder}
             value={pair[1]}

@@ -64,7 +64,6 @@ const g = createStaticStyles(({ css }) => ({
     min-height: 0;
   `,
   list: css`
-    scrollbar-width: thin;
     padding: 6px 0;
   `,
   row: css`
@@ -84,6 +83,7 @@ const g = createStaticStyles(({ css }) => ({
     flex: none;
     width: 110px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 11px;
     color: ${cssVar.colorTextTertiary};
   `,
@@ -100,6 +100,7 @@ const g = createStaticStyles(({ css }) => ({
     flex: none;
     width: 72px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 11px;
     color: ${cssVar.colorTextTertiary};
   `,

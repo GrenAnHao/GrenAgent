@@ -30,6 +30,7 @@ const styles = createStaticStyles(({ css }) => ({
   name: css`
     flex: none;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     color: ${cssVar.colorTextSecondary};
   `,
@@ -40,6 +41,7 @@ const styles = createStaticStyles(({ css }) => ({
     overflow: hidden;
     min-width: 0;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 11.5px;
     color: ${cssVar.colorTextTertiary};
     text-overflow: ellipsis;

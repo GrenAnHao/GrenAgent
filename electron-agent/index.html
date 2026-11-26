@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GrenAgent</title>
     <link rel="icon" href="./favicon.ico" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./src/assets/fonts/inter-latin-wght-normal.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./src/assets/fonts/jetbrains-mono-latin-wght-normal.woff2" />
     <script>
       // 首帧前按「设置 → 外观」定首屏明暗，写到 <html data-theme>，React 起来后 ThemeBridge 写的也是这个属性。
       // 读 themeStore 的持久化值（zustand persist，键 pi-theme），判定与 WorkbenchThemeProvider 相同；
@@ -26,8 +28,8 @@
         --boot-logo: #e8e8e2;
       }
       html[data-theme='light'] {
-        --boot-bg: #f3f3f0;
-        --boot-logo: #242722;
+        --boot-bg: #f8f9f8;
+        --boot-logo: #18181b;
       }
       html,
       body {

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+本篇阈值、摘要和手动／自动续跑策略继续有效。[生命周期修复](../bug-fix/2026-11-17-visual-review-and-goal-lifecycle.md)补充独立压缩活动、可信内部中断来源、存活宿主快照恢复与 contextRevision 统计对账，不落盘重放 compacting=true，也不替换这些策略。
+
 ## Problem
 
 ### 旧工具结果默认按压力裁并冷时定案；压缩时一次状态抽取兼作摘要

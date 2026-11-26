@@ -11,6 +11,9 @@ function hostDeps(over: Partial<HostDeps> = {}): HostDeps {
     allowedPluginIds: vi.fn(() => ['mcp']),
     authorize: vi.fn(async () => ({ status: 'allowed' as const, decision: 'allow' as const })),
     mergeRuntimeSettings: vi.fn(async () => {}),
+    invalidateSessionRecords: vi.fn(),
+    goalLossClaim: vi.fn(() => undefined),
+    goalLossAck: vi.fn(() => false),
     thread: {
       createThread: vi.fn(async () => ({})),
       createTurn: vi.fn(async () => ({})),
@@ -40,6 +43,10 @@ describe('createHostMethods', () => {
     expect(deps.authorize).toHaveBeenCalledWith({ kind: 'pi.agent_prompt', workspace: 'D:/p' }, 'interactive');
     await host.mergeRuntimeSettings({ 'approval:D:/p': 'ask' });
     expect(deps.mergeRuntimeSettings).toHaveBeenCalledWith({ 'approval:D:/p': 'ask' });
+    await host.invalidateSessionRecords(['D:/sessions/a.jsonl']);
+    expect(deps.invalidateSessionRecords).toHaveBeenCalledWith(['D:/sessions/a.jsonl']);
+    await expect(host.goalLossClaim('D:/sessions/a.jsonl', 'session-a')).resolves.toBeUndefined();
+    expect(deps.goalLossClaim).toHaveBeenCalledWith('D:/sessions/a.jsonl', 'session-a');
     await host.thread.createThread({ id: 't', projectId: 'p', workspace: 'D:/p' });
     expect(deps.thread.createThread).toHaveBeenCalledWith({ id: 't', projectId: 'p', workspace: 'D:/p' });
     await host.thread.updateTurn('turn-1', { status: 'completed', completedAt: 5 });
@@ -64,6 +71,17 @@ describe('createHostMethods', () => {
     const deps = hostDeps();
     await expect(createHostMethods(deps)['host.mergeRuntimeSettings']({ patch: { a: 1 } })).rejects.toThrow('patch values must be strings');
     expect(deps.mergeRuntimeSettings).not.toHaveBeenCalled();
+  });
+
+  it('迁移后的会话缓存失效只接受字符串路径数组', async () => {
+    const deps = hostDeps();
+    const methods = createHostMethods(deps);
+    await methods['host.invalidateSessionRecords']({ paths: ['D:/sessions/a.jsonl', 'D:/sessions/b.jsonl'] });
+    expect(deps.invalidateSessionRecords).toHaveBeenCalledWith(['D:/sessions/a.jsonl', 'D:/sessions/b.jsonl']);
+    for (const paths of [undefined, 'D:/sessions/a.jsonl', ['D:/sessions/a.jsonl', 1], ['  ']]) {
+      await expect(Promise.resolve().then(() => methods['host.invalidateSessionRecords']({ paths }))).rejects.toThrow(/paths must be a string array/);
+    }
+    expect(deps.invalidateSessionRecords).toHaveBeenCalledTimes(1);
   });
 
   it('参数缺失时报清楚的错误', async () => {
@@ -93,6 +111,8 @@ describe('createAgentPorts', () => {
       agent.pi.respondUi('D:/p', { id: 'r' }),
       agent.pi.send('D:/p', 'agent_get_state', {}),
       agent.pi.sessionWorkflow('D:/p', {action:'tree'}),
+      agent.pi.sessionProjectTransfer('D:/p', {action:'preview',sourceWorkspace:'D:/p',sessionPath:'p.jsonl',targetWorkspace:'D:/q'}),
+      agent.pi.recoverSessionTransfers(),
       agent.pi.permissionProfile('D:/p', 's1'),
       agent.pi.refreshModelRegistry(),
       agent.pi.syncModelCompactionBudgets(),
@@ -101,6 +121,7 @@ describe('createAgentPorts', () => {
       agent.pi.ownsSession('D:/p', 's1'),
       agent.pi.activeModel('D:/p'),
       agent.subagent.list('D:/p'),
+      agent.subagent.lookup('D:/p', 'id', 'p.jsonl'),
       agent.subagent.transcript('D:/p', 'id'),
       agent.subagent.sessionMessages('a.jsonl'),
       agent.subagent.catalog('p.jsonl'),
@@ -112,6 +133,9 @@ describe('createAgentPorts', () => {
       agent.jobs.kill('j', 1),
       agent.mcp.hotReload('D:/p', '[]'),
       agent.mcp.reload('D:/p', 'a'),
+      agent.mcp.inspect('D:/p', 'a'),
+      agent.mcp.cancelAttempt('D:/p', 'a', 'old'),
+      agent.mcp.testCall('D:/p', 'a', 'mcp__a__x', {}),
       agent.mcp.probe('{}'),
       agent.mcp.workspaceForCwd('D:/p'),
       agent.controlPlane.release('D:/p'),
@@ -120,6 +144,7 @@ describe('createAgentPorts', () => {
       agent.extensions.catalog(),
       agent.observations.command({action:'list'}),
       agent.usage.report(),
+      agent.usage.calls({page:1}),
       agent.usage.reconcile(),
     ]);
     const used = new Set(calls.map(([method]) => method));

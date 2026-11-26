@@ -353,6 +353,7 @@ describe("adjacent-tools", () => {
       "/ws/child.jsonl",
       "Agent p1 sent a message: hi",
       "followUp",
+      { registry: control.getRegistry.mock.results.at(-1)?.value },
     );
     expect(r.isError).toBeFalsy();
     expect(r.content[0]?.text).toContain("message delivered to agent sa-1");
@@ -373,7 +374,7 @@ describe("adjacent-tools", () => {
       "/ws/grand.jsonl",
       "Agent sa-1 sent a message: hi",
       "followUp",
-      { senderActivationId: "sa-1" },
+      { senderActivationId: "sa-1", registry: control.getRegistry.mock.results.at(-1)?.value },
     );
     expect(r.isError).toBeFalsy();
   });

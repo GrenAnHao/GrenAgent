@@ -67,7 +67,8 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 8px 10px;
     border-top: 1px solid ${cssVar.colorBorderSecondary};
 
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.55;
     color: ${cssVar.colorText};

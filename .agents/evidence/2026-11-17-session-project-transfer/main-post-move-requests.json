@@ -1,0 +1,52 @@
+[
+  {
+    "index": 1,
+    "toolNames": [
+      "read",
+      "bash",
+      "present",
+      "ask_user",
+      "fetch_url",
+      "working_directory",
+      "search"
+    ],
+    "roles": [
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "user",
+      "user",
+      "assistant",
+      "user",
+      "user"
+    ],
+    "tail": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\\\"规约到 [0, π/2]\\\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 subgraph \\\"第3层=结果\\\"、别写 subgraph 第3层=结果）、连线标签（写 A -->|\\\"是/否\\\"| B）。漏引号会触发 mermaid 解析报错、整图渲染失败。2) 数学公式用 $...$（行内）或 $$...$$（整行、单独成行），不要用 \\\\(...\\\\) 或 \\\\[...\\\\]——前端不渲染那种写法、会原样显示反斜杠。（这是渲染用的系统提示，不是用户偏好：无需在回复里确认、复述或保存为用户偏好。）\"}]},{\"role\":\"assistant\",\"content\":\"FIXTURE_REPLY\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"EXPLICIT_AFTER_MOVE continue here\"}]},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\\\"规约到 [0, π/2]\\\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 subgraph \\\"第3层=结果\\\"、别写 subgraph 第3层=结果）、连线标签（写 A -->|\\\"是/否\\\"| B）。漏引号会触发 mermaid 解析报错、整图渲染失败。2) 数学公式用 $...$（行内）或 $$...$$（整行、单独成行），不要用 \\\\(...\\\\) 或 \\\\[...\\\\]——前端不渲染那种写法、会原样显示反斜杠。（这是渲染用的系统提示，不是用户偏好：无需在回复里确认、复述或保存为用户偏好。）\"}]}]"
+  },
+  {
+    "index": 2,
+    "toolNames": [
+      "read",
+      "bash",
+      "present",
+      "ask_user",
+      "fetch_url",
+      "working_directory",
+      "search"
+    ],
+    "roles": [
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "user",
+      "user",
+      "assistant",
+      "user",
+      "user",
+      "assistant",
+      "tool"
+    ],
+    "tail": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"EXPLICIT_AFTER_MOVE continue here\"}]},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\\\"规约到 [0, π/2]\\\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 subgraph \\\"第3层=结果\\\"、别写 subgraph 第3层=结果）、连线标签（写 A -->|\\\"是/否\\\"| B）。漏引号会触发 mermaid 解析报错、整图渲染失败。2) 数学公式用 $...$（行内）或 $$...$$（整行、单独成行），不要用 \\\\(...\\\\) 或 \\\\[...\\\\]——前端不渲染那种写法、会原样显示反斜杠。（这是渲染用的系统提示，不是用户偏好：无需在回复里确认、复述或保存为用户偏好。）\"}]},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call-read-1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"rules-probe.txt\\\"}\"}}]},{\"role\":\"tool\",\"content\":\"TARGET_FILE_CONTENT\\n\",\"tool_call_id\":\"call-read-1\"}]"
+  }
+]

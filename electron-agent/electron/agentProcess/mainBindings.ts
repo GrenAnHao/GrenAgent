@@ -5,14 +5,19 @@
  * 本文件不引入任何扩展模块。
  */
 import type { PermissionAuthorization, PermissionOperation } from '../app/permissionManager';
-import type { UsageReport } from '../../src/lib/usageReport';
-import type {
-  ActiveModel,
-  AgentMethod,
-  ExtensionCatalogEntry,
-  HostMethod,
-  McpServerEntry,
-  ThreadStorePort,
+import type { SubagentLookup } from '../app/subagentService';
+import type { CallPage, CallQuery, UsageFilters, UsageReport } from '../../src/lib/usageReport';
+import {
+  BROADCAST_CHANNEL,
+  GOAL_WORKSLOT_CHANNEL,
+  type ActiveModel,
+  type AgentMethod,
+  type BroadcastPayload,
+  type ConfirmedGoalOwnerLoss,
+  type ExtensionCatalogEntry,
+  type HostMethod,
+  type McpServerEntry,
+  type ThreadStorePort,
 } from './contract';
 import type { MethodHandler } from './rpcPeer';
 
@@ -24,6 +29,10 @@ export interface HostDeps {
   allowedPluginIds(): string[];
   authorize(operation: PermissionOperation, profile: string): Promise<PermissionAuthorization>;
   mergeRuntimeSettings(patch: Record<string, string>): Promise<void>;
+  /** 迁移提交后让 main 的 WorkspaceService 重读这些会话文件（同尺寸／同 mtime 也必重读）。 */
+  invalidateSessionRecords(paths: string[]): Promise<void> | void;
+  goalLossClaim(sessionPath: string, sessionId: string): ConfirmedGoalOwnerLoss | undefined;
+  goalLossAck(loss: ConfirmedGoalOwnerLoss): boolean;
   thread: ThreadStorePort;
 }
 
@@ -46,10 +55,38 @@ export function createHostMethods(deps: HostDeps): Record<HostMethod, MethodHand
       await deps.mergeRuntimeSettings(patch as Record<string, string>);
       return null;
     },
+    'host.invalidateSessionRecords': async (p) => {
+      const paths = p.paths;
+      if (!Array.isArray(paths) || !paths.every((path) => typeof path === 'string' && path.trim())) {
+        throw new Error('paths must be a string array');
+      }
+      await deps.invalidateSessionRecords(paths as string[]);
+      return null;
+    },
+    'host.goalLossClaim': (p) => deps.goalLossClaim(str(p, 'sessionPath'), str(p, 'sessionId')) ?? null,
+    'host.goalLossAck': (p) => deps.goalLossAck(record(p, 'loss') as unknown as ConfirmedGoalOwnerLoss),
     'host.thread.createThread': (p) => deps.thread.createThread(p as unknown as Parameters<ThreadStorePort['createThread']>[0]),
     'host.thread.createTurn': (p) => deps.thread.createTurn(p as unknown as Parameters<ThreadStorePort['createTurn']>[0]),
     'host.thread.updateTurn': (p) => deps.thread.updateTurn(str(p, 'id'), record(p, 'patch')),
     'host.thread.upsertItem': (p) => deps.thread.upsertItem(p as unknown as Parameters<ThreadStorePort['upsertItem']>[0]),
+  };
+}
+
+/** 子进程 → 主进程运行时事件的出口。 */
+export type AgentBroadcaster = (channel: string, payload: unknown) => void;
+
+/**
+ * agent-host 的 broadcast 出口：内部通道（Goal 占用证据）按自己的 channel 直发，和 DIAG 同级，
+ * 主进程 onEvent 里对应分支消费后 return，不进窗口；其余事件照旧套 BROADCAST_CHANNEL 信封，
+ * 由主进程解包后推给渲染层。
+ */
+export function createAgentBroadcaster(emit: (channel: string, payload: unknown) => void): AgentBroadcaster {
+  return (channel, payload) => {
+    if (channel === GOAL_WORKSLOT_CHANNEL) {
+      emit(GOAL_WORKSLOT_CHANNEL, payload);
+      return;
+    }
+    emit(BROADCAST_CHANNEL, { channel, payload } satisfies BroadcastPayload);
   };
 }
 
@@ -112,6 +149,9 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
         tracker.close(workspace);
       },
       sessionWorkflow: (workspace: string, requestInput: import('../app/sessionWorkflowContracts').SessionWorkflowRequest) => touching(workspace, request<import('../app/sessionWorkflowContracts').SessionWorkflowAck>('pi.sessionWorkflow', {workspace,request:requestInput})),
+      sessionProjectTransfer: (workspace: string, requestInput: import('../app/sessionProjectTransferContracts').SessionProjectTransferRequest) => touching(workspace, request<import('../app/sessionProjectTransferContracts').SessionProjectTransferAck>('pi.sessionProjectTransfer', {workspace,request:requestInput})),
+      // 冷启动迁移恢复闸门：main WorkspaceService 等它结束后才开放会话读写；无 workspace 参数。
+      recoverSessionTransfers: async (): Promise<void> => { await whenRunning('pi.recoverSessionTransfers', {}, null); },
       respondUi: (workspace: string, response: Record<string, unknown>) => request('pi.respondUi', { workspace, response }),
       send: (workspace: string, command: string, args: Record<string, unknown>) =>
         touching(workspace, request('pi.send', { workspace, command, args })),
@@ -131,6 +171,8 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
     },
     subagent: {
       list: (workspace: string, sessionPath?: string) => request('subagent.list', { workspace, ...(sessionPath ? { sessionPath } : {}) }),
+      lookup: (workspace: string, agentId: string, parentSessionPath: string) =>
+        request<SubagentLookup>('subagent.lookup', { workspace, agentId, parentSessionPath }),
       transcript: (workspace: string, agentId: string) => request('subagent.transcript', { workspace, agentId }),
       sessionMessages: (sessionPath: string) => request<unknown[]>('subagent.sessionMessages', { sessionPath }),
       catalog: (parentSessionPath: string) => request('subagent.catalog', { parentSessionPath }),
@@ -153,6 +195,9 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
       hotReload: async (workspace: string, runtimeJson: string) => { await whenRunning('mcp.hotReload', { workspace, runtime: runtimeJson }, null); },
       // 带回这个工作区 manager 的状态摘要；旧子进程回 null。
       reload: (workspace: string, name: string) => request<unknown[] | null>('mcp.reload', { workspace, name }),
+      cancelAttempt: (workspace: string, name: string, attemptId: string) => whenRunning('mcp.cancelAttempt', { workspace, name, attemptId }, false),
+      inspect: (workspace: string, name: string, since?: string) => whenRunning('mcp.inspect', { workspace, name, since }, { servers: [] }),
+      testCall: (workspace: string, name: string, fullName: string, args: Record<string, unknown>) => request('mcp.testCall', { workspace, name, fullName, args }),
       probe: (configJson: string) => request<string>('mcp.probe', { configJson }),
       workspaceForCwd: (cwd: string) => whenRunning('mcp.workspaceForCwd', { cwd }, cwd),
     },
@@ -170,7 +215,8 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
     observations:{command:(params:Record<string,unknown>)=>request<any>('observations.command',params)},
     // 用量账本在 agent-host 里查：同步 sqlite 和历史导入都不占主进程。
     usage: {
-      report: () => request<UsageReport>('usage.report'),
+      calls: (query: CallQuery) => request<CallPage>('usage.calls', {query}),
+      report: (filters?: UsageFilters) => request<UsageReport>('usage.report', { filters }),
       reconcile: () => request<{ files: number; added: number }>('usage.reconcile'),
     },
   };

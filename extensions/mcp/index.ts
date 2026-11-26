@@ -132,7 +132,7 @@ function extensionServerConfig(server: RegisteredMcpServer): McpServerConfig {
     name: server.name,
     transport,
     source: "extension",
-    ...(command ? { command, args: config.args, env: config.env, cwd: "cwd" in config ? config.cwd : undefined } : {}),
+    ...("command" in config && command ? { command, args: config.args, env: config.env, cwd: "cwd" in config ? config.cwd : undefined } : {}),
     ...(url ? { url, headers: "headers" in config ? config.headers : undefined } : {}),
     ...(config.exposure !== undefined ? { exposure: config.exposure } : {}),
     ...(config.toolExposure ? { toolExposure: config.toolExposure } : {}),
@@ -209,7 +209,7 @@ function outstandingMcpName(name: string, snap: McpSnapshot, registeredNow: Read
   for (const [server, entry] of snap.servers) {
     if (!name.startsWith(`mcp__${sanitize(server)}__`)) continue;
     matched = true;
-    if (entry.status !== "connected" && entry.status !== "failed") return true;
+    if (entry.status === "connecting") return true;
   }
   return !matched;
 }

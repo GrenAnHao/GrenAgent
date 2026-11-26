@@ -111,10 +111,10 @@ export class AgentDataService {
     return this.requireClient().request<T>(method, params);
   }
 
-  createThread(input: CreateThreadInput): Promise<Thread> { return this.request('thread.create', input); }
+  createThread(input: CreateThreadInput): Promise<Thread> { return this.request('thread.create', { ...input }); }
   listThreads(): Promise<Thread[]> { return this.request('thread.list'); }
   readThread(id: string): Promise<ThreadSnapshot | undefined> { return this.request('thread.read', { id }); }
-  createTurn(input: CreateTurnInput): Promise<Turn> { return this.request('turn.create', input); }
+  createTurn(input: CreateTurnInput): Promise<Turn> { return this.request('turn.create', { ...input }); }
   updateTurn(id: string, patch: Partial<Pick<Turn, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<Turn> { return this.request('turn.update', { id, ...patch }); }
   upsertItem(item: Omit<Item, 'createdAt'> & Partial<Pick<Item, 'createdAt' | 'updatedAt'>>): Promise<Item> { return this.request('item.upsert', item); }
   listItems(threadId: string, turnId?: string): Promise<Item[]> { return this.request('item.list', { threadId, ...(turnId === undefined ? {} : { turnId }) }); }

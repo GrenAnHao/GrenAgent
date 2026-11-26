@@ -83,7 +83,7 @@ describe("official tool prompt metadata", () => {
           ],
         ]),
       } as never,
-      { callTool: async () => ({ text: "" }) },
+      { callTool: async () => ({ content: [{ type: "text", text: "" }] }) },
     );
     expect(tools).toEqual([
       expect.objectContaining({

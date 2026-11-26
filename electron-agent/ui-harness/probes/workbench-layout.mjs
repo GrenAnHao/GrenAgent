@@ -1,10 +1,13 @@
+import { checkPageHeading, compareThemeGeometry } from '../workbenchThemeChecks.mjs';
 const MAIN = '[data-testid="workbench-main"]';
 const VIEW = `${MAIN} [data-find-scope]`;
 const PROMPT = '[data-testid="empty-chat-prompt"]';
 const SURFACE = '[data-testid="composer-surface"]';
 const SEAT = '[data-testid="composer-seat"]';
 const EDITOR = `${SURFACE} [contenteditable="true"]`;
-const ROWS = '[data-testid="workbench-sidebar"] .pi-session-row';
+const SIDEBAR = '[data-testid="workbench-sidebar"]';
+const RAIL = '[data-testid="module-rail"]';
+const ROWS = `${SIDEBAR} .pi-session-row`;
 const HEADER_TAB = `${MAIN} [data-testid="workspace-tab-chat"]`;
 const HEADER_TITLE = `${HEADER_TAB} [data-testid="workspace-tab-title"]`;
 const q = JSON.stringify;
@@ -43,7 +46,7 @@ async function responsiveGeometry(t, label, expected) {
   t.info(`${label} 按实际聊天列采样比例`, geometry);
   t.checkNear(`${label} 输入卡目标宽度`, geometry.surfaceWidth, expected.width, 2);
   t.checkNear(`${label} 输入卡目标高度`, geometry.surfaceHeight, expected.height, 10);
-  t.checkNear(`${label} 标题字号按聊天列缩放`, geometry.titleFontSize, expected.font, 0.5);
+  t.check(`${label} 聊天列宽度不改变一级标题字号`, geometry.titleFontSize, 18);
   t.checkNear(`${label} 输入卡两侧留白对称`, geometry.leftGap, geometry.rightGap, 1);
   t.ok(`${label} 输入控件不横向溢出卡片`, geometry.controlsBounded);
   t.ok(`${label} 发送按钮位于可视卡片内且可用`, geometry.sendBounded && geometry.sendEnabled && geometry.sendHit);
@@ -107,28 +110,46 @@ async function surfaceHierarchy(t, label, dark) {
       context.fillRect(0, 0, 1, 1);
       return [...context.getImageData(0, 0, 1, 1).data];
     };
-    const rail = background('[data-testid="module-rail"]');
+    const rail = background(${q(RAIL)});
     const titlebar = background('[data-testid="workbench-layout"] > [data-tauri-drag-region]');
-    const sidebar = background('[data-testid="workbench-sidebar"]');
-    const chat = background('[data-testid="workbench-layout"]');
-    const selected = background('[data-testid="module-rail"] button[aria-pressed="true"]');
-    return { rail, titlebar, sidebar, chat, railPixel: pixel(rail), sidebarPixel: pixel(sidebar), chatPixel: pixel(chat), selected, selectedPixel: pixel(selected, rail) };
+    const sidebarPane = document.querySelector(${q(SIDEBAR)});
+    const railStyle = getComputedStyle(document.querySelector(${q(RAIL)}));
+    const sidebarStyle = getComputedStyle(sidebarPane.closest('.ant-draggable-panel'));
+    const sidebar = getComputedStyle(sidebarPane.closest('.ant-draggable-panel-fixed')).backgroundColor;
+    const composer = getComputedStyle(document.querySelector(${q(SURFACE)}));
+    const chat = background(${q(SEAT)});
+    const selected = background(${q(RAIL + ' button[aria-pressed="true"]')});
+    return {
+      rail, titlebar, sidebar, chat, selected, selectedPixel: pixel(selected, rail),
+      railBorder: { style: railStyle.borderInlineEndStyle, width: parseFloat(railStyle.borderInlineEndWidth) },
+      sidebarBorder: { color: sidebarStyle.borderInlineEndColor, style: sidebarStyle.borderInlineEndStyle, width: parseFloat(sidebarStyle.borderInlineEndWidth) },
+      paintPixel: Math.max(1, Math.floor(devicePixelRatio)) / devicePixelRatio,
+      composer: composer.backgroundColor, composerBorder: composer.borderTopColor, composerShadow: composer.boxShadow,
+      fontSmoothing: getComputedStyle(document.body).getPropertyValue('-webkit-font-smoothing'),
+    };
   })()`);
-  t.info(`${label} 图标栏、会话列表、聊天区与选中淡底的实际背景`, surfaces);
+  t.info(`${label} 外壳、聊天画布、输入卡与字体平滑的计算样式`, surfaces);
   const expected = dark
-    ? { rail: 'rgb(21, 23, 25)', sidebar: 'rgb(34, 35, 37)', chat: 'rgb(25, 26, 28)' }
-    : { rail: 'rgb(231, 233, 228)', sidebar: 'rgb(243, 243, 240)', chat: 'rgb(255, 254, 250)' };
-  t.checkColor(`${label} 图标栏使用独立底色`, surfaces.rail, expected.rail, 1);
+    ? { rail: 'rgb(21, 23, 25)', sidebar: 'rgb(34, 35, 37)', chat: 'rgb(25, 26, 28)', composer: 'rgb(36, 37, 39)' }
+    : { rail: 'rgb(236, 238, 235)', sidebar: 'rgb(244, 245, 243)', chat: 'rgb(248, 249, 248)', composer: 'rgb(255, 255, 255)' };
+  t.checkColor(`${label} 图标栏底色`, surfaces.rail, expected.rail, 1);
   t.checkColor(`${label} 标题栏与最左图标栏底色一致`, surfaces.titlebar, surfaces.rail, 1);
-  t.checkColor(`${label} 会话列表保留原底色`, surfaces.sidebar, expected.sidebar, 1);
-  t.checkColor(`${label} 聊天区保留原底色`, surfaces.chat, expected.chat, 1);
+  t.checkColor(`${label} 会话侧栏底色`, surfaces.sidebar, expected.sidebar, 1);
+  t.checkColor(`${label} 聊天画布底色`, surfaces.chat, expected.chat, 1);
+  t.checkColor(`${label} 聊天输入卡为独立表面`, surfaces.composer, expected.composer, 1);
+  t.check(`${label} ChatView 继承的字体平滑策略`, surfaces.fontSmoothing, 'antialiased');
   const rgb = (pixel) => `rgb(${pixel.slice(0, 3).join(', ')})`;
-  t.ok(`${label} 三块实际底色各异`, !t.colorNear(surfaces.rail, surfaces.sidebar, 1) && !t.colorNear(surfaces.sidebar, surfaces.chat, 1) && !t.colorNear(surfaces.rail, surfaces.chat, 1));
   if (!dark) {
-    const luminance = (pixel) => pixel.slice(0, 3).map((channel) => channel / 255).map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
-    t.ok('浅色图标栏到会话列表再到聊天区逐层变亮', luminance(surfaces.railPixel) < luminance(surfaces.sidebarPixel) && luminance(surfaces.sidebarPixel) < luminance(surfaces.chatPixel));
+    t.check('浅色图标轨没有新增占位边框', surfaces.railBorder.width, 0);
+    // Chromium at 150% Windows scale snaps 1 CSS px to 1 physical px (0.667 CSS px).
+    t.checkNear('浅色二级侧栏保留 1px 分隔线（按系统缩放取整）', surfaces.sidebarBorder.width, surfaces.paintPixel, 0.01);
+    t.checkColor('浅色二级侧栏分隔线为冷灰', surfaces.sidebarBorder.color, 'rgba(0, 0, 0, 0.08)', 1);
+    t.check('浅色二级侧栏使用实线分割', surfaces.sidebarBorder.style, 'solid');
+    t.checkColor('浅色聊天输入卡有冷灰边框', surfaces.composerBorder, 'rgba(0, 0, 0, 0.08)', 1);
+    t.checkColor('浅色图标栏选中状态用淡 Sage', surfaces.selected, 'rgba(92, 128, 96, 0.1)', 1);
   }
-  t.ok(`${label} 选中淡底合成后仍与栏底可区分`, !t.colorNear(rgb(surfaces.selectedPixel), surfaces.rail, 3));
+  t.ok(`${label} 选中背景合成后不同于图标轨底色`, !t.colorNear(rgb(surfaces.selectedPixel), surfaces.rail, dark ? 3 : 0));
+  return surfaces;
 }
 
 export default async function (t) {
@@ -157,7 +178,9 @@ export default async function (t) {
   t.check('主标题简洁地提出工作目标', await t.text(`${PROMPT} h1`), '想在这里完成什么？');
   t.ok('项目名作为小型上下文显示', (await t.text(PROMPT)).includes('专业工作台'));
   await emptyGeometry(t, '深色大屏');
-  await surfaceHierarchy(t, '深色大屏', true);
+  await t.click(`${PROMPT} h1`);
+  await t.sleep(200);
+  const darkSurfaces = await surfaceHierarchy(t, '深色大屏', true);
   const initialSurface = await t.rect(SURFACE);
   t.ok('大屏输入卡充分使用 880px 宽度', initialSurface.w >= 860);
   await noOverflow(t, '深色大屏');
@@ -170,7 +193,7 @@ export default async function (t) {
   const projectRect = await t.rect(project);
   const childRect = await t.rect('[data-probe-row="a"]');
   t.ok('项目会话位于项目标题下方', childRect.y > projectRect.y);
-  const selectedA = await t.style('[data-probe-row="a"]', ['background-color']);
+  const selectedA = await t.style('[data-probe-row="a"]', ['background-color', 'font-weight', 'box-shadow']);
   await t.click('[data-probe-row="b"]', 50);
   t.ok('会话选择回调保留准确路径', (await t.events()).includes(`open:${data.sessionB}`));
   const selectedB = await t.style('[data-probe-row="b"]', ['background-color']);
@@ -223,36 +246,36 @@ export default async function (t) {
   await t.click(EDITOR, 25);
   await t.type(data.DRAFT);
   await t.js(`window.__workbenchEditor = document.querySelector(${q(EDITOR)})`);
-  const wide = await responsiveGeometry(t, '宽聊天列', { width: 880, height: 135, font: 30 });
+  const wide = await responsiveGeometry(t, '宽聊天列', { width: 880, height: 135 });
   t.ok('宽窗实际聊天列至少 1000px', wide.columnWidth >= 1000);
   const windowWidth = await t.js('innerWidth');
   await t.act('sidebarWidth', windowWidth - railGeometry.width - 600);
   await t.sleep(350);
-  const compressed = await responsiveGeometry(t, '大窗口侧栏挤窄到 600px 列', { width: 528, height: 104, font: 22.8 });
+  const compressed = await responsiveGeometry(t, '大窗口侧栏挤窄到 600px 列', { width: 528, height: 104 });
   t.checkNear('大窗口实际聊天列为 600px', compressed.columnWidth, 600, 1);
   await emptyGeometry(t, '大窗口窄聊天列');
   await t.shot('empty-wide-window-narrow-column');
   await t.act('sidebarWidth', 260);
   await t.resize(600 + 260 + railGeometry.width, 880);
   await t.sleep(350);
-  const narrow = await responsiveGeometry(t, '小窗口正常侧栏的 600px 列', { width: 528, height: 104, font: 22.8 });
+  const narrow = await responsiveGeometry(t, '小窗口正常侧栏的 600px 列', { width: 528, height: 104 });
   for (const key of ['columnWidth', 'titleFontSize', 'surfaceWidth', 'surfaceHeight', 'leftGap', 'rightGap']) {
     t.checkNear(`两种等宽聊天列的 ${key} 一致`, narrow[key], compressed[key], 1);
   }
-  t.ok('窄列标题与输入卡比宽列紧凑', narrow.titleFontSize < wide.titleFontSize && narrow.surfaceHeight < wide.surfaceHeight);
+  t.ok('窄列保持标题字号，输入卡收紧', narrow.titleFontSize === wide.titleFontSize && narrow.surfaceHeight < wide.surfaceHeight);
   t.ok('600px 窄列每侧保留至少 35px 留白', narrow.leftGap >= 35 && narrow.rightGap >= 35);
   await emptyGeometry(t, '小窗口 600px 聊天列');
   await noOverflow(t, '小窗口 600px 聊天列');
   await t.shot('empty-narrow-window-equal-column');
   await t.resize(444 + 260 + railGeometry.width, 720);
   await t.sleep(350);
-  await responsiveGeometry(t, '444px 聊天列', { width: 378, height: 104, font: 20 });
+  await responsiveGeometry(t, '444px 聊天列', { width: 378, height: 104 });
   await emptyGeometry(t, '444px 聊天列');
   await noOverflow(t, '444px 聊天列');
   await t.shot('empty-responsive-444-column');
   await t.resize(windowWidth, 880);
   await t.sleep(350);
-  const restoredWide = await responsiveGeometry(t, '恢复宽聊天列', { width: 880, height: 135, font: 30 });
+  const restoredWide = await responsiveGeometry(t, '恢复宽聊天列', { width: 880, height: 135 });
   t.checkNear('放大后输入卡恢复原高度', restoredWide.surfaceHeight, wide.surfaceHeight, 1);
   t.ok('宽窄往返不重挂编辑器', await t.js(`window.__workbenchEditor === document.querySelector(${q(EDITOR)})`));
   t.check('宽窄往返不丢草稿正文', await t.text(EDITOR), data.DRAFT);
@@ -284,14 +307,25 @@ export default async function (t) {
   await emptyGeometry(t, '消息态回空态');
   await t.key('a', ['control']);
   await t.key('Backspace');
+  await t.click(`${PROMPT} h1`);
+  await compareThemeGeometry(t, '主对话', '[data-testid="workbench-layout"]', 'before');
+  await t.shot('theme-paired-dark');
   await t.setTheme('light');
+  await compareThemeGeometry(t, '主对话', '[data-testid="workbench-layout"]', 'after');
+  await checkPageHeading(t, '主对话空态', PROMPT+' h1');
+  await t.shot('theme-paired-light');
   await t.sleep(450);
   await emptyGeometry(t, '浅色大屏');
-  await surfaceHierarchy(t, '浅色大屏', false);
+  const lightSurfaces = await surfaceHierarchy(t, '浅色大屏', false);
+  const shadowGeometry = shadow => shadow.replace(/rgba?\([^)]*\)\s*/, '');
+  t.check('输入卡阴影的位移、模糊半径与扩散半径跨主题保持一致', shadowGeometry(lightSurfaces.composerShadow), shadowGeometry(darkSurfaces.composerShadow));
   await headerTitle(t, '浅色会话 A', data.titleA);
-  t.checkColor('浅色顶部标题使用清楚的深色文字', (await t.style(HEADER_TITLE, ['color'])).color, 'rgb(39, 41, 35)', 1);
-  const light = await t.style(SURFACE, ['background-color', 'color']);
-  t.ok('浅色输入卡采用亮色背景', Number(light.backgroundColor.match(/[0-9]+/g)?.[0]) > 200);
+  t.checkColor('浅色顶部标题使用清楚的深色文字', (await t.style(HEADER_TITLE, ['color'])).color, 'rgb(24, 24, 27)', 1);
+  await markSession(t, data.titleA, 'a');
+  const activeSession = await t.style('[data-probe-row="a"]', ['background-color', 'color', 'box-shadow', 'font-weight']);
+  t.checkColor('浅色选中会话使用淡 Sage', activeSession?.backgroundColor, 'rgba(92, 128, 96, 0.1)', 0);
+  t.checkColor('浅色选中会话保留深色标题', activeSession?.color, 'rgb(24, 24, 27)', 0);
+  t.check('选中会话在两种主题使用同样字重和内描边', [activeSession?.fontWeight, activeSession?.boxShadow], [selectedA.fontWeight, selectedA.boxShadow]);
   await noOverflow(t, '浅色大屏');
   await t.shot('empty-light');
 
@@ -335,8 +369,9 @@ export default async function (t) {
   t.ok('窄屏切换仍保留同一个编辑器节点', await t.js(`window.__workbenchEditor === document.querySelector(${q(EDITOR)})`));
   await t.shot('conversation-narrow-light');
   await t.act('empty');
+  await t.click(`${PROMPT} h1`);
   await t.setTheme('dark');
-  await t.sleep(350);
+  t.check('从浅色切回后聊天外壳、输入卡与字体平滑恢复深色设置', await surfaceHierarchy(t, '恢复深色', true), darkSurfaces);
   await noOverflow(t, '深色窄屏');
   await t.shot('empty-narrow-dark');
 

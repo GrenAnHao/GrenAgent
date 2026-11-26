@@ -5,7 +5,7 @@ import type { IndexProgress } from '@colbymchenry/codegraph';
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from '../../agentData/codeRetrievalProtocol';
 import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import { fromWireError } from '../../agentProcess/rpcPeer';
-import { CODEGRAPH_SDK_VERSION, type CodeGraphStatusView, type SyncOutcome, type SyncPlan } from './codeGraphEngine';
+import { CODEGRAPH_SDK_VERSION, type CodeGraphStatusView, type ManualSyncOptions, type SyncOutcome, type SyncPlan } from './codeGraphEngine';
 import type { CodeSearchView } from './codeGraphService';
 import { headAction, readGitHead } from './gitHead';
 import type { CodeGraphStateEvent } from './hostContract';
@@ -299,9 +299,9 @@ export class CodeGraphThreads {
   }
 
   /** 用户 job：并进该工作区的待执行槽，包含它的那次同步结束时落定（前面有一次在跑就排在它后面）。 */
-  async runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void): Promise<SyncOutcome> {
+  async runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void, options?: ManualSyncOptions): Promise<SyncOutcome> {
     if (this.closed) throw new Error(CLOSED);
-    return this.track(this.scheduler.request(keyOf(workspace), workspace, { trigger: 'manual', jobId, onProgress })!);
+    return this.track(this.scheduler.request(keyOf(workspace), workspace, { trigger: 'manual', jobId, onProgress, rebuild: options?.mode === 'full' })!);
   }
 
   async cancelSync(jobId: string): Promise<void> { await this.scheduler.cancel(jobId); }
@@ -624,8 +624,8 @@ function keyOf(workspace: string): string {
 
 function snapshot(status: CodeGraphStatusView | undefined): Partial<CodeGraphStatusView> {
   if (!status) return {};
-  const { connected, indexed, files, nodes, edges, lastIndexedAt } = status;
-  return { connected, indexed, files, nodes, edges, lastIndexedAt };
+  const { connected, indexed, files, nodes, edges, lastIndexedAt, syncedAt } = status;
+  return { connected, indexed, files, nodes, edges, lastIndexedAt, syncedAt };
 }
 
 function cancelledError(): Error {

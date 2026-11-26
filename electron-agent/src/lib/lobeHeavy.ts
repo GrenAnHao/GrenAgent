@@ -6,4 +6,6 @@
  * octicons）、Mermaid（elkjs）、EmojiPicker 等全部留在首包里。经这份文件中转，只有这里点名的组件
  * 及其依赖进按需分块。
  */
+// ThemeProvider's CDN font loader is disabled; keep the math styles with Markdown.
+import '@lobe-katex.css';
 export { CodeDiff, Highlighter, Markdown, PatchDiff, SyntaxHighlighter } from '@lobehub/ui';

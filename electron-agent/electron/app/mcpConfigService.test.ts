@@ -24,6 +24,16 @@ async function fixture() {
 }
 
 describe('McpConfigService', () => {
+  it('moves one disabled server between layers, and refuses to overwrite a shadowed name', async () => {
+    const {home,workspace,settings}=await fixture(), service=new McpConfigService(home,settings);
+    await service.upsert(workspace,'project','shared',{command:'project'},true);
+    await expect(service.move(workspace,'project','shared','settings','shared',{command:'edit'},true)).rejects.toThrow('同名');
+    await service.upsert(workspace,'project','single',{command:'old'},false);
+    await service.move(workspace,'project','single','global','single',{command:'edit',env:{LANG:'zh'}},false);
+    expect(await service.list(workspace)).toContainEqual({name:'single',scope:'global',enabled:false,config:{command:'edit',env:{LANG:'zh'}}});
+    expect(await readFile(join(workspace,'.pi','mcp.json'),'utf8')).not.toContain('single');
+  });
+
   it('includes MCP servers persisted in the shared Tauri app state', async () => {
     const { home, workspace } = await fixture();
     const dataDir = await mkdtemp(join(tmpdir(), 'electron-agent-shared-state-'));

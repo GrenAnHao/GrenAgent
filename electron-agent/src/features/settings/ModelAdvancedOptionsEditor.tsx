@@ -16,7 +16,8 @@ const styles = createStaticStyles(({ css }) => ({
   field: css`display:flex;flex-direction:column;gap:6px;min-width:0;`,
   label: css`font-size:var(--pi-font-size,14px);font-weight:600;line-height:1.55;`,
   json: css`
-    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-family:var(--font-mono);
+    font-variant-ligatures: none;
     font-size:12px;
     line-height:1.6;
     &::placeholder { font-family:${cssVar.fontFamily}; }

@@ -1,0 +1,154 @@
+{
+  "transport": "production RpcPeer + createAgentPorts + PiRuntimeService, structuredClone loopback",
+  "original": {
+    "operationId": "host-edit-1",
+    "sessionId": "01a1e8ad-de88-7690-b6ce-06216a0b6cbc",
+    "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+    "ownerEpoch": "a9c8239a-9aed-4fbf-8e7e-0a60864da4f6",
+    "action": "edit",
+    "expectedConditionRevision": 1,
+    "outcome": "committed",
+    "snapshot": {
+      "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+      "revision": 2,
+      "condition": "second",
+      "status": "active",
+      "roundsStarted": 0,
+      "runNumber": 1,
+      "runRoundsStarted": 0,
+      "conditionRevision": 2,
+      "maxRounds": 256,
+      "createdAt": "2026-11-17T08:44:31.249Z",
+      "updatedAt": "2026-11-17T08:44:31.273Z",
+      "ranMs": 0,
+      "runStartedAt": "2026-11-17T08:44:31.249Z"
+    },
+    "status": {
+      "schemaVersion": 1,
+      "sessionId": "01a1e8ad-de88-7690-b6ce-06216a0b6cbc",
+      "source": "live",
+      "ownerEpoch": "a9c8239a-9aed-4fbf-8e7e-0a60864da4f6",
+      "sequence": 3,
+      "snapshot": {
+        "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+        "revision": 2,
+        "condition": "second",
+        "status": "active",
+        "roundsStarted": 0,
+        "runNumber": 1,
+        "runRoundsStarted": 0,
+        "conditionRevision": 2,
+        "maxRounds": 256,
+        "createdAt": "2026-11-17T08:44:31.249Z",
+        "updatedAt": "2026-11-17T08:44:31.273Z",
+        "ranMs": 0,
+        "runStartedAt": "2026-11-17T08:44:31.249Z",
+        "activation": "armed"
+      },
+      "history": [
+        {
+          "source": "event",
+          "kind": "create",
+          "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+          "revision": 1,
+          "at": "2026-11-17T08:44:31.249Z",
+          "payload": {
+            "condition": "first"
+          }
+        },
+        {
+          "source": "event",
+          "kind": "edit",
+          "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+          "revision": 2,
+          "at": "2026-11-17T08:44:31.273Z",
+          "payload": {
+            "condition": "second",
+            "operationId": "host-edit-1",
+            "controlAction": "edit",
+            "expectedRevision": 1,
+            "expectedConditionRevision": 1,
+            "controlRequest": "{\"operationId\":\"host-edit-1\",\"action\":\"edit\",\"goalId\":\"71af5bcc-6765-4c2b-aebf-bb693a28dd1d\",\"expectedRevision\":1,\"expectedConditionRevision\":1,\"condition\":\"second\"}"
+          }
+        }
+      ]
+    },
+    "committedRevision": 2
+  },
+  "replay": {
+    "operationId": "host-edit-1",
+    "sessionId": "01a1e8ad-de88-7690-b6ce-06216a0b6cbc",
+    "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+    "ownerEpoch": "a9c8239a-9aed-4fbf-8e7e-0a60864da4f6",
+    "action": "edit",
+    "expectedConditionRevision": 1,
+    "outcome": "committed",
+    "snapshot": {
+      "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+      "revision": 2,
+      "condition": "second",
+      "status": "active",
+      "roundsStarted": 0,
+      "runNumber": 1,
+      "runRoundsStarted": 0,
+      "conditionRevision": 2,
+      "maxRounds": 256,
+      "createdAt": "2026-11-17T08:44:31.249Z",
+      "updatedAt": "2026-11-17T08:44:31.273Z",
+      "ranMs": 0,
+      "runStartedAt": "2026-11-17T08:44:31.249Z"
+    },
+    "status": {
+      "schemaVersion": 1,
+      "sessionId": "01a1e8ad-de88-7690-b6ce-06216a0b6cbc",
+      "source": "live",
+      "ownerEpoch": "a9c8239a-9aed-4fbf-8e7e-0a60864da4f6",
+      "sequence": 4,
+      "snapshot": {
+        "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+        "revision": 2,
+        "condition": "second",
+        "status": "active",
+        "roundsStarted": 0,
+        "runNumber": 1,
+        "runRoundsStarted": 0,
+        "conditionRevision": 2,
+        "maxRounds": 256,
+        "createdAt": "2026-11-17T08:44:31.249Z",
+        "updatedAt": "2026-11-17T08:44:31.273Z",
+        "ranMs": 0,
+        "runStartedAt": "2026-11-17T08:44:31.249Z",
+        "activation": "armed"
+      },
+      "history": [
+        {
+          "source": "event",
+          "kind": "create",
+          "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+          "revision": 1,
+          "at": "2026-11-17T08:44:31.249Z",
+          "payload": {
+            "condition": "first"
+          }
+        },
+        {
+          "source": "event",
+          "kind": "edit",
+          "goalId": "71af5bcc-6765-4c2b-aebf-bb693a28dd1d",
+          "revision": 2,
+          "at": "2026-11-17T08:44:31.273Z",
+          "payload": {
+            "condition": "second",
+            "operationId": "host-edit-1",
+            "controlAction": "edit",
+            "expectedRevision": 1,
+            "expectedConditionRevision": 1,
+            "controlRequest": "{\"operationId\":\"host-edit-1\",\"action\":\"edit\",\"goalId\":\"71af5bcc-6765-4c2b-aebf-bb693a28dd1d\",\"expectedRevision\":1,\"expectedConditionRevision\":1,\"condition\":\"second\"}"
+          }
+        }
+      ]
+    },
+    "replayed": true,
+    "committedRevision": 2
+  }
+}

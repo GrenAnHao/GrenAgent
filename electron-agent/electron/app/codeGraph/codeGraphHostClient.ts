@@ -1,7 +1,7 @@
 import type { IndexProgress } from '@colbymchenry/codegraph';
 import type { CodeRetrievalTool } from '../../agentData/codeRetrievalProtocol';
 import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
-import type { CodeGraphStatusView } from './codeGraphEngine';
+import type { CodeGraphStatusView, ManualSyncOptions } from './codeGraphEngine';
 import type { CodeSearchView } from './codeGraphService';
 import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, CODEGRAPH_STATE_CHANNEL, CODEGRAPH_SYNC_EVENT_CHANNEL, type CodeGraphDiagSample, type CodeGraphHostMethod, type CodeGraphProgressEvent, type CodeGraphStateEvent, type CodeGraphSyncEvent } from './hostContract';
 import { probeProjects, type ProjectIndexState } from './indexProbe';
@@ -61,12 +61,12 @@ export class CodeGraphHostClient {
     }
   }
 
-  async runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void): Promise<void> {
+  async runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void, options?: ManualSyncOptions): Promise<void> {
     if (this.closed) throw new Error('CodeGraph engine is closed');
     if (onProgress) this.progress.set(jobId, onProgress);
     try {
       // 同一工作区有同步在跑时子进程让它排队（进度先报 queued），不再报 busy。
-      await this.request('codegraph.runSync', { jobId, workspace });
+      await this.request('codegraph.runSync', { jobId, workspace, ...options });
     } finally {
       this.progress.delete(jobId);
     }

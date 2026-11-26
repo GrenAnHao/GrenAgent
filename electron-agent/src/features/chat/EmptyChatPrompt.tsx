@@ -21,7 +21,7 @@ const styles = createStaticStyles(({ css }) => ({
     min-width: 0;
     gap: ${EMPTY_CHAT_BRAND_GAP}px;
     color: ${cssVar.colorTextSecondary};
-    font-size: 12px;
+    font-size: var(--gren-font-secondary);
 
     > span:last-child {
       overflow-wrap: anywhere;
@@ -38,9 +38,9 @@ const styles = createStaticStyles(({ css }) => ({
     min-width: 0;
     max-width: 100%;
     color: ${cssVar.colorText};
-    font-size: clamp(20px, 3.8cqw, 30px);
-    font-weight: 500;
-    line-height: 1.35;
+    font-size: var(--gren-font-heading);
+    font-weight: 600;
+    line-height: 1.3;
     letter-spacing: -0.02em;
     text-wrap: balance;
   `,

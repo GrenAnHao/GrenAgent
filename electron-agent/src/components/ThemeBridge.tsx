@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { useTheme } from 'antd-style';
 import { getCurrentWindow } from '../platform/runtime';
 import { useFontSizeSync } from '../theme/useFontSizeSync';
@@ -21,6 +21,23 @@ export { ANTD_CSS_VAR_KEY };
 export function ThemeBridge() {
   const theme = useTheme();
   useFontSizeSync();
+
+  const previousAppearance = useRef(theme.appearance);
+  useLayoutEffect(() => {
+    if (previousAppearance.current === theme.appearance) return;
+    previousAppearance.current = theme.appearance;
+    if (!window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) return;
+    const root = document.documentElement;
+    root.dataset.themeSwitching = '';
+    // Install before the palette update below; remove after the transition's first painted frame.
+    let timer: number | undefined;
+    const frame = requestAnimationFrame(() => { timer = window.setTimeout(() => { delete root.dataset.themeSwitching; }, 160); });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      delete root.dataset.themeSwitching;
+    };
+  }, [theme.appearance]);
 
   useLayoutEffect(() => {
     // 让 --ant-* 在根元素上就有定义，全树（含非 antd 元素）都能继承到当前明暗的真实值。
@@ -60,15 +77,21 @@ export function ThemeBridge() {
     const palette = workbenchPalette(theme.appearance === 'dark');
     root.setProperty('--gren-titlebar-bg', palette.chrome);
     root.setProperty('--gren-chrome-bg', palette.chrome);
-    root.setProperty('--gren-rail-bg', palette.rail);
-    root.setProperty('--gren-sidebar-bg', theme.colorBgLayout);
-    root.setProperty('--gren-content-bg', theme.colorBgContainer);
+    root.setProperty('--gren-rail-bg', palette.chrome);
+    root.setProperty('--gren-sidebar-bg', palette.sidebar);
+    root.setProperty('--gren-content-bg', palette.content);
     root.setProperty('--gren-accent', theme.colorPrimary);
-    root.setProperty('--gren-chrome-border', `color-mix(in srgb, ${theme.colorBorderSecondary} 55%, transparent)`);
+    root.setProperty('--gren-chrome-border', palette.chromeBorder);
     root.setProperty('--gren-sidebar-hover-bg', `color-mix(in srgb, ${theme.colorText} 5%, transparent)`);
     root.setProperty('--gren-sidebar-active-bg', theme.colorPrimaryBg);
     root.setProperty('--gren-composer-bg', palette.composer);
     root.setProperty('--gren-composer-shadow', palette.composerShadow);
+    root.setProperty('--gren-description', palette.description);
+    root.setProperty('--gren-chart-tooltip-bg', palette.chartTooltip);
+    root.setProperty('--gren-inline-link', palette.inlineLink);
+    root.setProperty('--gren-tool-command', palette.toolCommand);
+    root.setProperty('--gren-scrollbar-thumb', palette.scrollbar);
+    root.setProperty('--gren-scrollbar-thumb-hover', palette.scrollbarHover);
     // 依赖整个 theme 对象：effect 读了十余个 token，逐个列举漏一个就会出现「切换明暗后
     // 某个 --gren-* 不更新」。antd-style 每次渲染重建 theme 对象，而 ThemeBridge 无自身
     // state，只在主题上下文变化时重渲染，因此这里等价于「主题变了就重写」，开销可忽略。

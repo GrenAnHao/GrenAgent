@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-依赖升到精确版本 `1.6.2`，`CODEGRAPH_SDK_VERSION` 与之一致。
+桌面依赖精确锁定 `@colbymchenry/codegraph@1.6.4`，`CODEGRAPH_SDK_VERSION` 与之一致；加载时仍核对实际安装的 SDK 版本。
 
 模型能看见的代码检索只剩 `code_explore`，参数与上游公开 schema 对齐：必填 `query`，可选 `maxFiles`（1–20，默认 12）。不暴露 `projectPath`，工作区仍是当前会话的 `cwd`。提示词、ask/plan 白名单、Fable 默认子代理和增强提示词用的工具表一起收成这一个。
 
@@ -37,12 +37,12 @@ Status: implemented
 
 ## Consequences
 
-1.6.0 建的索引抽取版本是 25，1.6.2 是 27。已有项目需要重新索引才能用上新的解析和路由；这次不自动重建。
+1.6.0、1.6.2 和 1.6.4 的索引抽取版本分别是 25、27 和 29。要让已有索引中的旧文件也使用新版解析与调用关系，需要全量重建；安装依赖时不重建用户项目索引。见 [1.6.4 发布说明](https://github.com/colbymchenry/codegraph/releases/tag/v1.6.4)。
 
 ask/plan 不再放行旧的 `code_*` 名字。Fable 种子版本改为 `2026-10-11.1`，未改过的默认子代理会在下次加载时换成只含 `code_explore` 的模板；用户改过的子代理文件保持原样，里面若仍写着已删除的工具名，调用会找不到工具。
 
-父包 `@colbymchenry/codegraph` 仍受 pnpm `minimumReleaseAge` 约束。1.6.2 发布已超过 24 小时。平台包继续由既有的 `@colbymchenry/codegraph-*` 排除规则放行。
+父包 `@colbymchenry/codegraph` 仍受 pnpm `minimumReleaseAge` 约束。平台包继续由既有的 `@colbymchenry/codegraph-*` 排除规则放行。
 
 ## Verification
 
-verify: n/a 回填的历史决定，源记录（docs/decisions）未记录验证
+1.6.4：在 `electron-agent` 运行 `npm run test:codegraph -- electron/app/codeGraph electron/agentData/codeRetrievalProtocol.test.ts electron/agentData/codegraphTaskRouting.test.ts`，19 个文件、213 项测试通过。Electron 自带的 Node 在临时项目建索引，经 AgentData RPC 搜到源文件中的符号；增量同步、文件监听、枚举契约与平台包的 WASM 资源复制也通过。

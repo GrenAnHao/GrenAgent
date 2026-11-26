@@ -45,7 +45,7 @@ export class RootErrorBoundary extends Component<RootErrorBoundaryProps, RootErr
           padding: 24,
           background: '#0b0d12',
           color: '#e6e6e6',
-          fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans)',
         }}
       >
         <div style={{ fontSize: 16, fontWeight: 600 }}>应用启动出错</div>

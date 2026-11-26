@@ -20,7 +20,7 @@ Status: implemented
 
 ### 开发时渲染层只侦测前端源码的热更
 
-渲染层的 chokidar 只放下 `src/`（不含 `*.test.*` / `*.spec.*`）、`index.html` 和 `electron.vite.config.ts`。其余路径直接 `ignored`。另加一个 `hotUpdate` 插件：漏进模块图的非前端文件返回空更新，不再整页刷新。`electron-vite dev` 默认不 watch 主进程和 preload，这次不打开。
+渲染层监听 `src/`（不含测试）、`index.html` 和 `electron.vite.config.ts`。另有一个精确例外：`extensions/usage-ledger/analytics.ts` 是渲染器实际导入的运行时模块，不只是 TypeScript 类型。它必须同时进入 chokidar 监听和 Vite 热更新，否则前端重新导出新字段时，开发服务还会返回缺少该字段的旧模块，连工作台都无法启动。其余扩展实现、账本写入、测试和构建产物仍不触发前端刷新。主进程和 preload 不开启 watch。
 
 ### Windows 开发服务用 IPv4 回环，保留 localhost 页面地址
 
@@ -50,6 +50,7 @@ Status: implemented
 ### 开发时渲染层只侦测前端源码的热更
 
 - 只在插件里丢掉事件、目录照样全量侦测：`electron/` 和 `out/` 的写入仍会进回调，Windows 上容易漏进刷新。
+- 仅重启开发服务能恢复当下窗口，但下次外部共享契约新增导出仍会复现。保留分页和校验逻辑的单一来源，不在渲染器里复制常量。
 - 关掉渲染层热更：前端改动也要整页刷新，启动页照样闪。
 - 给 main / preload 打开 watch：改主进程会杀掉 Electron 再拉起，比渲染层刷新更闪。
 - 直接设置 `server.host: "127.0.0.1"` 也能稳定绑定 IPv4，但 electron-vite 同时会改页面 URL，导致原 `localhost` 的草稿和界面偏好留在旧 origin。
@@ -64,7 +65,7 @@ Status: implemented
 
 ### 开发时渲染层只侦测前端源码的热更
 
-改 `electron/`、`extensions/`、测试和构建产物不会刷新界面，这些改动要手动重启或自己再改一次前端文件才进页面。改 `src/` 和 `index.html` 仍走原来的热更；没有组件边界的模块仍可能整页刷新。开发服务器要重新启动后，新的侦测范围才生效。
+改 `electron/`、普通扩展实现、测试和构建产物不会刷新界面。改前端源码、用量共享契约或 `index.html` 走热更新；没有组件边界的模块仍可能整页刷新。修改监听规则或主进程 IPC 后，需要重新启动开发实例；窗口内的「重新加载」不会重启开发服务或主进程。
 
 ## Verification
 

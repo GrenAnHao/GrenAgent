@@ -104,6 +104,45 @@ describe('SDK structured queries', () => {
     });
   });
 
+  it('uses the whole index for language counts and file in-degree; links to the referencing file', async () => {
+    const result = await executeCodeGraphTool(graph, workspace, 'codegraph_files', { sort:'references', languageCounts:true, hideIgnored:true, limit:1 });
+    expect(result.structuredContent.rows).toMatchObject([{ file:'src/parser.ts', incomingFiles:1 }]);
+    expect(result.structuredContent.extra).toEqual({ page:{ offset:0,total:3 }, languages:{ typescript:3 } });
+    const refs = await executeCodeGraphTool(graph,workspace,'codegraph_deps',{file:'src/parser.ts',direction:'dependents'});
+    expect(refs.structuredContent.rows).toContainEqual({ file:'src/main.ts',snippet:'dependent' });
+  });
+
+  it('filters before grouping, sorting and paging, and can reveal hidden/generated files without rebuilding', async () => {
+    const paths = ['.agents/a.ts','lib/.cache/a.ts','dist/a.ts','src/gen.ts','src/b.ts','lib/a.ts','src/deep/c.ts','README.ts'];
+    const fake = { getFiles:() => paths.map((path) => ({path,language:'typescript',size:1,nodeCount:1,generated:path==='src/gen.ts'})) } as unknown as Graph;
+    const browse = async (opts:Record<string,unknown>) => (await executeCodeGraphTool(fake, workspace,'codegraph_files',opts)).structuredContent;
+    expect((await browse({format:'children',hideIgnored:true,limit:2}))).toMatchObject({rows:[{file:'src',fileCount:2},{file:'lib',fileCount:1}],extra:{page:{total:3}}});
+    expect((await browse({format:'children',path:'src',hideIgnored:true})).rows.map((r)=>r.file)).toEqual(['src/deep','src/b.ts']);
+    expect((await browse({format:'flat',sort:'name',hideIgnored:true})).rows.map((r)=>r.file)).toEqual(['lib/a.ts','src/b.ts','src/deep/c.ts','README.ts']);
+    expect((await browse({format:'flat',hideIgnored:false})).rows).toHaveLength(paths.length);
+  });
+
+  it('does not let a full page of hidden or generated symbol hits displace visible results', async () => {
+    const parse = graph.getNodesByName('parse')[0];
+    const nodes = Array.from({length:66},(_,i)=>({...parse,id:String(i),filePath:i<64?'.agents/a.ts':i===64?'src/generated.ts':'src/parser.ts'}));
+    const fake = {
+      getFile:(file:string)=>({generated:file==='src/generated.ts'}),
+      searchNodes:(_query:string,{ offset=0,limit }:{offset?:number;limit:number})=>nodes.slice(offset,offset+limit).map(node=>({node})),
+      findRelevantContext:()=>({ nodes:new Map(nodes.map(node=>[node.id,node])), edges:[] }),
+    } as unknown as Graph;
+    const found=await executeCodeGraphTool(fake,workspace,'codegraph_search',{query:'parse',limit:1,hideIgnored:true});
+    expect(found.structuredContent.rows.map(r=>r.file)).toEqual(['src/parser.ts']);
+    const nearby=await executeCodeGraphTool(fake,workspace,'codegraph_explore',{query:'parse',hideIgnored:true});
+    expect(nearby.structuredContent.rows.map(r=>r.file)).toEqual(['src/parser.ts']);
+  });
+
+  it('matches segment search identities by the SDK definition and source position', async () => {
+    const parse=graph.getNodesByName('parse').find(n=>n.filePath==='src/parser.ts')!;
+    const fake={getSegmentMatches:()=>[{name:parse.name,kind:parse.kind,filePath:parse.filePath,startLine:parse.startLine,matchedWords:['parse']}],getNodesByName:(name:string)=>graph.getNodesByName(name)} as unknown as Graph;
+    const found=await executeCodeGraphTool(fake,workspace,'codegraph_search',{mode:'segment',query:'parse'});
+    expect(found.structuredContent.rows.map(r=>r.id)).toEqual([parse.id]);
+  });
+
   it('serializes impact and context subgraphs rather than losing Maps', async () => {
     const impact = await executeCodeGraphTool(graph, workspace, 'codegraph_impact', { symbol: 'parse', file: 'src/parser.ts' });
     expect(impact.structuredContent.nodes.some((node) => node.name === 'main')).toBe(true);

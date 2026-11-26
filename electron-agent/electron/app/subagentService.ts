@@ -13,6 +13,14 @@ import {
 import { foldCatalog, type SubagentCatalogEntry, type SubagentCatalogView } from '../../../extensions/multi-agent/catalog.js';
 import { sampleCatalogRow, type CatalogRowView } from '../../../extensions/multi-agent/catalog-sample.js';
 import type { Delivery } from '../../../extensions/multi-agent/inbox.js';
+import { getRegistry } from '../../../extensions/multi-agent/controlPlane.js';
+import { readSubagentBashState, type SubagentBashState } from '../../../extensions/multi-agent/background-bash.js';
+import {
+  firstSessionOperationBlocker,
+  isSessionOperationBlocked,
+  withSessionOperationGuard,
+} from '../../../extensions/multi-agent/session-operation-guard.js';
+import { workflowHistoryMessages } from './sessionWorkflowData';
 import type { SandboxManager } from './sandbox/sandboxManager';
 
 export interface SubagentItem {
@@ -27,12 +35,62 @@ export interface SubagentItem {
   error: string | null;
   exitCode: number | null;
   transcript: string | null;
+  /** 运行期已观察到首个实质活动（正文/思考/工具调用）；结算后为 0。旧库缺列时为 0。 */
+  responseStarted: number;
   createdAt: number;
   updatedAt: number;
+  bashState?: SubagentBashState;
+}
+
+export type SubagentLookup = { kind: 'found'; item: SubagentItem } | { kind: 'not-found' } | { kind: 'unavailable' };
+
+function projectSubagentRow(
+  row: Record<string, unknown>,
+  thinkingColumn: boolean,
+  sessionColumn: boolean,
+  responseColumn = false,
+): SubagentItem {
+  const bashState = readSubagentBashState(row.bashState);
+  return {
+    id: asString(row.id), task: asString(row.task), status: asString(row.status),
+    model: asNullableString(row.model),
+    thinkingLevel: thinkingColumn ? asNullableString(row.thinkingLevel) : null,
+    sessionPath: sessionColumn ? asNullableString(row.sessionPath) : null,
+    profile: asNullableString(row.profile), output: asNullableString(row.output),
+    error: asNullableString(row.error), exitCode: asNullableNumber(row.exitCode),
+    transcript: null,
+    responseStarted: responseColumn && asNumber(row.responseStarted) > 0 ? 1 : 0,
+    createdAt: asNumber(row.createdAt), updatedAt: asNumber(row.updatedAt),
+    ...(bashState ? { bashState } : {}),
+  };
 }
 
 export class SubagentService {
   constructor(private readonly sandbox?: SandboxManager) {}
+
+  /** 按稳定身份读单行，不受列表的 50 行窗口限制；缺行不代表孩子中断。 */
+  lookup(workspace: string, agentId: string, parentSessionPath: string): SubagentLookup {
+    const id = agentId.trim();
+    if (!id) throw new Error('agentId is required');
+    const parentId = sessionIdFromFileName(parentSessionPath.trim());
+    if (!parentId) return { kind: 'unavailable' };
+    const db = this.openRegistry(workspace);
+    if (!db) return { kind: 'not-found' };
+    try {
+      if (!hasTable(db, 'subagents') || !hasColumn(db, 'subagents', 'parentId')) return { kind: 'not-found' };
+      const sessionColumn = hasColumn(db, 'subagents', 'sessionPath');
+      const thinkingColumn = hasColumn(db, 'subagents', 'thinkingLevel');
+      const bashColumn = hasColumn(db, 'subagents', 'bashState');
+      const responseColumn = hasColumn(db, 'subagents', 'responseStarted');
+      const row = db.prepare(`SELECT id, task, status, model${thinkingColumn ? ', thinkingLevel' : ''}${bashColumn ? ', bashState' : ''}${responseColumn ? ', responseStarted' : ''}, output, error, exitCode, createdAt, updatedAt, profile${sessionColumn ? ', sessionPath' : ''} FROM subagents WHERE id = ? AND parentId = ?`)
+        .get(id, parentId) as Record<string, unknown> | undefined;
+      if (!row) return { kind: 'not-found' };
+      if (sessionColumn && isSessionOperationBlocked(asNullableString(row.sessionPath))) return { kind: 'unavailable' };
+      return { kind: 'found', item: projectSubagentRow(row, thinkingColumn, sessionColumn, responseColumn) };
+    } finally {
+      db.close();
+    }
+  }
 
   /**
    * 项目内的子代理登记。给了 ownerSessionPath 时只返回这份会话派出去的（含子代理再派的孙级）：
@@ -48,8 +106,10 @@ export class SubagentService {
       const owner = ownerSessionPath?.trim();
       if (owner && !parentColumn) return [];
       const thinkingColumn = hasColumn(db, 'subagents', 'thinkingLevel');
+      const bashColumn = hasColumn(db, 'subagents', 'bashState');
+      const responseColumn = hasColumn(db, 'subagents', 'responseStarted');
       const columns = `${sessionColumn ? ', sessionPath' : ''}${parentColumn ? ', parentId' : ''}`;
-      const select = `SELECT id, task, status, model${thinkingColumn ? ', thinkingLevel' : ''}, output, error, exitCode, createdAt, updatedAt, profile${columns} FROM subagents`;
+      const select = `SELECT id, task, status, model${thinkingColumn ? ', thinkingLevel' : ''}${bashColumn ? ', bashState' : ''}${responseColumn ? ', responseStarted' : ''}, output, error, exitCode, createdAt, updatedAt, profile${columns} FROM subagents`;
       let rows: Array<Record<string, unknown>>;
       if (owner) {
         // 先只拿归属要用的短列（有 idx_subagents_listing 时不碰表行），收出归属于这份会话的 id 后，
@@ -64,21 +124,9 @@ export class SubagentService {
       } else {
         rows = db.prepare(`${select} ORDER BY createdAt DESC LIMIT ?`).all(LIST_LIMIT) as Array<Record<string, unknown>>;
       }
-      return rows.map((row) => ({
-        id: asString(row.id),
-        task: asString(row.task),
-        status: asString(row.status),
-        model: asNullableString(row.model),
-        thinkingLevel: thinkingColumn ? asNullableString(row.thinkingLevel) : null,
-        sessionPath: sessionColumn ? asNullableString(row.sessionPath) : null,
-        profile: asNullableString(row.profile),
-        output: asNullableString(row.output),
-        error: asNullableString(row.error),
-        exitCode: asNullableNumber(row.exitCode),
-        transcript: null,
-        createdAt: asNumber(row.createdAt),
-        updatedAt: asNumber(row.updatedAt),
-      }));
+      return rows
+        .filter((row) => !isSessionOperationBlocked(sessionColumn ? asNullableString(row.sessionPath) : null))
+        .map((row) => projectSubagentRow(row, thinkingColumn, sessionColumn, responseColumn));
     } finally {
       db.close();
     }
@@ -87,6 +135,7 @@ export class SubagentService {
   transcript(workspace: string, agentId: string): string | null {
     const id = agentId.trim();
     if (!id) throw new Error('agentId is required');
+    if (isSessionOperationBlocked(this.sessionPathOf(workspace, id))) return null;
     const db = this.openRegistry(workspace);
     if (!db) return null;
     try {
@@ -98,27 +147,52 @@ export class SubagentService {
     }
   }
 
-  /** Read-only: load LLM context messages from a child sub-agent session JSONL (no parent session switch). */
+  /**
+   * Read-only: load a child sub-agent session for the detail panel (no parent session switch).
+   *
+   * Uses the same history projection as the main session so historical relative links keep their
+   * pre-transfer source (`sourceCwd` / `sourceRefs`) instead of resolving against the target project's
+   * same-named file. Child sessions that were moved are still only read here — one-shot children stay
+   * read-only because prompting them is rejected in `promptChild`, not because of this projection.
+   */
   sessionMessages(sessionPath: string): unknown[] {
     const path = sessionPath.trim();
     if (!path || !existsSync(path)) return [];
+    // 半迁移族在读闸门放行前不投影历史：删除 / 恢复后路径可能已经不同。
+    if (isSessionOperationBlocked(path)) return [];
     try {
       const sm = SessionManager.open(path);
-      return sm.buildSessionContext().messages as unknown[];
+      return workflowHistoryMessages(sm) as unknown[];
     } catch {
       return [];
     }
   }
 
   catalog(parentSessionPath: string): SubagentCatalogView {
-    return foldCatalog(parentSessionPath.trim());
+    const path = parentSessionPath.trim();
+    if (isSessionOperationBlocked(path)) return { entries: [], diagnostics: [] };
+    const view = foldCatalog(path);
+    // 子级各自也可能属于别的未完成迁移族：只藏那些，同一个父的其余子级照常显示。
+    const entries = view.entries.filter((entry) => !isSessionOperationBlocked(entry.sessionPath));
+    return entries.length === view.entries.length ? view : { ...view, entries };
   }
 
   catalogRowSample(sessionPath: string): CatalogRowView {
     const path = sessionPath.trim();
+    if (isSessionOperationBlocked(path)) {
+      // 半迁移族不暴露历史行的样本；形状保持可渲染的占位。
+      return {
+        id: '', sessionPath: path, createdAt: 0, mode: 'one-shot', label: '',
+        activity: 'unavailable', hasChildren: false, diagnostic: 'unavailable',
+      };
+    }
     return sampleCatalogRow(identityFromChildMeta(path));
   }
 
+  /**
+   * 外部唤醒子代理：与迁移事务取同一把会话族 lease（父会话 + 子会话路径）。
+   * 迁移正在释放 / 改写这族时这里拿到 busy 或任务被拒，不会把消息投进半迁移的会话。
+   */
   async promptChild(
     workspace: string,
     parentSessionPath: string,
@@ -130,30 +204,62 @@ export class SubagentService {
     if (entry.mode === 'one-shot') {
       throw new Error('cannot prompt a one-shot child: 只读');
     }
-    const activation = getActivationBySessionPath(entry.sessionPath);
-    if (activation) {
-      authorizeParent(activation, workspace);
-      deliverToChild(activation.childId, message, delivery);
-      return;
+    // 半迁移族不唤醒：读闸门先拒（快照不同步时还有异步 probe 兜底），lease 再拦写。
+    if (isSessionOperationBlocked(parentSessionPath) || isSessionOperationBlocked(entry.sessionPath)) {
+      throw new Error('sub-agent session is blocked by an unfinished transfer');
     }
-    await coldResumeAndDeliver(entry.id, entry.sessionPath, message, delivery);
+    const blocker = await firstSessionOperationBlocker({ paths: [parentSessionPath, entry.sessionPath] });
+    if (blocker) throw new Error(blocker.reason);
+    await withSessionOperationGuard([parentSessionPath, entry.sessionPath], async () => {
+      const activation = getActivationBySessionPath(entry.sessionPath);
+      if (activation) {
+        authorizeParent(activation, workspace);
+        deliverToChild(activation.childId, message, delivery);
+        return;
+      }
+      const registry = existsSync(join(subagentsDir(workspace), 'registry.db')) ? getRegistry(workspace) : undefined;
+      await coldResumeAndDeliver(entry.id, entry.sessionPath, message, delivery, ...(registry ? [{ registry }] : []));
+    });
   }
 
-  interruptChild(workspace: string, parentSessionPath: string, sessionPath: string): void {
+  async interruptChild(workspace: string, parentSessionPath: string, sessionPath: string): Promise<void> {
     const entry = resolveCatalogChild(parentSessionPath, sessionPath);
-    const activation = getActivationBySessionPath(entry.sessionPath);
-    if (!activation) return;
-    authorizeParent(activation, workspace);
-    interruptResidentChild(activation.childId);
+    if (isSessionOperationBlocked(parentSessionPath) || isSessionOperationBlocked(entry.sessionPath)) {
+      throw new Error('sub-agent session is blocked by an unfinished transfer');
+    }
+    await withSessionOperationGuard([parentSessionPath, entry.sessionPath], async () => {
+      const activation = getActivationBySessionPath(entry.sessionPath);
+      if (!activation) return;
+      authorizeParent(activation, workspace);
+      interruptResidentChild(activation.childId);
+    });
   }
 
+  /** 停止子代理：同族 lease 保护；登记过的子会话路径也纳入（没登记时只锁 registry.db）。 */
   async cancel(workspace: string, agentId: string): Promise<void> {
     const id = agentId.trim();
     if (!id) throw new Error('agentId is required');
-    const directory = subagentsDir(workspace);
-    this.sandbox?.prepare({ profile: 'workspace', workspaceRoot: workspace, cwd: workspace, writePaths: [directory] });
-    await mkdir(directory, { recursive: true });
-    await appendFile(join(directory, 'cancel-requests.jsonl'), `${JSON.stringify({ agentId: id, at: Date.now() })}\n`);
+    // 没有登记行就没有可迁移的会话路径：不要为停止操作凭空锁项目 registry 文件。
+    const registered = this.sessionPathOf(workspace, id);
+    await withSessionOperationGuard(registered ? [registered] : [], async () => {
+      const directory = subagentsDir(workspace);
+      this.sandbox?.prepare({ profile: 'workspace', workspaceRoot: workspace, cwd: workspace, writePaths: [directory] });
+      await mkdir(directory, { recursive: true });
+      await appendFile(join(directory, 'cancel-requests.jsonl'), `${JSON.stringify({ agentId: id, at: Date.now() })}\n`);
+    });
+  }
+
+  /** 登记的 sessionPath（没有登记 / 旧库没列时 undefined）；只读打开，不建库。 */
+  private sessionPathOf(workspace: string, agentId: string): string | undefined {
+    const db = this.openRegistry(workspace);
+    if (!db) return undefined;
+    try {
+      if (!hasColumn(db, 'subagents', 'sessionPath')) return undefined;
+      const row = db.prepare('SELECT sessionPath FROM subagents WHERE id = ?').get(agentId) as Record<string, unknown> | undefined;
+      return asNullableString(row?.sessionPath) ?? undefined;
+    } finally {
+      db.close();
+    }
   }
 
   private openRegistry(workspace: string): DatabaseSync | null {

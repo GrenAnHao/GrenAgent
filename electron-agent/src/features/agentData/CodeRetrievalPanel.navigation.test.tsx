@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./useProjectOptions', () => ({ useProjectOptions: () => [{ cwd: 'D:/a', name: 'A' }, { cwd: 'D:/b', name: 'B' }] }));
-vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { projects: vi.fn(), status: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
+vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { overview: vi.fn(), projects: vi.fn(), status: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
 vi.mock('../../lib/files', () => ({ files: { read: vi.fn() } }));
 vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
 vi.mock('./CodeSourceLines', async () => await import('./codeSourceLinesStub'));
@@ -17,6 +17,7 @@ import { expectSelectDisplay, pickSelectOption } from './antdSelectTestUtils';
 describe('CodeRetrievalPanel resource navigation', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(agentDataApi.code.overview).mockResolvedValue({ structuredContent: {schemaVersion:1, rows:[], extra:{languages:{}}} });
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([]);
     vi.mocked(agentDataApi.code.status).mockImplementation(async (workspace) => ({ workspace, connected: true, indexed: true }));
     vi.mocked(agentDataApi.code.call).mockResolvedValue({ structuredContent: [] });
@@ -45,7 +46,7 @@ describe('CodeRetrievalPanel resource navigation', () => {
     // 任务视图下线后没有 watchedTaskVersion 回调：普通重渲染不再触发第二次状态读取。
     rerender(<CodeRetrievalPanel navigation={{ ...navigation }} navigationRequest={1} />);
     rerender(<CodeRetrievalPanel navigation={navigation} navigationRequest={1} />);
-    await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(files.read).toHaveBeenCalledTimes(1));
     expect(scrollToLineSpy).toHaveBeenCalledTimes(1);
     rerender(<CodeRetrievalPanel navigation={navigation} navigationRequest={2} />);
     await waitFor(() => expect(scrollToLineSpy).toHaveBeenCalledTimes(2));
@@ -53,8 +54,8 @@ describe('CodeRetrievalPanel resource navigation', () => {
 
   it('refuses unknown workspaces and outside files without reading or creating tasks', async () => {
     const { rerender } = render(<CodeRetrievalPanel navigation={{ view: 'code', workspace: 'D:/removed', file: 'a.ts' }} navigationRequest={1} />);
-    await waitFor(() => expect(agentDataApi.code.projects).toHaveBeenCalled());
-    expect(agentDataApi.code.status).not.toHaveBeenCalled();
+    await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledWith('D:/a'));
+    expect(agentDataApi.code.status).not.toHaveBeenCalledWith('D:/removed');
     expect(agentDataApi.code.call).not.toHaveBeenCalled();
     rerender(<CodeRetrievalPanel navigation={{ view: 'code', workspace: 'D:/a', file: '../outside.ts' }} navigationRequest={2} />);
     await screen.findByText('无法确认该文件位于当前项目内，未打开文件。');
@@ -84,13 +85,13 @@ describe('CodeRetrievalPanel resource navigation', () => {
     expect((screen.getByLabelText('搜索代码') as HTMLInputElement).value).toBe('alpha query');
   });
 
-  it('surfaces the sync state banner after starting a sync, without a task list', async () => {
+  it('shows a pending manual sync in the toolbar without inserting a banner', async () => {
     vi.mocked(agentDataApi.jobs.create).mockResolvedValue({ id: 'job-1', workspace: 'D:/a', kind: 'codegraph.sync', state: 'running', progress: 0, createdAt: 1, updatedAt: 1 });
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/a', connected: true, indexed: true });
     render(<CodeRetrievalPanel initialProject="D:/a" />);
     fireEvent.click(await screen.findByRole('button', { name: '同步索引' }));
-    // 横幅不再来自任务列表，而是读 status 轮询的结果。
-    await screen.findByText(/已开始同步/);
+    await waitFor(() => expect(screen.getByTestId('code-index-state').textContent).toBe('同步中'));
+    expect(screen.queryByText(/已开始同步/)).toBeNull();
     expect(screen.queryByText(/查看任务/)).toBeNull();
   });
 

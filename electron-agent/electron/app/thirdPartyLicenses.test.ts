@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
 const require = createRequire(import.meta.url);
@@ -10,16 +10,22 @@ const script = require('../../scripts/collect-third-party-licenses.cjs') as {
   collect: (opts?: { out?: string; report?: string }) => { outDir: string; count: number; missing: number };
   buildInventory: () => Array<{ name: string; version: string; license: string; files: string[]; directory: string }>;
   packedExclusions: () => string[];
-  renderReport: (inventory: unknown, generatedBy: string) => string;
 };
 
 const root = resolve(__dirname, '../..');
 const repoRoot = resolve(root, '..');
 
 describe('collect-third-party-licenses', () => {
-  const created: string[] = [];
-  afterEach(() => {
-    for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
+  let out: string;
+  let inventory: ReturnType<typeof script.buildInventory>;
+  let result: ReturnType<typeof script.collect>;
+  beforeAll(() => {
+    out = mkdtempSync(join(tmpdir(), 'licenses-'));
+    inventory = script.buildInventory();
+    result = script.collect({ out });
+  }, 90_000);
+  afterAll(() => {
+    if (out) rmSync(out, { recursive: true, force: true });
   });
 
   it('excludes exactly what electron-builder keeps out of the bundle', () => {
@@ -33,7 +39,6 @@ describe('collect-third-party-licenses', () => {
   });
 
   it('lists installed production dependencies, dev ones excluded', () => {
-    const inventory = script.buildInventory();
     const names = new Set(inventory.map((entry) => entry.name));
     expect(names.has('react')).toBe(true);
     expect(names.has('mermaid')).toBe(true);
@@ -54,9 +59,6 @@ describe('collect-third-party-licenses', () => {
   });
 
   it('copies the license texts that carry obligations the bundle must satisfy', () => {
-    const out = mkdtempSync(join(tmpdir(), 'licenses-'));
-    created.push(out);
-    const result = script.collect({ out });
     expect(result.count).toBeGreaterThan(800);
 
     // EPL-2.0（elkjs）：随附原文，且正文是 EPL 而非别的许可。
@@ -67,9 +69,12 @@ describe('collect-third-party-licenses', () => {
     expect(readFileSync(join(out, '@fontsource/inter', 'LICENSE'), 'utf8')).toContain('SIL Open Font License');
 
     // 双许可包两个文件都在（dompurify 是 MPL-2.0 OR Apache-2.0，按 Apache 履行）。
-    for (const version of ['3.4.14', '3.4.17']) {
-      expect(existsSync(join(out, 'dompurify', version, 'LICENSE'))).toBe(true);
-      expect(existsSync(join(out, 'dompurify', version, 'LICENSE-MPL'))).toBe(true);
+    const dompurify = inventory.filter((entry) => entry.name === 'dompurify');
+    expect(dompurify.length).toBeGreaterThan(0);
+    for (const { version } of dompurify) {
+      const dir = dompurify.length === 1 ? join(out, 'dompurify') : join(out, 'dompurify', version);
+      expect(readFileSync(join(dir, 'LICENSE'), 'utf8')).toMatch(/Apache License\s+Version 2\.0/);
+      expect(readFileSync(join(dir, 'LICENSE-MPL'), 'utf8')).toContain('Mozilla Public License Version 2.0');
     }
 
     // 本仓库的许可与第三方来源说明也一并给出。
@@ -79,9 +84,6 @@ describe('collect-third-party-licenses', () => {
   });
 
   it('leaves a placeholder for packages that ship no license file', () => {
-    const out = mkdtempSync(join(tmpdir(), 'licenses-'));
-    created.push(out);
-    const result = script.collect({ out });
     expect(result.missing).toBeGreaterThan(0);
     // Pi SDK 的 npm 发布物没有 LICENSE（files 未包含），许可证由 package.json 的 MIT 声明。
     const placeholder = readFileSync(join(out, '@earendil-works/pi-coding-agent', 'LICENSE-MISSING.txt'), 'utf8');
@@ -90,7 +92,7 @@ describe('collect-third-party-licenses', () => {
   });
 
   it('keeps the committed dependency report in sync with the installed production graph', () => {
-    const expected = script.renderReport(script.buildInventory(), 'electron-agent/scripts/collect-third-party-licenses.cjs');
+    const expected = readFileSync(join(out, 'INDEX.md'), 'utf8');
     const committed = readFileSync(join(repoRoot, 'docs/third-party-dependencies.md'), 'utf8');
     // 依赖变更后跑 `node scripts/collect-third-party-licenses.cjs --report=../docs/third-party-dependencies.md`。
     expect(committed).toBe(expected);

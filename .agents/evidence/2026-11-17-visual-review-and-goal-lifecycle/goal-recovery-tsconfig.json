@@ -1,0 +1,15 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "compilerOptions": { "composite": false, "noEmit": true },
+  "include": [
+    "../../../extensions/goal/control.ts",
+    "../../../extensions/goal/control.test.ts",
+    "../../../extensions/goal/continue.ts",
+    "../../../extensions/goal/continue.test.ts",
+    "../../../extensions/goal/recover-owner-loss.ts",
+    "../../../extensions/goal/recover-owner-loss.test.ts",
+    "../../../extensions/goal/status.ts",
+    "../../../extensions/goal/status.test.ts",
+    "../../../extensions/goal/lifecycle.test.ts"
+  ]
+}

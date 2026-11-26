@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import { createRoot } from 'react-dom/client'
 import HarnessRoot from './HarnessRoot'
+import { installScenarioClock } from './probeClock.mjs'
 import { forceEagerImages } from '../src/lib/forceEagerImages'
 // 和 src/main.tsx 一样：全局样式 + 图片强制 eager
 import '../src/index.css'
@@ -26,6 +27,10 @@ async function boot(): Promise<void> {
     ui.__uiErrors.push(`没有这个场景：${name}`)
     return
   }
+  const uninstallClock = installScenarioClock(name)
+  if (uninstallClock) window.addEventListener('pagehide', (event) => {
+    if (!event.persisted) uninstallClock()
+  })
   const { default: Scenario } = await load()
   createRoot(document.getElementById('root')!).render(
     <HarnessRoot>

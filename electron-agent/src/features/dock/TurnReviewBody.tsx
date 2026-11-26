@@ -103,6 +103,7 @@ const styles = createStaticStyles(({ css }) => ({
   totals: css`
     flex-shrink: 0;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;

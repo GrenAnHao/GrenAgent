@@ -5,6 +5,8 @@ import { UserMessage } from './UserMessage';
 import { TurnTimeline, TurnTimelineRow } from './TurnTimeline';
 import { buildTurnRows, type TurnRow } from './turnRows';
 import { NoticePill } from './NoticePill';
+import { RuleInjectionPill } from './RuleInjectionPill';
+import { RULE_INJECTION_ENTRY } from '@extensions/context-rules/injectionNotice';
 import { SubagentSettledPill } from './SubagentSettledPill';
 import { JobDonePill } from './JobDonePill';
 import { AgentMessagePill } from './AgentMessagePill';
@@ -101,16 +103,18 @@ export function renderMessageBody(
         return <AgentMessagePill content={msg.text} timestamp={msg.timestamp} />;
       }
       return (
-        <UserMessage
-          id={msg.id}
-          text={msg.text}
-          images={msg.images}
-          timestamp={msg.timestamp}
-          entryId={msg.entryId}
-          steering={msg.steering}
-          steerState={msg.steerState}
-          promptFrame={msg.promptFrame}
-        />
+        <span data-source-cwd={msg.sourceCwd} style={{ display: 'contents' }}>
+          <UserMessage
+            id={msg.id}
+            text={msg.text}
+            images={msg.images}
+            timestamp={msg.timestamp}
+            entryId={msg.entryId}
+            steering={msg.steering}
+            steerState={msg.steerState}
+            promptFrame={msg.promptFrame}
+          />
+        </span>
       );
     case 'turn':
       return (
@@ -166,8 +170,9 @@ export function renderMessageBody(
         />
       );
     case 'compaction':
-      return <CompactionDivider label="已压缩" testId="compaction-done" />;
+      return <CompactionDivider phase="done" />;
     case 'notice':
+      if (msg.customType === RULE_INJECTION_ENTRY) return <RuleInjectionPill details={msg.details} />;
       if (msg.customType === 'agent-answer') return <AnswerCard content={msg.content} />;
       if (msg.customType === 'agent-plan') return <PlanSummaryCard content={msg.content} />;
       if (msg.customType === 'agent-plan-missing') return <PlanMissingNotice content={msg.content} />;
@@ -178,7 +183,7 @@ export function renderMessageBody(
       if (msg.customType === 'subagent-settled') return <SubagentSettledPill content={msg.content} details={msg.details} timestamp={msg.sourceTimestamp} />;
       if (msg.customType === 'job-done') return <JobDonePill content={msg.content} details={msg.details} timestamp={msg.sourceTimestamp} />;
       if (msg.customType === 'agent-message') return <AgentMessagePill content={msg.content} details={msg.details} timestamp={msg.sourceTimestamp} />;
-      if (msg.customType === 'goal-round') return <GoalRoundPill content={msg.content} />;
+      if (msg.customType === 'goal-round') return <GoalRoundPill content={msg.content} details={msg.details} />;
       if (msg.customType === 'ui-prompt-receipt') return <UiPromptReceipt content={msg.content} />;
       return <NoticePill customType={msg.customType} content={msg.content} />;
     case 'command-input':

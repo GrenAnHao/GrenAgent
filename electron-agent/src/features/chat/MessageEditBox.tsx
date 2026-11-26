@@ -52,7 +52,6 @@ const styles = createStaticStyles(({ css }) => ({
     }
   `,
   body: css`
-    scrollbar-width: thin;
 
     overflow-y: auto;
 

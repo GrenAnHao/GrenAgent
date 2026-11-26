@@ -1,4 +1,5 @@
-import { Button, Modal } from '@lobehub/ui';
+import { Modal } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../components/WorkbenchButton';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useEffect, useState } from 'react';
 
@@ -32,7 +33,8 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 9px;
     background: ${cssVar.colorFillQuaternary};
     color: ${cssVar.colorText};
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     font-size: 13px;
 
     &:focus {
@@ -65,7 +67,8 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 10px;
     background: ${cssVar.colorFillQuaternary};
     color: ${cssVar.colorText};
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.55;
     resize: vertical;

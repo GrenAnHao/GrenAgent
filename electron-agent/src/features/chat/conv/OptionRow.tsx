@@ -35,6 +35,7 @@ const styles = createStaticStyles(({ css }) => ({
     flex: none;
     width: 12px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 10.5px;
     color: ${cssVar.colorTextQuaternary};
   `,

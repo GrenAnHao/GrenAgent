@@ -32,6 +32,8 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorText};
   `,
   projectContextPanelPath: css`
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     overflow: hidden;
     font-size: 11px;
     font-weight: 400;
@@ -186,8 +188,10 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     border-radius: 9px;
 
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     /* 中性计数色：colorPrimaryBg 在暗色模式下偏闷、与 chip 撞色不好看，改用中性 fill + 次级文字色，明暗两套都干净。 */
     color: ${cssVar.colorTextSecondary};
 
@@ -232,7 +236,6 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     }
   `,
   list: css`
-    scrollbar-width: thin;
     overflow-y: auto;
     flex: 1;
     padding: 4px;

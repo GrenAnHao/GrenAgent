@@ -1,15 +1,19 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getApprovalPolicy, setApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
 import { getAgentMode, hasAgentMode, setAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
 import { setSessionPlan, __resetPlanStateForTest } from '../../../extensions/agent-mode/planState.js';
 import { createPlan } from '../../../extensions/agent-mode/plan.js';
+import { beginCompactionIntent, getCompactionActivity, forgetCompactionActivity, observeCompactionEvent } from '../../../extensions/_shared/compaction-activity.js';
+import { sessionOperationLeases } from './sessionOperationLease.js';
 import { PiRuntimeService, type AgentHostPort } from './piRuntimeService';
 import { AgentDataService } from './agentDataService';
 import { AgentDataRuntime } from '../agentData/runtime';
 import { SessionManager } from '../../../cli/src/pi-sdk.js';
+import { askUserDraftPath, readAskUserDraft, writeAskUserDraft } from '../agent/askUserDraft';
 import {
   readRequestedPreferences,
   readSessionPreferences,
@@ -1384,6 +1388,64 @@ describe('进程内宿主交互路径', () => {
       expect(front.prompt).toHaveBeenCalledWith('to front', expect.anything(), 'main');
     });
 
+    it('manual compact stays bound to its original parked session through foreground changes and abort', async () => {
+      const { parked, front, host, foreground } = twoHandles();
+      parked.session.isStreaming = false;
+      let finish!: () => void;
+      parked.session.compact = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      const targetSessionPath = parked.session.sessionFile;
+      const pending = service.send('C:/work', 'agent_compact', { targetSessionPath });
+      await vi.waitFor(() => expect(parked.session.compact).toHaveBeenCalledTimes(1));
+      expect(front.session.compact).not.toHaveBeenCalled();
+      expect(foreground()).toBe(front);
+      const intent = getCompactionActivity(parked.session.sessionId);
+      expect(intent).toMatchObject({ origin: 'user-manual', phase: 'preparing', operationId: expect.any(String) });
+      expect(service.listRunningTurns()).toEqual(expect.arrayContaining([expect.objectContaining({ sessionId: 'parked',
+        isStreaming: false, isCompacting: true, compaction: expect.objectContaining({ operationId: intent!.operationId }) })]));
+      await service.send('C:/work', 'agent_abort', { targetSessionPath });
+      expect(parked.session.abort).toHaveBeenCalledTimes(1);
+      expect(front.session.abort).not.toHaveBeenCalled();
+      // Abort RPC is only a request: no SDK compaction_end yet, so the activity stays live.
+      expect(getCompactionActivity(parked.session.sessionId)?.operationId).toBe(intent!.operationId);
+      observeCompactionEvent({ sessionId: parked.session.sessionId }, { type: 'compaction_end', aborted: true });
+      finish();
+      await pending;
+      expect(getCompactionActivity(parked.session.sessionId)).toBeUndefined();
+      forgetCompactionActivity(parked.session.sessionId);
+    });
+
+    it('stale compact intent cannot bypass an external exclusive lease or blocked transfer journal', async () => {
+      const { parked, front, host } = twoHandles();
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      const targetSessionPath = parked.session.sessionFile;
+      const coordinator = sessionOperationLeases('C:/a');
+      const external = await coordinator.acquire([targetSessionPath], { owner: 'external-transfer' });
+      beginCompactionIntent({ sessionId: parked.session.sessionId }, 'user-manual');
+      try {
+        await expect(service.send('C:/work', 'agent_abort', { targetSessionPath })).rejects.toThrow('SESSION_OPERATION_LEASE_BUSY');
+        await expect(service.send('C:/work', 'agent_get_state', { targetSessionPath })).rejects.toThrow('SESSION_OPERATION_LEASE_BUSY');
+        expect(parked.session.abort).not.toHaveBeenCalled();
+        expect(front.session.abort).not.toHaveBeenCalled();
+      } finally { await external.release(); }
+      coordinator.setBlockerProbe({ blocked: async () => [{ path: targetSessionPath, reason: 'unfinished transfer journal' }] });
+      try {
+        await expect(service.send('C:/work', 'agent_abort', { targetSessionPath })).rejects.toThrow('SESSION_OPERATION_LEASE_BLOCKED');
+        await expect(service.send('C:/work', 'agent_get_state', { targetSessionPath })).rejects.toThrow('SESSION_OPERATION_LEASE_BLOCKED');
+        expect(parked.session.abort).not.toHaveBeenCalled();
+      } finally { coordinator.setBlockerProbe(undefined); forgetCompactionActivity(parked.session.sessionId); }
+    });
+
+    it('manual compact rejects a released target instead of compressing the foreground session', async () => {
+      const { parked, front, handles, host } = twoHandles();
+      handles.splice(handles.indexOf(parked), 1);
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      await expect(service.send('C:/work', 'agent_compact', { targetSessionPath: parked.session.sessionFile }))
+        .rejects.toThrow('SESSION_NOT_LIVE');
+      expect(front.session.compact).not.toHaveBeenCalled();
+      expect(parked.session.compact).not.toHaveBeenCalled();
+    });
+
     it('目标会话已不在任何 handle 上时 abort 不落到别的会话，并回一个「已停」回执', async () => {
       const { parked, front, host } = twoHandles();
       const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
@@ -1407,7 +1469,69 @@ describe('进程内宿主交互路径', () => {
         const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
         const result = await service.send('C:/work', 'agent_get_messages', { targetSessionPath: path }) as { messages: Array<Record<string, unknown>> };
         expect(result.messages).toEqual([expect.objectContaining({ role: 'user', content: 'from disk', entryId: expect.any(String) })]);
+        const projection = vi.spyOn(SessionManager.prototype, 'buildSessionProjection');
+        try {
+          await expect(service.send('C:/work', 'agent_get_messages', { targetSessionPath: path, userEntriesOnly: true })).resolves.toEqual({
+            messages: [{ role: 'user', entryId: result.messages[0]!.entryId, timestamp: 1 }],
+          });
+          expect(projection).not.toHaveBeenCalled();
+        } finally {
+          projection.mockRestore();
+        }
         await expect(service.send('C:/other', 'agent_get_messages', { targetSessionPath: path })).rejects.toThrow('SESSION_WORKSPACE_MISMATCH');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('looks up user IDs on the parked live branch without reading or projecting any content', async () => {
+      const { parked, front, host, foreground } = twoHandles();
+      const dir = await mkdtemp(join(tmpdir(), 'user-entry-lookup-'));
+      const noContent = () => { throw new Error('message content must not be read'); };
+      const projection = vi.fn(noContent);
+      parked.session.sessionManager = {
+        getBranch: () => [
+          { type: 'message', id: 'u1', message: { role: 'user', timestamp: 13, get content() { return noContent(); } } },
+          { type: 'message', id: 'a1', message: { role: 'assistant', get content() { return noContent(); } } },
+          { type: 'message', id: 'u2', message: { role: 'user', timestamp: 32, get content() { return noContent(); } } },
+        ],
+        buildSessionProjection: projection,
+      };
+      try {
+        const service = new PiRuntimeService({ agentDir: dir, agentHost: host, modelRuntimeHost: noopModelHost });
+        await expect(service.send('C:/work', 'agent_get_messages', { targetSessionPath: parked.session.sessionFile, userEntriesOnly: true })).resolves.toEqual({
+          messages: [{ role: 'user', entryId: 'u1', timestamp: 13 }, { role: 'user', entryId: 'u2', timestamp: 32 }],
+        });
+        expect(projection).not.toHaveBeenCalled();
+        expect(foreground()).toBe(front);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('cleans only the draft of the responding live question and ignores draft writes arriving after ack', async () => {
+      const { parked, front, host } = twoHandles();
+      const dir = await mkdtemp(join(tmpdir(), 'ask-user-owner-'));
+      const path = join(dir, 'parked.jsonl');
+      const foregroundPath = join(dir, 'front.jsonl');
+      parked.session.sessionFile = path;
+      front.session.sessionFile = foregroundPath;
+      let pending = true;
+      parked.ui.hasPending = (id: string) => pending && id === 'request-a';
+      parked.ui.pendingAskUserRequestId = () => pending ? 'request-a' : undefined;
+      parked.ui.respond = vi.fn(() => { pending = false; });
+      front.ui.hasPending = () => false;
+      const draft = { toolCallId: 'call-a', selected: {}, customTexts: {}, extraText: '', extraImages: [] };
+      try {
+        await Promise.all([writeAskUserDraft(path, draft), writeAskUserDraft(foregroundPath, draft)]);
+        const service = new PiRuntimeService({ agentDir: dir, agentHost: host, modelRuntimeHost: noopModelHost });
+        await service.respondUi('C:/work', { id: 'request-a', value: 'yes', askUserDraftToolCallId: draft.toolCallId });
+        expect(parked.ui.respond).toHaveBeenCalledOnce();
+        expect(front.ui.respond).not.toHaveBeenCalled();
+        await service.send('C:/work', 'ask_user_draft_write', { targetSessionPath: path, requestId: 'request-a', draft });
+        await expect(readAskUserDraft(path, draft.toolCallId)).resolves.toBeNull();
+        await expect(readFile(askUserDraftPath(path), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(readAskUserDraft(foregroundPath, draft.toolCallId)).resolves.toEqual(draft);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -1423,7 +1547,11 @@ describe('进程内宿主交互路径', () => {
       parked.session.sessionManager = { getEntries: () => [goalEntry('create', 1, { condition: '写完' })] };
       const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
       const result = await service.send('C:/work', 'agent_get_goal', { targetSessionPath: 'C:\\sessions\\parked.jsonl' }) as Record<string, any>;
-      expect(result).toMatchObject({ schemaVersion: 1, sessionId: 'parked', snapshot: { goalId: 'g1', status: 'active', condition: '写完', activation: 'disarmed' } });
+      expect(result).toMatchObject({ schemaVersion: 1, source: 'live', sessionId: 'parked', snapshot: { goalId: 'g1', status: 'active', condition: '写完', activation: 'disarmed', runNumber: 1, runRoundsStarted: 0, conditionRevision: 1 } });
+      expect(result.ownerEpoch).toEqual(expect.any(String));
+      const pulledAgain = await service.send('C:/work', 'agent_get_goal', { targetSessionPath: 'C:\\sessions\\parked.jsonl' }) as Record<string, any>;
+      expect(pulledAgain.ownerEpoch).toBe(result.ownerEpoch);
+      expect(pulledAgain.sequence).toBeGreaterThan(result.sequence);
       expect(parked.prompt).not.toHaveBeenCalled();
       expect(front.prompt).not.toHaveBeenCalled();
       expect(host.focus).not.toHaveBeenCalled();
@@ -1440,7 +1568,8 @@ describe('进程内宿主交互路径', () => {
         await writeFile(path, [sm.getHeader(), ...sm.getEntries()].map((item) => JSON.stringify(item)).join('\n') + '\n');
         const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
         const result = await service.send('C:/work', 'agent_get_goal', { targetSessionPath: path }) as Record<string, any>;
-        expect(result).toMatchObject({ sessionId: sm.getSessionId(), snapshot: { condition: '重启后还在', status: 'active', activation: 'disarmed' } });
+        expect(result).toMatchObject({ source: 'offline', sessionId: sm.getSessionId(), snapshot: { condition: '重启后还在', status: 'active', activation: 'disarmed' } });
+      expect(result.ownerEpoch).toBeUndefined();
         expect(result.history).toHaveLength(1);
         expect(front.prompt).not.toHaveBeenCalled();
         await expect(service.send('C:/other', 'agent_get_goal', { targetSessionPath: path })).rejects.toThrow('SESSION_WORKSPACE_MISMATCH');
@@ -1683,6 +1812,49 @@ describe('会话偏好（session-preferences）', () => {
         revision: 2,
       });
       expect(state.unavailable).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('另一个项目持有迁移锁时，目标会话的偏好读取等自身短锁释放，写入仍拒绝占锁', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-prefs-lease-'));
+    try {
+      const movingWorkspace = join(root, 'moving');
+      const otherWorkspace = join(root, 'other');
+      await Promise.all([mkdir(movingWorkspace), mkdir(otherWorkspace)]);
+      const moving = await realManager(root, movingWorkspace);
+      const other = await realManager(root, otherWorkspace);
+      const preferences = { thinkingLevel: 'low', mode: 'ask', revision: 1 };
+      other.sm.appendCustomEntry('session-preferences', preferences);
+      await other.write();
+
+      const { host } = fakeAgentHost();
+      const service = new PiRuntimeService({ agentDir: root, agentHost: host, modelRuntimeHost: noopModelHost });
+      const leases = sessionOperationLeases(root);
+      const movingLease = await leases.acquire([moving.file], { owner: 'transfer' });
+      try {
+        const otherLease = await leases.acquire([other.file], { owner: 'history-load' });
+        try {
+          const target = { targetSessionPath: other.file };
+          const release = delay(100).then(() => otherLease.release());
+          try {
+            await Promise.all([
+              expect(service.send(otherWorkspace, 'agent_set_mode', { ...target, mode: 'plan' }))
+                .rejects.toMatchObject({ code: 'SESSION_OPERATION_LEASE_BUSY' }),
+              expect(service.send(otherWorkspace, 'agent_get_state', target))
+                .resolves.toMatchObject({ sessionPath: other.file, sessionId: other.sm.getSessionId(), preferences }),
+            ]);
+          } finally {
+            await release;
+          }
+          await movingLease.assertOwned();
+        } finally {
+          await otherLease.release();
+        }
+      } finally {
+        await movingLease.release();
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -2692,6 +2864,35 @@ describe('agent_get_session_defaults 只读项目默认，不继承当前会话'
     } finally {
       __resetAgentModeForTest();
       __resetApprovalForTest();
+    }
+  });
+
+  it('不押前景会话锁：回合持锁时仍可读项目默认，无 target 的 get_state 仍报 busy', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-defaults-lease-'));
+    try {
+      const workspace = join(root, 'work');
+      await mkdir(workspace);
+      const sm = SessionManager.create(workspace, root);
+      sm.appendMessage({ role: 'user', content: 'seed', timestamp: 1 } as never);
+      const file = sm.getSessionFile()!;
+      await writeFile(file, [sm.getHeader(), ...sm.getEntries()].map((e) => JSON.stringify(e)).join('\n') + '\n');
+      const handle = fakeHandle({ sessionId: 'sid-a', sessionFile: file });
+      const { host } = fakeAgentHost(handle);
+      const service = new PiRuntimeService({ agentDir: root, agentHost: host, modelRuntimeHost: noopModelHost });
+      await service.openWorkspace(workspace);
+      const turn = await sessionOperationLeases(root).acquire([file], { owner: 'running-turn' });
+      try {
+        // 运行中的回合持有前景会话锁：无 target 的 get_state 仍要过锁，立即 busy。
+        await expect(service.send(workspace, 'agent_get_state', {}))
+          .rejects.toMatchObject({ code: 'SESSION_OPERATION_LEASE_BUSY' });
+        // 草稿初始化的 defaults 读是纯配置投影，不押会话锁，照常返回项目默认。
+        await expect(service.send(workspace, 'agent_get_session_defaults', {}))
+          .resolves.toMatchObject({ mode: 'agent', approval: 'auto', revision: 0 });
+      } finally {
+        await turn.release();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Failure fixture</title>
+<style>
+  * { box-sizing: border-box } body { font: 16px system-ui; background: #172335; color: white; margin: 32px }
+  p { color: #a6b8ca } input, button { font: inherit; border: 0; padding: 10px 14px; border-radius: 5px }
+  button { margin-left: 8px; background: #9fe5d1; color: #10211d } small { color: #9fe5d1 }
+</style>
+<small>UI HARNESS · SYNTHETIC FIXTURE</small>
+<h1>First observation</h1>
+<p>The button receives the press; the count stays at zero.</p>
+<input aria-label="Synthetic input" type="password"><button data-testid="receiver">Inspect</button>
+<script>
+  window.__uiReady = location.hash !== '#not-ready'
+  window.__uiErrors = location.hash === '#page-error' ? ['Synthetic page error'] : []
+  window.__uiActions = { reset(value) { document.querySelector('input').value = value } }
+</script></html>

@@ -26,7 +26,7 @@ const MODULES: ModuleDef[] = [
 
 // 改用 createStaticStyles（与 dockTabStyles 等同一套写法）而非内联 style：内联写不出 hover，
 // 且原先激活态只有 colorFillTertiary（暗色下约 6% 白）+ colorText，几乎看不出选中。
-// 激活态用柔和强调色底和图标色，和会话栏的中性选中态区分。
+// 选中态只消费主题的品牌前景、淡底与描边；切换时按钮盒保持原位。
 const styles = createStaticStyles(({ css }) => ({
   rail: css`
     display: flex;
@@ -53,7 +53,7 @@ const styles = createStaticStyles(({ css }) => ({
 
     width: 36px;
     height: 36px;
-    border: none;
+    border: 1px solid transparent;
     border-radius: 8px;
 
     color: ${cssVar.colorTextSecondary};
@@ -71,12 +71,13 @@ const styles = createStaticStyles(({ css }) => ({
     }
   `,
   itemActive: css`
-    color: var(--gren-accent, ${cssVar.colorPrimary});
-    background: color-mix(in srgb, var(--gren-accent, ${cssVar.colorPrimary}) 12%, transparent);
+    border-color: ${cssVar.colorPrimaryBorder};
+    color: ${cssVar.colorPrimary};
+    background: ${cssVar.colorPrimaryBg};
 
     &:hover {
-      color: var(--gren-accent, ${cssVar.colorPrimary});
-      background: color-mix(in srgb, var(--gren-accent, ${cssVar.colorPrimary}) 16%, transparent);
+      color: ${cssVar.colorPrimary};
+      background: ${cssVar.colorPrimaryBgHover};
     }
   `,
 }));

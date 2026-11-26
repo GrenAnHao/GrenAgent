@@ -3,17 +3,18 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('xterm/css/xterm.css', () => ({}));
+const { openTerm, writeTerm } = vi.hoisted(() => ({ openTerm: vi.fn(), writeTerm: vi.fn() }));
 vi.mock('xterm', () => ({
   Terminal: class {
     options: Record<string, unknown> = {};
     rows = 0;
     cols = 0;
     loadAddon() {}
-    open() {}
+    open = openTerm;
     onData() {
       return { dispose() {} };
     }
-    write() {}
+    write = writeTerm;
     focus() {}
     refresh() {}
     dispose() {}
@@ -58,6 +59,28 @@ afterEach(() => {
 });
 
 describe('TerminalBody', () => {
+  it('buffers early PTY output until xterm can measure its real font', async () => {
+    let release!: () => void;
+    const loading = new Promise<void>(resolve => { release = resolve; });
+    const descriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { check: () => false, load: () => loading } });
+    openTerm.mockClear();
+    writeTerm.mockClear();
+    try {
+      useDockStore.setState({ tabs: [termTab], activeByRegion: { right: null, bottom: termTab.id } });
+      render(<TerminalBody tab={termTab} active />);
+      await waitFor(() => expect(useDockStore.getState().tabs.find(t => t.id === termTab.id)?.payload).toMatchObject({ shellId: 'sh-1' }));
+      for (const listener of activeShellListeners) listener({ type: 'output', session_id: 'sh-1', data: 'ready>' });
+      expect(openTerm).not.toHaveBeenCalled();
+      expect(writeTerm).not.toHaveBeenCalled();
+      release();
+      await waitFor(() => expect(writeTerm).toHaveBeenCalledWith('ready>'));
+      expect(openTerm).toHaveBeenCalledTimes(1);
+    } finally {
+      if (descriptor) Object.defineProperty(document, 'fonts', descriptor);
+      else Reflect.deleteProperty(document, 'fonts');
+    }
+  });
   it('starts a shell on mount and reports running status into dockStore', async () => {
     useDockStore.setState({ tabs: [termTab], activeByRegion: { right: null, bottom: 'term-1' } });
     render(<TerminalBody tab={termTab} active />);

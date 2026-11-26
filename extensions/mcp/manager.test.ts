@@ -150,7 +150,7 @@ describe("createManager", () => {
 
   it("calls the current getProviderToken when connecting a provider server", async () => {
     const seen: string[] = [];
-    const connect = vi.fn(async (_server: McpServerConfig, hooks?: { getProviderToken?: (provider: string) => Promise<string | undefined> }) => {
+    const connect = vi.fn(async (_server: McpServerConfig, hooks?: import("./transport.js").OAuthConnectHooks) => {
       seen.push((await hooks?.getProviderToken?.("openai")) ?? "");
       return fakeClient([{ name: "alpha" }]);
     });
@@ -593,7 +593,7 @@ describe("reloadServer", () => {
   });
 
   it("未 init 时触发 init，目标 connect 恰好一次，resolve 时已是终态", async () => {
-    const connect = vi.fn(async () => fakeClient([{ name: "t" }]));
+    const connect = vi.fn(async (_server: McpServerConfig) => fakeClient([{ name: "t" }]));
     const mgr = createManager({
       connect,
       readServers: () => [srv("a"), srv("b")],
@@ -860,10 +860,10 @@ describe("resources", () => {
     expect(listResources).toHaveBeenCalled();
     expect(listResourceTemplates).toHaveBeenCalled();
     expect(readResource).toHaveBeenCalledWith({ uri: "file://a" });
-    expect(listed.content?.[0]).toMatchObject({ type: "text" });
-    expect(String((listed.content?.[0] as { text?: string } | undefined)?.text)).toContain("file://a");
-    expect(String((templated.content?.[0] as { text?: string } | undefined)?.text)).toContain("file://{id}");
-    expect(String((body.content?.[0] as { text?: string } | undefined)?.text)).toContain("body");
+    expect(listed.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text" })]));
+    expect(listed.content).toMatchObject([{ type: "text", text: expect.stringContaining("file://a") }]);
+    expect(templated.content).toMatchObject([{ type: "text", text: expect.stringContaining("file://{id}") }]);
+    expect(body.content).toMatchObject([{ type: "text", text: expect.stringContaining("body") }]);
   });
 
   it("passes cursor to the SDK and includes nextCursor in the list result", async () => {
@@ -893,8 +893,8 @@ describe("resources", () => {
     expect(templateArgs).toEqual([{ cursor: "tpl-1" }]);
     expect(listed.structuredContent).toEqual(expect.objectContaining({ nextCursor: "res-2" }));
     expect(templated.structuredContent).toEqual(expect.objectContaining({ nextCursor: "tpl-2" }));
-    expect(String((listed.content?.[0] as { text?: string } | undefined)?.text)).toContain("res-2");
-    expect(String((templated.content?.[0] as { text?: string } | undefined)?.text)).toContain("tpl-2");
+    expect(listed.content).toMatchObject([{ type: "text", text: expect.stringContaining("res-2") }]);
+    expect(templated.content).toMatchObject([{ type: "text", text: expect.stringContaining("tpl-2") }]);
   });
 });
 

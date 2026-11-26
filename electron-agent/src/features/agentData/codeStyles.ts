@@ -5,7 +5,7 @@ export const codeStyles = createStaticStyles(({ css }) => ({
     container: code-workbench / inline-size;
     display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0;
     color: ${cssVar.colorText};
-    font-size: 13px;
+    font-size: var(--gren-font-body);
     overflow-wrap: anywhere;
   `,
   /**
@@ -16,7 +16,7 @@ export const codeStyles = createStaticStyles(({ css }) => ({
    */
   fill: css`&& { flex: 1; min-height: 320px; overflow: hidden; }`,
   /** 覆盖分栏的 440px 下限，让高度完全由 fill 决定。 */
-  split: css`&& { min-height: 0; }`,
+  split: css`&& { min-height: 0; } @container code-workbench (max-width: 799px) { && { grid-template-columns: minmax(0, 1fr); } }`,
   column: css`min-width: 0;`,
   /** 列表栏顶部的计数条：滚动时吸顶，背景盖住下方行。负 margin 抵消分栏的 6px 内边距。 */
   listHeader: css`
@@ -24,7 +24,7 @@ export const codeStyles = createStaticStyles(({ css }) => ({
     margin: -6px -6px 0; padding: 8px 12px;
     background: ${cssVar.colorBgContainer};
     border-block-end: 1px solid ${cssVar.colorBorderSecondary};
-    color: ${cssVar.colorTextTertiary}; font-size: 12px;
+    color: ${cssVar.colorTextTertiary}; font-size: var(--gren-font-secondary);
     font-variant-numeric: tabular-nums;
   `,
   /** 结果列表尾部的「显示更多」：与行同样的圆角语言。 */
@@ -33,7 +33,7 @@ export const codeStyles = createStaticStyles(({ css }) => ({
   stats: css`
     display: inline-flex; flex-wrap: wrap; align-items: center;
     padding: 3px 6px; border-radius: 999px; background: ${cssVar.colorFillTertiary};
-    color: ${cssVar.colorTextSecondary}; font-size: 12px; font-variant-numeric: tabular-nums;
+    color: ${cssVar.colorTextSecondary}; font-size: var(--gren-font-secondary); font-variant-numeric: tabular-nums;
     > span { padding: 1px 10px; }
     > span + span { border-inline-start: 1px solid ${cssVar.colorBorderSecondary}; }
     > span:last-child { color: ${cssVar.colorTextTertiary}; }
@@ -52,7 +52,7 @@ export const codeStyles = createStaticStyles(({ css }) => ({
   `,
   sourceToolbar: css`
     display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0;
-    color: ${cssVar.colorTextTertiary}; font-size: 12px;
+    color: ${cssVar.colorTextTertiary}; font-size: var(--gren-font-secondary);
   `,
   sourceStats: css`font-variant-numeric: tabular-nums;`,
   toolbarSpacer: css`flex: 1;`,
@@ -73,11 +73,13 @@ export const codeStyles = createStaticStyles(({ css }) => ({
   `,
   detailTitle: css`
     flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
-    h3, h4, h5 { margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    h3, h4, h5 { margin: 0; font-size: var(--gren-font-section); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   `,
   detailPath: css`
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: ${cssVar.colorTextTertiary}; font-size: 12px;
+    color: ${cssVar.colorTextTertiary}; font-size: var(--gren-font-secondary);
   `,
   relations: css`
     display: flex; flex-direction: column; align-items: stretch; gap: 8px;
@@ -86,7 +88,7 @@ export const codeStyles = createStaticStyles(({ css }) => ({
   `,
   raw: css`
     max-width: 100%; min-width: 0; margin: 6px; color: ${cssVar.colorTextSecondary};
-    summary { cursor: pointer; font-size: 12px; color: ${cssVar.colorTextTertiary}; }
+    summary { cursor: pointer; font-size: var(--gren-font-secondary); color: ${cssVar.colorTextTertiary}; }
     pre { max-width: 100%; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
   `,
   text: css`font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;`,

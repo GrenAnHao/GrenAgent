@@ -53,7 +53,7 @@ function setup(handler: Handler, readers = 2, now = () => 0, extra: Partial<Code
   return { threads, workers, of };
 }
 
-const indexed = (workspace: string) => ({ workspace, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.2', state: 'indexed', files: 3, nodes: 9, edges: 4 });
+const indexed = (workspace: string) => ({ workspace, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.4', state: 'indexed', files: 3, nodes: 9, edges: 4 });
 const W = (name: string) => (process.platform === 'win32' ? `C:\\cg\\${name}` : `/cg/${name}`);
 const result = (text: string) => ({ content: [{ type: 'text', text }], isError: false, structuredContent: { schemaVersion: 1, rows: [], nodes: [], edges: [] } });
 

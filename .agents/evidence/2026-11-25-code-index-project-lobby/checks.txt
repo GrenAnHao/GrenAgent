@@ -1,0 +1,121 @@
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs code-index-projects
+  PASS 所有项目都能在大厅浏览
+  PASS 大厅不重复显示选择器
+  PASS 标题位于顶栏下面而非页面中央
+  PASS 同步时间优先使用各项目的落盘回执；未知时间不回退到检查、任务或未完成的文件行
+  PASS 未索引卡片用引导替代空统计
+  PASS 首行卡片等高，标题、路径、统计、底栏逐行对齐
+  PASS 长路径在卡片内单行省略
+  PASS 悬停可读完整路径
+  PASS 长列表仅大厅滚动、可到达最后的项目
+  PASS 按路径搜索兼容盘符大小写和反斜杠
+  PASS 状态筛选只列未索引项目
+  PASS 从未索引筛选原地开始，仍显示本卡真实进度
+  PASS 轮询更新计数
+  PASS 完成后离开未索引筛选，保留清除入口
+  PASS 新索引卡显示落盘时间
+  PASS 单项目立即同步不跳入内页
+  PASS 批量只提交另外两个待更新项目、不重复派发
+  PASS 目录交给本机资源管理器，不打开项目页
+  PASS 已索引项目明确派发全量重建
+  PASS 移除跨重新挂载生效并更新总数
+  PASS 重新添加可进入同一目录并恢复项目选择器
+  PASS 返回列表恢复卡片，不重复重新索引
+  PASS 窄窗口没有横向溢出
+  ── 23 passed, 0 failed
+通过：code-index-projects（20.0s）。只跑了 1/66 个场景，其余 65 个没指定，未运行
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs code-index-projects code-index-browser
+  PASS 所有项目都能在大厅浏览
+  PASS 大厅不重复显示选择器
+  PASS 标题位于顶栏下面而非页面中央
+  PASS 同步时间来自各项目的文件索引，而非同一轮成功检查或已完成任务
+  PASS 未索引卡片用引导替代空统计
+  PASS 首行卡片等高，标题、路径、统计、底栏逐行对齐
+  PASS 长路径在卡片内单行省略
+  PASS 悬停可读完整路径
+  PASS 长列表仅大厅滚动、可到达最后的项目
+  PASS 按路径搜索兼容盘符大小写和反斜杠
+  PASS 状态筛选只列未索引项目
+  PASS 从未索引筛选原地开始，仍显示本卡真实进度
+  PASS 轮询更新计数
+  PASS 完成后离开未索引筛选，保留清除入口
+  PASS 新索引卡显示落盘时间
+  PASS 单项目立即同步不跳入内页
+  PASS 批量只提交另外两个待更新项目、不重复派发
+  PASS 目录交给本机资源管理器，不打开项目页
+  PASS 已索引项目明确派发全量重建
+  PASS 移除跨重新挂载生效并更新总数
+  PASS 重新添加可进入同一目录并恢复项目选择器
+  PASS 返回列表恢复卡片，不重复重新索引
+  PASS 窄窗口没有横向溢出
+  ── 23 passed, 0 failed
+  PASS 四个项目未选中便已实际检查
+  PASS 最近使用的项目排第一
+  PASS 首屏显示完整路径、索引统计及时间
+  PASS 大厅不显示项目选择器
+  PASS 下拉中无占位选项
+  PASS 可按路径过滤出长项目名
+  PASS 状态胶囊不可压缩
+  PASS 长项目名的状态完整位于选项内
+  PASS 选中后页头沿用相同需更新状态
+  PASS 取消目录选择后仍在最近项目
+  PASS 新选本地目录只检查、不自动建索引
+  PASS 核心文件按入度而非文件名排第一
+  PASS 语言占比使用完整可见集合
+  PASS 手动同步不挤动搜索框
+  PASS 手动同步按钮原位加载且只能派发一次
+  PASS 进度自动推进
+  PASS 后台项目卡显示自己的实时进度
+  PASS 完成后显示一次轻提示
+  PASS 回到统计与新的同步时间
+  PASS 同步结束位置也不变
+  PASS 目录树默认隐藏点目录
+  PASS 可逐级打开文件夹
+  PASS 收起目录卸载其文件
+  PASS 可按需显示隐藏目录和构建产物
+  PASS 平铺模式默认文件名排序
+  PASS 可按引用文件数排序
+  PASS 排名直达源码和文件关系
+  PASS / 快捷聚焦
+  PASS 方向键切换文件且输入框保留焦点
+  PASS 上键切回上一个文件
+  PASS 悬停可见复制和对话操作
+  PASS 复制的是源项目相对路径
+  PASS 添加到当前对话使用源项目绝对路径，不发送
+  PASS 窄屏可单独查看概览
+  ── 34 passed, 0 failed
+通过：code-index-projects, code-index-browser（45.9s）。只跑了 2/66 个场景，其余 64 个没指定，未运行
+
+> electron-agent@0.3.0 test:codegraph
+> node scripts/test-codegraph.mjs --maxWorkers=2 electron/app/codeGraph/indexCommitTime.test.ts electron/app/codeGraph/codeGraphRuntime.integration.test.ts electron/app/codeGraph/codeGraphThreads.test.ts src/features/agentData/CodeRetrievalPanel.test.tsx src/features/agentData/CodeRetrievalPanel.navigation.test.tsx src/features/agentData/CodeRetrievalPanel.workbench.test.tsx
+ Test Files  6 passed (6)
+      Tests  77 passed (77)
+
+> electron-agent@0.3.0 test:codegraph
+> node scripts/test-codegraph.mjs --maxWorkers=2 src/features/agentData/codeIndexFreshness.test.ts
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+
+> electron-agent@0.3.0 test:codegraph
+> node scripts/test-codegraph.mjs --maxWorkers=2 electron/app/codeGraph/codeGraphJobs.test.ts electron/agentData/codegraphTaskRouting.test.ts
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+
+> electron-agent@0.3.0 build
+> npm run typecheck && electron-vite build
+> electron-agent@0.3.0 typecheck
+> npm run typecheck:renderer && npm run typecheck:main
+> electron-agent@0.3.0 typecheck:renderer
+> tsc -p tsconfig.renderer.json --noEmit
+> electron-agent@0.3.0 typecheck:main
+> tsc -p tsconfig.node.json --noEmit --tsBuildInfoFile ./tmp/tsc-node/check.tsbuildinfo
+✓ built in 6.58s
+✓ built in 43ms
+✓ built in 7.95s
+
+Scanned 1 files. No issues found.
+Scanned 1 files. No issues found.
+Scanned 1 files. No issues found.

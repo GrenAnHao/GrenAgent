@@ -98,6 +98,7 @@ const styles = createStaticStyles(({ css }) => ({
 
 interface ConvStripProps {
   status: ConvStatus;
+  warning?: boolean;
   icon: LucideIcon;
   title: string;
   /** 角色 / 任务短标签（第一行主文案，非 code）。 */
@@ -120,6 +121,7 @@ interface ConvStripProps {
 /** L3 横条：双行 surface（角色前置 + 实时/摘要第二行 + 模型靠右）。 */
 export const ConvStrip = memo(function ConvStrip({
   status,
+  warning,
   icon,
   title,
   role,
@@ -140,7 +142,7 @@ export const ConvStrip = memo(function ConvStrip({
   return (
     <div className={`conv-strip ${styles.strip}`} data-testid={testId} onClick={onOpen ?? onToggle}>
       <div className={styles.l1}>
-        <StatusGlyph status={status} onStop={onStop} />
+        <StatusGlyph status={status} warning={warning} onStop={onStop} />
         <Icon icon={icon} size={14} style={{ color: cssVar.colorInfo, flex: 'none' }} />
         <span className={styles.title}>{title}</span>
         {role != null ? (

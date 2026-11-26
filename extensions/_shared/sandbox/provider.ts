@@ -95,7 +95,7 @@ function processResourcesPath(): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function lookupWinHelper(deps: SandboxProviderDeps): string | undefined {
+export function lookupWinHelper(deps: SandboxProviderDeps): string | undefined {
   const lookup = deps.helperLookup ?? {};
   return resolveWinHelperPath({
     helperPath: deps.helperPath,

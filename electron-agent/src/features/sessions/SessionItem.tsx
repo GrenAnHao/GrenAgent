@@ -124,6 +124,8 @@ export interface SessionItemProps {
   onDelete: () => void;
   onReveal?: () => void;
   onArchive?: () => void;
+  /** 移动到项目…：主会话在两种会话行都提供，未提供则不显示该项。 */
+  onTransfer?: () => void;
 }
 
 export const SessionItem = memo(function SessionItem(props: SessionItemProps) {
@@ -142,6 +144,7 @@ export const SessionItem = memo(function SessionItem(props: SessionItemProps) {
     onDelete,
     onReveal,
     onArchive,
+    onTransfer,
   } = props;
   const [draft, setDraft] = useState(title);
   const [hovered, setHovered] = useState(false);
@@ -192,6 +195,7 @@ export const SessionItem = memo(function SessionItem(props: SessionItemProps) {
     onReveal,
     onArchive,
     archiveDisabled: running,
+    onTransfer,
   });
   // 回合在跑的行不出归档按钮（菜单里那项是灰的并写了原因）。
   const showArchive = Boolean(onArchive) && !running && hovered;

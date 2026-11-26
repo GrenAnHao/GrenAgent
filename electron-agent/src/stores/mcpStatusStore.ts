@@ -2,10 +2,13 @@ import { create } from 'zustand';
 
 export interface McpServerStatus {
   name: string;
-  transport: string;
-  status: 'connecting' | 'connected' | 'failed' | 'needs-login';
+  transport?: string;
+  error?: string;
+  attemptedAt?: string;
+  status: 'connecting' | 'connected' | 'failed' | 'stopped' | 'needs-login';
   tools: number;
   toolNames?: string[];
+  footprints?: import("../../../extensions/mcp/definitionSize").ToolFootprint[];
   exposure?: string;
   auth?: 'none' | 'oauth' | 'provider';
   loginUrl?: string;

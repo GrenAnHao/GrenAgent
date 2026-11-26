@@ -131,8 +131,8 @@ describe("closeTodosInContext", () => {
   };
 
   it("context 的字符串正文和非首 text 也同步计数", () => {
-    expect(closeTodosInContext([{ ...todo, content: "old" }, { role: "assistant", stopReason: "stop" }])?.[0]?.content).toBe("0 pending, 0 in progress, 2 completed");
-    expect(closeTodosInContext([{ ...todo, content: [{ type: "image" }, { type: "text", text: "old" }] }, { role: "assistant", stopReason: "stop" }])?.[0]?.content).toEqual([{ type: "image" }, { type: "text", text: "0 pending, 0 in progress, 2 completed" }]);
+    expect(closeTodosInContext([{ ...todo, content: "old" }, { role: "assistant", stopReason: "stop" }])?.[0]).toMatchObject({ content: "0 pending, 0 in progress, 2 completed" });
+    expect(closeTodosInContext([{ ...todo, content: [{ type: "image" }, { type: "text", text: "old" }] }, { role: "assistant", stopReason: "stop" }])?.[0]).toMatchObject({ content: [{ type: "image" }, { type: "text", text: "0 pending, 0 in progress, 2 completed" }] });
   });
 
   it("closes the last successful todo result after a normal stop", () => {

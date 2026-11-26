@@ -1,29 +1,31 @@
-import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { basename, extname, join, relative } from 'node:path';
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { replacePreviewedFile } from './extensionFiles';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 
-export interface SkillInfo { name: string; description: string; path: string; scope: string; }
+export interface SkillInfo { name: string; description: string; path: string; scope: string; disableModelInvocation?: boolean; }
 
 const execFileAsync = promisify(execFile);
 
 export class SkillService {
-  constructor(private readonly home: string) {}
+  constructor(private readonly home: string, private readonly agentDir = join(home, '.pi', 'agent')) {}
 
-  async list(): Promise<SkillInfo[]> {
+  async list(workspace?: string): Promise<SkillInfo[]> {
     const seen = new Set<string>();
     const result: SkillInfo[] = [];
-    for (const directory of this.directories()) {
+    for (const [directory, scope] of this.directories(workspace)) {
       let entries;
       try { entries = await readdir(directory, { withFileTypes: true }); } catch { continue; }
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const path = join(directory, entry.name);
-        try { await lstat(join(path, 'SKILL.md')); } catch { continue; }
+        try { if (!(await lstat(join(path, 'SKILL.md'))).isFile()) continue; } catch { continue; }
         const info = await readSkillInfo(path, entry.name);
-        if (!seen.has(info.name)) { seen.add(info.name); result.push(info); }
+        const identity = scope + ':' + info.name;
+        if (!seen.has(identity)) { seen.add(identity); result.push({ ...info, scope }); }
       }
     }
     return result.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'accent' }));
@@ -39,14 +41,52 @@ export class SkillService {
     return { name, description: compact(description), path, scope: 'global' };
   }
 
-  async remove(path: string): Promise<void> {
-    const target = await realpath(path).catch((error) => { throw new Error(`路径无效: ${String(error)}`); });
-    const allowed = await Promise.all(this.directories().map(async (directory) => {
-      try { return await realpath(directory); } catch { return null; }
-    }));
-    if (!allowed.some((base) => base && target !== base && within(base, target))) throw new Error('拒绝删除：路径不在全局技能目录内');
-    try { if (!(await lstat(join(target, 'SKILL.md'))).isFile()) throw new Error(); } catch { throw new Error('拒绝删除：目标不是技能目录（缺少 SKILL.md）'); }
-    await rm(target, { recursive: true, force: true });
+  async checkedDirectory(path: string, workspace?: string): Promise<string> {
+    if (!isAbsolute(path) || !this.directories(workspace).some(([root]) => relative(root, dirname(resolve(path))) === '')) {
+      throw new Error('拒绝删除或修改：路径不在技能目录内');
+    }
+    if (!(await lstat(path)).isDirectory() || !(await lstat(join(path, 'SKILL.md'))).isFile()) {
+      throw new Error('目标不是普通技能目录');
+    }
+    return resolve(path);
+  }
+
+  async detail(path: string, workspace?: string) {
+    const target = await this.checkedDirectory(path, workspace);
+    return { content: await readFile(join(target, 'SKILL.md'), 'utf8'), files: await directoryEntries(target) };
+  }
+
+  async files(path: string, folder: string, workspace?: string) {
+    const root = await this.checkedDirectory(path, workspace);
+    const parts = folder.split('/');
+    if (parts.some((p) => !p || p === '.' || p === '..' || /[\\\\:]/.test(p))) throw new Error('无效的资源目录');
+    let dir = root;
+    for (const part of parts) {
+      dir = join(dir, part);
+      if (!(await lstat(dir)).isDirectory()) throw new Error('不能展开链接或非目录资源');
+    }
+    return directoryEntries(dir);
+  }
+
+  async save(path: string, original: string, content: string, workspace?: string) {
+    const target = await this.checkedDirectory(path, workspace);
+    await replacePreviewedFile(join(target, 'SKILL.md'), original, content);
+  }
+
+  async archive(path: string, workspace?: string): Promise<string> {
+    const target = await this.checkedDirectory(path, workspace);
+    const root = join(dirname(dirname(target)), 'skills-archive');
+    await mkdir(root, { recursive: true });
+    if (!(await lstat(root)).isDirectory()) throw new Error('归档位置不是普通目录');
+    const slot = await mkdtemp(join(root, 'archive-'));
+    const destination = join(slot, basename(target));
+    try { await rename(target, destination); }
+    catch (error) { await rmdir(slot).catch(() => {}); throw error; }
+    return destination;
+  }
+
+  async remove(path: string, workspace?: string): Promise<void> {
+    await rm(await this.checkedDirectory(path, workspace), { recursive: true });
   }
 
   async importDirectory(source: string): Promise<SkillInfo> {
@@ -88,7 +128,12 @@ export class SkillService {
 
   async openDirectory(): Promise<string> { const directory = this.targetDirectory(); await mkdir(directory, { recursive: true }); return directory; }
 
-  private directories(): string[] { return [this.targetDirectory(), join(this.home, '.pi', 'agent', 'skills')]; }
+  private directories(workspace?: string): Array<[string, string]> {
+    const global: Array<[string, string]> = [[this.targetDirectory(), 'global'], [join(this.agentDir, 'skills'), 'global']];
+    if (!workspace || !isAbsolute(workspace)) return global;
+    return [[join(workspace, '.pi', 'skills'), 'project'], ...(!global.some(([dir]) => dir === join(workspace, '.agents', 'skills'))
+      ? [[join(workspace, '.agents', 'skills'), 'project'] as [string, string]] : []), ...global];
+  }
   private targetDirectory(): string { return join(this.home, '.agents', 'skills'); }
   private async newDestination(name: string): Promise<string> {
     const destination = join(this.targetDirectory(), name);
@@ -121,10 +166,10 @@ async function copySkillDirectory(source: string, destination: string): Promise<
 
 async function readSkillInfo(path: string, fallbackName: string): Promise<SkillInfo> {
   const parsed = parseFrontmatter(await readFile(join(path, 'SKILL.md'), 'utf8'));
-  return { name: parsed.name || fallbackName, description: parsed.description || '', path, scope: 'global' };
+  return { name: parsed.name || fallbackName, description: parsed.description || '', path, scope: 'global', ...(parsed.disableModelInvocation && { disableModelInvocation: true }) };
 }
 
-function parseFrontmatter(text: string): { name?: string; description?: string } {
+function parseFrontmatter(text: string): { name?: string; description?: string; disableModelInvocation?: boolean } {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/); if (lines[0] !== '---') return {};
   const end = lines.slice(1).indexOf('---'); if (end < 0) return {};
   const frontmatter = lines.slice(1, end + 1);
@@ -134,7 +179,7 @@ function parseFrontmatter(text: string): { name?: string; description?: string }
     if (doc && typeof doc === 'object' && !Array.isArray(doc)) {
       const record = doc as Record<string, unknown>;
       const field = (key: string) => (typeof record[key] === 'string' ? compact(record[key] as string) : undefined);
-      return { name: field('name'), description: field('description') };
+      return { name: field('name'), description: field('description'), disableModelInvocation: record['disable-model-invocation'] === true };
     }
   } catch {
     // 手写的头部不一定是合法 YAML，退回逐行读，保持以前能读出来的照样能读。
@@ -150,4 +195,9 @@ function validateName(name: string): void {
 }
 function compact(value: string): string { return value.trim().split(/\s+/).filter(Boolean).join(' '); }
 function buildSkillMarkdown(name: string, description: string, body: string): string { const desc = compact(description).replaceAll('\\', '\\\\').replaceAll('"', '\\"'); return `---\nname: ${name}${desc ? `\ndescription: "${desc}"` : ''}\n---\n\n${body.trim() || `# ${name}`}\n`; }
-function within(base: string, target: string): boolean { const rel = relative(base, target); return rel !== '' && !rel.startsWith('..') && !rel.split(/[\\/]/).includes('..'); }
+
+async function directoryEntries(dir: string): Promise<string[]> {
+  return (await readdir(dir, { withFileTypes: true }))
+    .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+    .map((entry) => entry.name + (entry.isDirectory() ? '/' : ''));
+}

@@ -12,7 +12,7 @@ Status: implemented
 ## Decision
 
 - 装配闭合：`main.ts` 自己 `new IndexTaskStore(indexTasksPath)` + `settleOrphans()`，把实例传进 assemble；assemble 把 `indexTasks` 转发进 runtimeOptions；`reportBreaker` 接 `indexTasks.recordBreaker(event.workspace, event.message)`；退出顺序里 `inprocAgentData.close()` 之后 `indexTasks.close()`（创建者关闭，CodeGraphJobs 先停、它的结束回调还要写库）。
-- 新鲜度：新增 `codeIndexWatcherPending(status)`（indexed 且 autoSync 非 false 且 watcher 存在、active:false、degraded:false），并入页面静默轮询条件。watch 挂载几秒内要么 active 要么 degraded，轮询自然停；degraded 走既有 stale + 横幅语义，autoSync off 不轮询。不改 `codeGraphThreads`「读 status 无副作用」的决定（见 [codegraph auto-sync and stale reads](../architecture/2026-10-18-codegraph-auto-sync-and-stale-reads.md)）。
+- 新鲜度：新增 `codeIndexWatcherPending(status)`（indexed 且 autoSync 非 false 且 watcher 存在、active:false、degraded:false），并入页面静默轮询条件。watch 挂载落定后结束快速轮询；degraded 表示需更新，关闭自动同步则不等待 watcher。项目目录的空闲复查及顶栏反馈见[项目索引浏览](../feature/2026-11-25-code-index-project-browser.md)。不改 `codeGraphThreads`「读 status 无副作用」的决定（见 [codegraph auto-sync and stale reads](../architecture/2026-10-18-codegraph-auto-sync-and-stale-reads.md)）。
 - 回归测试：assemble 级路由测试（传 indexTasks 后 `admin.jobs.create` 落 index-tasks 库并派发执行器）；`codeIndexWatcherPending` 单测；harness code-index-sync 增加 `watch-starting` 阶段：未落定期间轮询继续、落定后新鲜度标签消失且轮询停。
 
 ## Alternatives considered

@@ -165,13 +165,14 @@ export function ChatView() {
   const messages = store.useStore((s) => s.messages);
   const lastError = store.useStore((s) => s.lastError);
   const retrying = store.useStore((s) => s.retrying);
+  const compacting = store.useStore((s) => s.compacting);
   const isStreaming = store.useStore((s) => s.isStreaming);
   const awaitingResponse = store.useStore((s) => s.awaitingResponse);
   const composerQueue = store.useStore((s) => s.composerQueue) ?? [];
   const needsSessionReload = store.useStore(s => Boolean(s.sessionNeedsReload));
   const isEmpty = messages.length === 0;
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
-  const showEmptyLayout = isEmpty && workspaceReady;
+  const showEmptyLayout = isEmpty && workspaceReady && !compacting;
   const findOpen = useFindScope(CHAT_FIND_SCOPE).open && !showEmptyLayout;
   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
   const userAbortedRef = useRef(false);
@@ -658,7 +659,7 @@ export function ChatView() {
     </div>
   ) : null;
 
-  const retryIndicator = retrying ? (
+  const retryIndicator = retrying && !retrying.recovered ? (
     <div style={retryBannerStyle} data-testid="send-retry-indicator">
       <Icon icon={RefreshCw} spin size={14} />
       <span style={errorTextStyle}>
@@ -672,6 +673,7 @@ export function ChatView() {
   ) : null;
 
   const abortOnce = async () => {
+    const cancellingCompaction = store.useStore.getState().compacting === true;
     // 标记用户主动中断：runOnce 据此把本轮判为中断（不报错、不重试），无论中断如何体现。
     userAbortedRef.current = true;
     cancelSleepRef.current?.();
@@ -683,15 +685,13 @@ export function ChatView() {
       aborting: true,
       retrying: undefined,
       awaitingResponse: false,
-      isStreaming: false,
-      runActive: false,
-      runOpening: false,
+      ...(cancellingCompaction ? {} : { isStreaming: false, runActive: false, runOpening: false }),
     });
     // 停的是画面上这个会话，不是项目前景里恰好在跑的另一个。
     const abortPath = store.getLoadedSessionPath() ?? null;
     // 先熄灭侧栏那一圈：它只认 agent_end / agent_settled，那两条一起丢时取消就没有第二条熄灭入口。
     // 这里不等后端回执，也不管后端是否真的停下——用户已经对这份会话按下停止。
-    if (abortPath) markSessionStopped(abortPath);
+    if (abortPath && !cancellingCompaction) markSessionStopped(abortPath);
     // 后端的 abort 有自己的收口上限；这里再兜一层，保证任何情况下都不会把停止按钮永久挂住。
     let timedOut = false;
     try {
@@ -707,10 +707,17 @@ export function ChatView() {
       if (samePath(store.getLoadedSessionPath(), abortPath)) {
         store.useStore.setState({
           aborting: false,
-          isStreaming: false,
-          runActive: false,
+          ...(cancellingCompaction ? { compactionUnconfirmed: true } : { isStreaming: false, runActive: false }),
           lastError: `停止失败：${error instanceof Error ? error.message : String(error)}`,
         });
+      }
+      return;
+    }
+    if (cancellingCompaction) {
+      // 停止回执超时并非压缩终态；只有 SDK 的 compaction_end / 宿主退出能熄灭活动。
+      if (timedOut && samePath(store.getLoadedSessionPath(), abortPath)) {
+        store.useStore.setState({ aborting: false, compactionUnconfirmed: true,
+          lastError: '已请求停止压缩，但宿主尚未确认结束。状态待确认。' });
       }
       return;
     }

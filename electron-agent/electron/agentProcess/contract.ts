@@ -15,6 +15,8 @@ export const AGENT_METHODS = [
   'pi.respondUi',
   'pi.send',
   'pi.sessionWorkflow',
+  'pi.sessionProjectTransfer',
+  'pi.recoverSessionTransfers',
   'pi.permissionProfile',
   'pi.refreshModelRegistry',
   'pi.syncModelCompactionBudgets',
@@ -23,6 +25,7 @@ export const AGENT_METHODS = [
   'pi.ownsSession',
   'pi.activeModel',
   'subagent.list',
+  'subagent.lookup',
   'subagent.transcript',
   'subagent.sessionMessages',
   'subagent.catalog',
@@ -34,6 +37,9 @@ export const AGENT_METHODS = [
   'jobs.kill',
   'mcp.hotReload',
   'mcp.reload',
+  'mcp.inspect',
+  'mcp.cancelAttempt',
+  'mcp.testCall',
   'mcp.probe',
   'mcp.workspaceForCwd',
   'controlPlane.release',
@@ -41,6 +47,7 @@ export const AGENT_METHODS = [
   'resources.reload',
   'extensions.catalog',
   'observations.command',
+  'usage.calls',
   'usage.report',
   'usage.reconcile',
 ] as const;
@@ -54,6 +61,9 @@ export const HOST_METHODS = [
   'host.allowedPluginIds',
   'host.authorize',
   'host.mergeRuntimeSettings',
+  'host.invalidateSessionRecords',
+  'host.goalLossClaim',
+  'host.goalLossAck',
   'host.thread.createThread',
   'host.thread.createTurn',
   'host.thread.updateTurn',
@@ -65,6 +75,22 @@ export type HostMethod = typeof HOST_METHODS[number];
 export const BROADCAST_CHANNEL = 'broadcast';
 /** 子进程每 10 秒报一次内存与事件循环延迟，主进程写进 runtime-diag.jsonl。 */
 export const DIAG_CHANNEL = 'host.diag';
+/** Internal host-to-main ownership evidence; never forwarded as a renderer action. */
+export const GOAL_WORKSLOT_CHANNEL = 'internal.goal-workslot';
+export interface GoalWorkslotNotice {
+  workspace: string;
+  sessionPath: string;
+  sessionId: string;
+  ownerEpoch: string;
+  goalId: string;
+  revision: number;
+  runNumber: number;
+  conditionRevision: number;
+  roundId: string;
+  sequence: number;
+  occupied: boolean;
+}
+export type ConfirmedGoalOwnerLoss = GoalWorkslotNotice & { occupied: true };
 export interface BroadcastPayload {
   channel: string;
   payload: unknown;
@@ -90,6 +116,11 @@ export interface HostApi {
   allowedPluginIds(): Promise<string[]>;
   authorize(operation: PermissionOperation, profile: string): Promise<PermissionAuthorization>;
   mergeRuntimeSettings(patch: Record<string, string>): Promise<void>;
+  /** 迁移提交后显式失效 main WorkspaceService 的会话记录缓存；路径来自宿主，不由渲染层提供。 */
+  invalidateSessionRecords(paths: string[]): Promise<void>;
+  /** Main-memory confirmed loss only; neither call opens a session or writes JSONL. */
+  goalLossClaim(sessionPath: string, sessionId: string): Promise<ConfirmedGoalOwnerLoss | undefined>;
+  goalLossAck(loss: ConfirmedGoalOwnerLoss): Promise<boolean>;
   thread: ThreadStorePort;
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActionIcon, Icon, Popover } from '@lobehub/ui';
+import { bashTimeoutDescription, bashTimeoutOf, subagentBashLabel } from '@extensions/multi-agent/background-bash';
 import { createStaticStyles, cssVar, cx, keyframes } from 'antd-style';
 import { AlertTriangle, CheckCircle2, ListTodo, Loader2, X, XCircle } from 'lucide-react';
 import { onPiEvent, pi, type SubAgentItem } from '../../../../lib/pi';
@@ -17,7 +18,6 @@ const spin = keyframes`
 
 const t = createStaticStyles(({ css }) => ({
   panel: css`
-    scrollbar-width: thin;
     overflow-y: auto;
 
     width: 330px;
@@ -182,12 +182,14 @@ export function TaskTray() {
     <div className={t.panel}>
       {visible.map((task) => {
         const isRun = task.status === 'running';
+        const bashLabel = subagentBashLabel(task.status, task.bashState);
+        const bashTimeout = task.status === 'error' ? bashTimeoutOf(task.bashState) : undefined;
         // running 但久无心跳：判定为停滞，区别于正常运行中。
-        const stale = isRun && now - task.updatedAt > STALE_MS;
-        const c = stale
+        const stale = isRun && !bashLabel && now - task.updatedAt > STALE_MS;
+        const c = stale || bashTimeout
           ? { fg: cssVar.colorWarning, bg: cssVar.colorWarningBg }
           : statusColor(task.status);
-        const label = stale ? '停滞' : (STATUS_LABEL[task.status] ?? task.status);
+        const label = bashLabel ?? (stale ? '停滞' : (STATUS_LABEL[task.status] ?? task.status));
         // 停滞后时间按最后一次心跳封顶，避免随 now 无限累加成离谱值。
         const liveTo = stale ? task.updatedAt : now;
         return (
@@ -196,7 +198,7 @@ export function TaskTray() {
               <Icon className={t.spin} icon={Loader2} size={15} />
             ) : (
               <Icon
-                icon={stale ? AlertTriangle : task.status === 'error' ? XCircle : CheckCircle2}
+                icon={stale || bashTimeout ? AlertTriangle : task.status === 'error' ? XCircle : CheckCircle2}
                 size={15}
                 style={{ color: c.fg, flex: 'none' }}
               />
@@ -208,7 +210,7 @@ export function TaskTray() {
                 {isRun ? `已运行 ${elapsed(task.createdAt, liveTo)}` : label}
               </div>
             </div>
-            <span className={t.st} style={{ color: c.fg, background: c.bg }}>
+            <span className={t.st} style={{ color: c.fg, background: c.bg }} title={bashTimeout ? bashTimeoutDescription(bashTimeout) : undefined}>
               {label}
             </span>
             {isRun ? (

@@ -11,6 +11,8 @@ import { useAgentRegistryStore } from './agentStoreRegistry';
  * 于是等待中的旧快照整份被放弃，A 这种丢了终态事件的陈旧条目就再也没机会被清掉。
  */
 const byWorkspace = new Map<string, string[]>();
+const compactions = new Map<string, string[]>();
+const compactionOps = new Map<string, string>();
 /** 每个 workspace / 会话收到运行态事件的次数。快照对账用它判断等待期间有没有新事件。 */
 const epochs = new Map<string, number>();
 
@@ -69,6 +71,9 @@ export function sessionsMovedSince(before: ReadonlyMap<string, number>): Set<str
 function publish(): void {
   const all: string[] = [];
   for (const paths of byWorkspace.values()) all.push(...paths);
+  for (const paths of compactions.values()) for (const path of paths) {
+    if (!all.some((existing) => pathsEquivalent(existing, path))) all.push(path);
+  }
   const prev = useAgentRegistryStore.getState().runningSessionPaths;
   if (prev.length === all.length && prev.every((path, index) => path === all[index])) return;
   useAgentRegistryStore.setState({ runningSessionPaths: all });
@@ -79,6 +84,26 @@ export function markSessionRunning(workspace: string, sessionPath: string): void
   const list = byWorkspace.get(workspace) ?? [];
   if (list.some((path) => pathsEquivalent(path, sessionPath))) return;
   byWorkspace.set(workspace, [...list, sessionPath]);
+  publish();
+}
+
+export function markSessionCompacting(workspace: string, sessionPath: string, operationId?: string): void {
+  bumpSession(workspace, sessionPath);
+  if (operationId) compactionOps.set(epochKey(workspace, sessionPath), operationId);
+  const list = compactions.get(workspace) ?? [];
+  if (!list.some((path) => pathsEquivalent(path, sessionPath))) compactions.set(workspace, [...list, sessionPath]);
+  publish();
+}
+
+export function markSessionCompactionIdle(workspace: string, sessionPath: string, operationId?: string): void {
+  const key = epochKey(workspace, sessionPath);
+  if (operationId && compactionOps.has(key) && compactionOps.get(key) !== operationId) return;
+  compactionOps.delete(key);
+  bumpSession(workspace, sessionPath);
+  const list = compactions.get(workspace) ?? [];
+  const next = list.filter((path) => !pathsEquivalent(path, sessionPath));
+  if (next.length) compactions.set(workspace, next);
+  else compactions.delete(workspace);
   publish();
 }
 
@@ -99,13 +124,19 @@ export function markSessionIdle(workspace: string, sessionPath: string): void {
  */
 export function forgetRunningSession(sessionPath: string): void {
   let changed = false;
-  for (const [workspace, list] of [...byWorkspace]) {
-    const next = list.filter((path) => !pathsEquivalent(path, sessionPath));
-    if (next.length === list.length) continue;
+  for (const workspace of new Set([...byWorkspace.keys(), ...compactions.keys()])) {
+    const replies = byWorkspace.get(workspace) ?? [];
+    const compressing = compactions.get(workspace) ?? [];
+    const nextReplies = replies.filter(path => !pathsEquivalent(path, sessionPath));
+    const nextCompression = compressing.filter(path => !pathsEquivalent(path, sessionPath));
+    if (replies.length === nextReplies.length && compressing.length === nextCompression.length) continue;
     bumpSession(workspace, sessionPath);
+    compactionOps.delete(epochKey(workspace, sessionPath));
     changed = true;
-    if (next.length) byWorkspace.set(workspace, next);
+    if (nextReplies.length) byWorkspace.set(workspace, nextReplies);
     else byWorkspace.delete(workspace);
+    if (nextCompression.length) compactions.set(workspace, nextCompression);
+    else compactions.delete(workspace);
   }
   if (changed) publish();
 }
@@ -120,18 +151,27 @@ export function forgetRunningSession(sessionPath: string): void {
  *   同项目里别的会话刚开始跑，不能因此让这份陈旧条目躲过对账。
  */
 export function reconcileRunningSessions(
-  turns: ReadonlyArray<{ workspace: string; sessionPath?: string }>,
+  turns: ReadonlyArray<{ workspace: string; sessionPath?: string; isStreaming?: boolean; isCompacting?: boolean;
+    compaction?: { operationId: string } }>,
   /** 等快照期间已有实时事件改过的 workspace，保留事件给出的结果。 */
   keep: ReadonlySet<string> = new Set(),
   /** 等待期间该会话本身已有新事件：它由事件决定，快照不覆盖。 */
   keepPaths: ReadonlySet<string> = new Set(),
 ): void {
   const snapshot = new Map<string, string[]>();
+  const compressionSnapshot = new Map<string, string[]>();
   for (const turn of turns) {
     if (!turn.workspace || !turn.sessionPath) continue;
-    const list = snapshot.get(turn.workspace) ?? [];
-    list.push(turn.sessionPath);
-    snapshot.set(turn.workspace, list);
+    if (turn.isStreaming !== false) {
+      const list = snapshot.get(turn.workspace) ?? [];
+      list.push(turn.sessionPath);
+      snapshot.set(turn.workspace, list);
+    }
+    if (turn.isCompacting) {
+      const list = compressionSnapshot.get(turn.workspace) ?? [];
+      list.push(turn.sessionPath);
+      compressionSnapshot.set(turn.workspace, list);
+    }
   }
   const previous = new Map(byWorkspace);
   byWorkspace.clear();
@@ -155,6 +195,27 @@ export function reconcileRunningSessions(
       lit.push(path);
     }
     if (lit.length) byWorkspace.set(workspace, lit);
+  }
+  const previousCompactions = new Map(compactions);
+  compactions.clear();
+  for (const workspace of new Set([...previousCompactions.keys(), ...compressionSnapshot.keys()])) {
+    if (keep.has(workspace)) {
+      if (previousCompactions.get(workspace)?.length) compactions.set(workspace, previousCompactions.get(workspace)!);
+      continue;
+    }
+    const lit = (compressionSnapshot.get(workspace) ?? []).filter(path => !keepPaths.has(epochKey(workspace, path)));
+    for (const path of previousCompactions.get(workspace) ?? []) {
+      if (keepPaths.has(epochKey(workspace, path)) && !lit.some(other => pathsEquivalent(path, other))) lit.push(path);
+    }
+    if (lit.length) compactions.set(workspace, lit);
+  }
+  const liveKeys = new Set<string>();
+  for (const [workspace, paths] of compactions) for (const path of paths) liveKeys.add(epochKey(workspace, path));
+  for (const key of compactionOps.keys()) if (!liveKeys.has(key)) compactionOps.delete(key);
+  for (const turn of turns) {
+    if (!turn.workspace || !turn.sessionPath || !turn.isCompacting || !turn.compaction?.operationId) continue;
+    const key = epochKey(turn.workspace, turn.sessionPath);
+    if (liveKeys.has(key) && !keep.has(turn.workspace) && !keepPaths.has(key)) compactionOps.set(key, turn.compaction.operationId);
   }
   publish();
 }
@@ -195,7 +256,7 @@ export function markSessionStopped(sessionPath: string): void {
 }
 
 export function isSessionRunning(sessionPath: string): boolean {
-  for (const list of byWorkspace.values()) {
+  for (const list of [...byWorkspace.values(), ...compactions.values()]) {
     if (list.some((path) => pathsEquivalent(path, sessionPath))) return true;
   }
   return false;
@@ -206,7 +267,10 @@ export function handleRunningEvent(env: PiEventEnvelope): void {
   const path = typeof env.sessionPath === 'string' && env.sessionPath ? env.sessionPath : undefined;
   if (!path) return;
   const event = env.event as { type?: string; willRetry?: boolean };
-  if (event.type === 'agent_start') markSessionRunning(env.workspace, path);
+  const operationId = (event as { compaction?: { operationId?: string } }).compaction?.operationId;
+  if (event.type === 'compaction_activity' || event.type === 'compaction_start') markSessionCompacting(env.workspace, path, operationId);
+  else if (event.type === 'compaction_end') markSessionCompactionIdle(env.workspace, path, operationId);
+  else if (event.type === 'agent_start') markSessionRunning(env.workspace, path);
   else if (event.type === 'agent_settled') markSessionIdle(env.workspace, path);
   else if (event.type === 'agent_end' && event.willRetry !== true) markSessionIdle(env.workspace, path);
 }
@@ -215,15 +279,19 @@ export function handleRunningExit(env: PiExitEnvelope): void {
   if (env.source === 'goal') return;
   if (env.sessionPath) {
     markSessionIdle(env.workspace, env.sessionPath);
+    markSessionCompactionIdle(env.workspace, env.sessionPath);
     return;
   }
   // 没有路径的退出说明整个项目的 runtime 没了。
   bumpProject(env.workspace);
-  if (byWorkspace.delete(env.workspace)) publish();
+  for (const key of compactionOps.keys()) if (key.startsWith(`[${JSON.stringify(env.workspace)},`)) compactionOps.delete(key);
+  if (byWorkspace.delete(env.workspace) || compactions.delete(env.workspace)) publish();
 }
 
 export function resetRunningSessionsForTest(): void {
   byWorkspace.clear();
+  compactions.clear();
+  compactionOps.clear();
   epochs.clear();
   publish();
 }

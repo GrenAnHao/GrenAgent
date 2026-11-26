@@ -55,7 +55,6 @@ const styles = createStaticStyles(({ css }) => ({
     max-height: 320px;
     overflow: auto;
     overflow-wrap: anywhere;
-    scrollbar-width: thin;
     margin: 4px 0 0 23px;
     padding: 4px 0 4px 12px;
     border-inline-start: 1px solid ${cssVar.colorBorderSecondary};

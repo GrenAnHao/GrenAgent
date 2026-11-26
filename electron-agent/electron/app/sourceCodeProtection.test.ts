@@ -26,7 +26,9 @@ function resolveViteConfig(command: ViteCommand, mode?: string): ViteSlice {
   if (typeof viteConfig !== 'function') {
     throw new Error('electron.vite.config must export defineConfig(({ command }) => ...)');
   }
-  return viteConfig({ command, mode: mode ?? (command === 'build' ? 'production' : 'development') });
+  const config = viteConfig({ command, mode: mode ?? (command === 'build' ? 'production' : 'development') });
+  if (!config.main || !config.preload) throw new Error('missing Electron build target');
+  return { main: config.main, preload: config.preload, renderer: config.renderer };
 }
 
 function outDirs(config: ViteSlice) {

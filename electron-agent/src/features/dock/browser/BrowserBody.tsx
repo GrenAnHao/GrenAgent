@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createElement, type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, MonitorSmartphone, MoreHorizontal, MousePointerClick, RefreshCw } from 'lucide-react';
 import { GrenAgentIcon } from '../../../components/GrenAgentLogo';
 import { getBrowser, openUrl } from '../../../platform/runtime';
@@ -33,6 +33,9 @@ import { browserErrorPageUrl, describeBrowserGuestFailure, isBrowserErrorPageUrl
 import { DEFAULT_BROWSER_VIEWPORT } from './browserViewport';
 import { ResponsiveBrowserViewport } from './ResponsiveBrowserViewport';
 import { safeWebviewCall } from './safeWebviewCall';
+
+// Electron reads this attribute as a string when the guest attaches.
+type GuestAttributes = Omit<JSX.IntrinsicElements['webview'], 'allowpopups'> & { allowpopups: 'true' };
 
 interface BrowserElement extends HTMLElement {
   canGoBack(): boolean;
@@ -355,7 +358,8 @@ export function BrowserBody({ tab }: DockBodyProps) {
     setPicking(true);
     void (async () => {
       try {
-        const raw = await view.executeJavaScript(buildBrowserElementPickerScript(), true);
+        const fontFamily = getComputedStyle(document.documentElement).getPropertyValue('--font-sans').trim();
+        const raw = await view.executeJavaScript(buildBrowserElementPickerScript(fontFamily || undefined), true);
         if (pickingSeqRef.current !== seq) return;
         const pick = parseBrowserElementPick(raw);
         if (pick?.status === 'selected') {
@@ -548,15 +552,15 @@ export function BrowserBody({ tab }: DockBodyProps) {
               ) : null}
             </div>
           ) : null}
-          <webview
-            key={`webview:${webviewGeneration}`}
-            ref={setWebviewNode}
-            {...(guestSrc ? { src: guestSrc } : {})}
-            partition="persist:gren-browser"
-            allowpopups="true"
-            title={title}
-            style={hideGuest ? { display: 'none' } : undefined}
-          />
+          {createElement<GuestAttributes>('webview', {
+            key: `webview:${webviewGeneration}`,
+            ref: setWebviewNode,
+            ...(guestSrc ? { src: guestSrc } : {}),
+            partition: 'persist:gren-browser',
+            allowpopups: 'true',
+            title,
+            style: hideGuest ? { display: 'none' } : undefined,
+          })}
         </ResponsiveBrowserViewport>
         {guestFailureView ? (
           <BrowserErrorState

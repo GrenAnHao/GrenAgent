@@ -42,6 +42,39 @@ describe('SkillService', () => {
     expect(byName.broken).toBe('plain text');
   });
 
+  it('inspects and edits a project skill, then archives the entire directory outside discovery', async () => {
+    const { home, service } = await fixture();
+    const project = join(home, 'project'), path = join(project, '.agents', 'skills', 'review');
+    const original = '---\r\nname: review\r\ndisable-model-invocation: true\r\n---\r\n# body\r\n';
+    await mkdir(join(path, 'scripts'), { recursive:true });
+    await writeFile(join(path, 'SKILL.md'), original);
+    await writeFile(join(path, 'scripts', 'check.js'), 'test');
+    expect(await service.list()).toEqual([]);
+    expect(await service.list(project)).toMatchObject([{ name:'review', scope:'project', disableModelInvocation:true }]);
+    const detail = await service.detail(path, project);
+    expect(detail.content).toBe(original);
+    expect(detail.files).toEqual(['scripts/', 'SKILL.md']);
+    expect(await service.files(path, 'scripts', project)).toEqual(['check.js']);
+    await expect(service.files(path, '../other', project)).rejects.toThrow();
+    await service.save(path, original, original + 'new\r\n', project);
+    await expect(service.save(path, original, 'stale', project)).rejects.toThrow('其他地方更改');
+    await expect(service.archive(path)).rejects.toThrow();
+    const archived = await service.archive(path, project);
+    expect(await readFile(join(archived, 'scripts', 'check.js'), 'utf8')).toBe('test');
+    expect(await readFile(join(archived, 'SKILL.md'), 'utf8')).toBe(original + 'new\r\n');
+    expect(await service.list(project)).toEqual([]);
+    await expect(service.remove(archived, project)).rejects.toThrow();
+  });
+
+  it('does not treat a nested resource containing SKILL.md as a deletable catalog item', async () => {
+    const { service } = await fixture();
+    const skill = await service.create('nested', '', '');
+    const resource = join(skill.path, 'example');
+    await mkdir(resource); await writeFile(join(resource, 'SKILL.md'), 'keep');
+    await expect(service.remove(resource)).rejects.toThrow();
+    expect(await readFile(join(resource, 'SKILL.md'), 'utf8')).toBe('keep');
+  });
+
   it('imports valid skill directories and Markdown files', async () => {
     const { home, service } = await fixture();
     const source = await mkdtemp(join(tmpdir(), 'electron-agent-skill-source-'));

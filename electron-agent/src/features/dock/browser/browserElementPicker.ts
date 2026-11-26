@@ -34,7 +34,7 @@ export type BrowserElementOffer = {
 
 const PICKER_KEY = '__grenBrowserElementPicker';
 
-function runGuestPicker(): Promise<BrowserElementPick> {
+function runGuestPicker(fontFamily: string): Promise<BrowserElementPick> {
   const key = '__grenBrowserElementPicker';
   const existing = (window as unknown as Record<string, { cancel?: () => void }>)[key];
   existing?.cancel?.();
@@ -160,7 +160,7 @@ function runGuestPicker(): Promise<BrowserElementPick> {
       'background:#202124',
       'color:#e8eaed',
       'box-shadow:0 4px 16px rgba(0,0,0,0.35)',
-      'font:12px/1.45 ui-sans-serif,system-ui,sans-serif',
+      `font:12px/1.45 ${fontFamily}`,
       'white-space:pre',
     ].join(';');
 
@@ -282,8 +282,8 @@ function runGuestPicker(): Promise<BrowserElementPick> {
   });
 }
 
-export function buildBrowserElementPickerScript(): string {
-  return `(${runGuestPicker.toString()})()`;
+export function buildBrowserElementPickerScript(fontFamily = 'system-ui'): string {
+  return `(${runGuestPicker.toString()})(${JSON.stringify(fontFamily)})`;
 }
 
 export function buildCancelBrowserElementPickerScript(): string {

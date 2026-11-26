@@ -38,6 +38,7 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 16px;
     white-space: pre;
     font-family: var(--pi-font-mono);
+    font-variant-ligatures: none;
     font-size: 13px;
   `,
   oldBlock: css`

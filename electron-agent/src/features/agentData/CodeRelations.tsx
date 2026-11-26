@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Empty, Listy, Segmented, Typography } from 'antd';
 import { Box, Braces, ListTree, Shapes, Variable } from 'lucide-react';
 import { agentDataApi, type CodeTool } from '../../lib/agentData';
 import FileIcon from '../../components/FileIcon';
 import { CODE_PAGE_SIZE, decodeCodeResult, retainedCodeResult, type CodeResultRow, type CodeResultView } from './codeResult';
 import { codeStyles as styles } from './codeStyles';
+import { browseStyles } from './codeBrowseStyles';
 import { listRowStyles as rows } from './listRowStyles';
 
 export interface CodeRelationsProps { workspace: string; symbol: string; nodeId?: string; file?: string; visible: boolean; reloadVersion?: number }
@@ -62,26 +63,27 @@ export function codeRequestError(cause: unknown): string {
 /** 结果由服务端分页：画全部已加载的行，「显示更多」改为向调用方要下一页，不再在前端切页。remaining 为 0（最后一页已到）时不显示按钮，但仍要传。 */
 export interface MoreRows { remaining: number; loading: boolean; onLoad: () => void }
 
-export function CodeResultContent({ result, retained, onSelect, selected, tool, more }: { result: CodeResultView; retained?: CodeResultView; onSelect?: (row: CodeResultRow, element: HTMLElement) => void; selected?: CodeResultRow; tool?: CodeTool; more?: MoreRows }) {
+export interface BrowseRenderers { nested?: boolean; actions?: (file: string) => ReactNode; directory?: (row: CodeResultRow) => ReactNode }
+export function CodeResultContent({ result, retained, onSelect, selected, tool, more, browser }: { browser?: BrowseRenderers; result: CodeResultView; retained?: CodeResultView; onSelect?: (row: CodeResultRow, element: HTMLElement) => void; selected?: CodeResultRow; tool?: CodeTool; more?: MoreRows }) {
   return <>
     {result.isError ? <Alert type="error" showIcon title={codeRequestError(result.text ?? result.message ?? 'CodeGraph 返回错误，详情见原始结果。')} /> : null}
     {retained && (retained.rows.length > 0 || retained.recognition !== 'rows') ? <>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>本次查询失败，保留上次成功读取的结果。</Typography.Text>
-      <CodeResultContent result={retained} onSelect={onSelect} selected={selected} tool={tool} />
+      <CodeResultContent result={retained} browser={browser} onSelect={onSelect} selected={selected} tool={tool} />
     </> : null}
     {result.message ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{result.message}</Typography.Text> : null}
     {result.recognition === 'rows' && result.rows.length === 0 && !result.isError ? <Empty description="没有匹配结果" /> : null}
-    {result.rows.length ? <ResultRows items={result.rows} onSelect={onSelect} selected={selected} tool={tool} more={more} /> : null}
+    {result.rows.length ? <ResultRows items={result.rows} browser={browser} onSelect={onSelect} selected={selected} tool={tool} more={more} /> : null}
     {result.recognition === 'text' ? <pre className={styles.text}>{result.text}</pre> : null}
     {result.recognition === 'unknown' ? <Empty description="返回格式未识别，请展开原始结果查看。" /> : null}
-    <RawResult raw={result.raw} />
+    {(!browser?.nested || result.isError || result.recognition !== 'rows') && <RawResult raw={result.raw} />}
   </>;
 }
 
-interface ResultRowsProps { items: CodeResultRow[]; onSelect?: (row: CodeResultRow, element: HTMLElement) => void; selected?: CodeResultRow; tool?: CodeTool; more?: MoreRows }
+interface ResultRowsProps { browser?: BrowseRenderers; items: CodeResultRow[]; onSelect?: (row: CodeResultRow, element: HTMLElement) => void; selected?: CodeResultRow; tool?: CodeTool; more?: MoreRows }
 
 /** 结果行分页渲染：默认在前端按页切；服务端分页时（more）画全部已加载的行。换查询时由调用方用 key 重置已展开的页数。 */
-function ResultRows({ items, onSelect, selected, tool, more }: ResultRowsProps) {
+function ResultRows({ items, onSelect, selected, tool, more, browser }: ResultRowsProps) {
   const [limit, setLimit] = useState(CODE_PAGE_SIZE);
   const shown = more ? items : items.slice(0, limit);
   const remaining = more ? more.remaining : items.length - shown.length;
@@ -95,6 +97,7 @@ function ResultRows({ items, onSelect, selected, tool, more }: ResultRowsProps) 
       itemRender={(row: CodeResultRow & { rowKey: string }) => {
         // 不能包成 Fragment：antd Button 会把 Fragment 整体包进一个 span，行内元素就不再纵向堆叠。
         // 文件浏览行（codegraph_files）没有行号是正常的，不必显示「未提供行号」；符号/关系行缺少行号才提示。
+        if (row.kind === 'directory' && browser?.directory) return browser.directory(row);
         const lineText = row.line !== undefined ? `第 ${row.line} 行` : tool === 'codegraph_files' ? null : '未提供行号';
         const fileName = row.file ? row.file.replace(/\\/g, '/').split('/').pop() || row.file : undefined;
         const content = [
@@ -104,22 +107,35 @@ function ResultRows({ items, onSelect, selected, tool, more }: ResultRowsProps) 
           <span key="body" className={rows.body}>
             <Typography.Text strong className={rows.title}>{row.symbol ?? fileName ?? row.file}</Typography.Text>
             {row.symbol ? <span className={rows.path} title={row.file}>{row.file ?? '未提供文件位置'}</span> : row.file !== fileName ? <span className={rows.path} title={row.file}>{row.file}</span> : null}
-            {lineText || (row.symbol && row.kind) || row.snippet ? <span className={rows.meta}>
+            {lineText || (row.symbol && row.kind) || row.snippet || row.incomingFiles !== undefined ? <span className={rows.meta}>
               {lineText ? <span className={rows.metaItem}>{lineText}</span> : null}
               {row.symbol && row.kind ? <span className={rows.kind}>{row.kind}</span> : null}
-              {row.snippet ? <span className={rows.snippet} title={row.snippet}>{row.snippet}</span> : null}
+              {row.incomingFiles !== undefined ? <span>{row.incomingFiles} 个文件引用</span> : row.snippet ? <span className={rows.snippet} title={row.snippet}>{row.snippet}</span> : null}
             </span> : null}
           </span>,
         ];
-        return onSelect
-          ? <Button block type="text" className={rows.row} aria-pressed={selected?.file === row.file && selected?.symbol === row.symbol && selected?.line === row.line} onClick={(event) => onSelect(row as CodeResultRow, event.currentTarget)}>{content}</Button>
+        const item = onSelect
+          ? <Button data-code-entry block type="text" className={rows.row} aria-pressed={selected?.file === row.file && selected?.symbol === row.symbol && selected?.line === row.line} onClick={(event) => onSelect(row as CodeResultRow, event.currentTarget)}>{content}</Button>
           : <div className={rows.row}>{content}</div>;
+        return browser?.actions && row.file ? <FileActionRow renderActions={() => browser.actions!(row.file!)}>{item}</FileActionRow> : item;
       }}
     />
     {remaining > 0 ? <div className={styles.loadMore}>
       {/* 用 aria-disabled 而不是 disabled：键盘用户刚按下的按钮被禁用会丢焦点；antd 的 loading 图标带 aria-label="loading"，会混进按钮的可访问名。 */}
       <Button block type="text" aria-disabled={loading || undefined} style={loading ? { cursor: 'progress', opacity: 0.6 } : undefined} onClick={loading ? undefined : showMore}>{loading ? '正在加载…' : `显示更多（还有 ${remaining} 项）`}</Button>
     </div> : null}
+  </div>;
+}
+
+/** 已加载的文件可达数千个；只给指针或焦点所在的行挂载操作按钮。 */
+function FileActionRow({ children, renderActions }: { children: ReactNode; renderActions: () => ReactNode }) {
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  return <div className={browseStyles.actionRow}
+    onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+    onFocusCapture={() => setFocus(true)}
+    onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocus(false); }}>
+    {children}{(hover || focus) && renderActions()}
   </div>;
 }
 

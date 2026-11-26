@@ -8,7 +8,9 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "../_shared/sqlite.js";
 import { isContinuableLeftover } from "./subagent-meta.js";
+import type { SubagentBashState } from "./background-bash.js";
 import { tailLines, LIVE_TRANSCRIPT_TAIL, TRANSCRIPT_CAP } from "./transcript-tail.js";
+import { ensureSubAgentRegistrySchema } from "./registry-schema.js";
 
 export type SubAgentStatus = "running" | "done" | "error" | "cancelled";
 
@@ -42,12 +44,17 @@ export interface SubAgentRow {
   jobId: string | null;
   createdAt: number;
   updatedAt: number;
+  bashState?: string | null;
+  /** 运行期已观察到首个实质活动（正文/思考/工具调用）；结算时清回 0，续聊重新记。 */
+  responseStarted: number;
 }
 
 export class SubAgentRegistry {
   private db: DatabaseSync | undefined;
   /** progress() 每-id 的上次落盘时刻，用于把高频流式写入收敛到 PROGRESS_PERSIST_MS 间隔。 */
   private lastProgressAt = new Map<string, number>();
+  /** 已确认写过 responseStarted=1 的 id：避免每帧重复 UPDATE。 */
+  private responseNoted = new Set<string>();
 
   constructor(private readonly file: string) {}
 
@@ -55,44 +62,7 @@ export class SubAgentRegistry {
     if (this.db) return;
     mkdirSync(dirname(this.file), { recursive: true });
     const db = new DatabaseSync(this.file);
-    db.exec(
-      `CREATE TABLE IF NOT EXISTS subagents (
-         id TEXT PRIMARY KEY,
-         task TEXT NOT NULL,
-         profile TEXT,
-         model TEXT,
-         thinkingLevel TEXT,
-         status TEXT NOT NULL,
-         output TEXT,
-         error TEXT,
-         exitCode INTEGER,
-         transcript TEXT,
-         sessionPath TEXT,
-         parentId TEXT,
-         depth INTEGER NOT NULL DEFAULT 0,
-         jobId TEXT,
-         createdAt INTEGER NOT NULL,
-         updatedAt INTEGER NOT NULL
-       );
-       CREATE INDEX IF NOT EXISTS idx_subagents_status ON subagents(status);`,
-    );
-    // 迁移：旧库（v1，无 transcript 列）补列——CREATE TABLE IF NOT EXISTS 不会给已存在的表加列。
-    // 新库的 CREATE 已含该列，PRAGMA 命中即跳过 ALTER。
-    const cols = db.prepare("PRAGMA table_info(subagents)").all() as Array<{ name?: string }>;
-    if (!cols.some((c) => c.name === "transcript")) {
-      db.exec("ALTER TABLE subagents ADD COLUMN transcript TEXT");
-    }
-    if (!cols.some((c) => c.name === "sessionPath")) {
-      db.exec("ALTER TABLE subagents ADD COLUMN sessionPath TEXT");
-    }
-    if (!cols.some((c) => c.name === "parentId")) db.exec("ALTER TABLE subagents ADD COLUMN parentId TEXT");
-    if (!cols.some((c) => c.name === "depth")) db.exec("ALTER TABLE subagents ADD COLUMN depth INTEGER NOT NULL DEFAULT 0");
-    if (!cols.some((c) => c.name === "jobId")) db.exec("ALTER TABLE subagents ADD COLUMN jobId TEXT");
-    if (!cols.some((c) => c.name === "thinkingLevel")) db.exec("ALTER TABLE subagents ADD COLUMN thinkingLevel TEXT");
-    // 列表索引：parentId / sessionPath / createdAt 都排在 transcript 后面，大 transcript 在溢出页里，
-    // 不走索引时每次列表都要顺着所有行的溢出链读到行尾（百兆级 transcript 时一次上百毫秒，
-    // 且在 Electron 主线程上）。覆盖索引让「按时间取最新 N 条」和「按会话收归属」都不碰表行。
-    db.exec("CREATE INDEX IF NOT EXISTS idx_subagents_listing ON subagents(createdAt, id, parentId, sessionPath)");
+    ensureSubAgentRegistrySchema(db);
     this.db = db;
   }
 
@@ -138,6 +108,7 @@ export class SubAgentRegistry {
       jobId: input.jobId ?? null,
       createdAt: now,
       updatedAt: now,
+      responseStarted: 0,
     };
     this.database
       .prepare(
@@ -187,13 +158,15 @@ export class SubAgentRegistry {
       error?: string | null;
       exitCode?: number | null;
       transcript?: string | null;
+      bashState?: SubagentBashState;
     },
   ): void {
     // transcript 用 COALESCE：调用方不传 / 传空串(→null)时保留运行期 progress() 已写入的 transcript，
     // 不会把实时累积的内容清空；传非空字符串则截断到上限后覆盖为最终 transcript。
+    // responseStarted 只是运行期证据：终态显示不看它，结算时清回 0（迁移只搬运已结算行，标记随之归零）。
     this.database
       .prepare(
-        "UPDATE subagents SET status=?, output=?, error=?, exitCode=?, transcript=COALESCE(?, transcript), updatedAt=? WHERE id=?",
+        "UPDATE subagents SET status=?, output=?, error=?, exitCode=?, transcript=COALESCE(?, transcript), bashState=?, responseStarted=0, updatedAt=? WHERE id=?",
       )
       .run(
         patch.status,
@@ -201,10 +174,32 @@ export class SubAgentRegistry {
         patch.error ?? null,
         patch.exitCode ?? null,
         patch.transcript ? tailLines(patch.transcript, TRANSCRIPT_CAP) : null,
+        patch.bashState ? JSON.stringify(patch.bashState) : null,
         Date.now(),
         id,
       );
     this.lastProgressAt.delete(id);
+    this.responseNoted.delete(id);
+  }
+
+  setBashPhase(id: string, state: SubagentBashState | null, reply?: string): void {
+    this.database.prepare("UPDATE subagents SET bashState=?, output=? WHERE id=? AND status='running'")
+      .run(state ? JSON.stringify(state) : null, reply ?? null, id);
+  }
+
+  /**
+   * 记下运行期已观察到首个实质活动。与 progress() 的落盘节流无关：只写一次 0→1，
+   * 不依赖大 transcript 的节流窗口，父卡下一轮查询即可从「等待首响应」进入「正在处理」。
+   * best-effort：流处理器里调用，写失败只是让父卡晚一拍，不能让子代理失败。
+   */
+  markResponseStarted(id: string): void {
+    if (this.responseNoted.has(id)) return;
+    try {
+      this.database.prepare("UPDATE subagents SET responseStarted=1 WHERE id=? AND status='running'").run(id);
+      this.responseNoted.add(id);
+    } catch {
+      /* 偶发争用：下一帧再试 */
+    }
   }
 
   get(id: string): SubAgentRow | undefined {
@@ -265,6 +260,7 @@ export class SubAgentRegistry {
   remove(id: string): boolean {
     const info = this.database.prepare("DELETE FROM subagents WHERE id=?").run(id);
     this.lastProgressAt.delete(id);
+    this.responseNoted.delete(id);
     return Number(info.changes) > 0;
   }
 

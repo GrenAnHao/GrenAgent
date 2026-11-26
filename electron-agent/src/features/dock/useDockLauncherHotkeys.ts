@@ -6,7 +6,7 @@ import { openLauncherTab } from './openLauncherTab';
 
 export function runDockLauncherHotkey(kind: LauncherKind, ctx: LauncherContext): void {
   if (!canOpenLauncherKind(kind, ctx)) return;
-  openLauncherTab({ region: 'right', kind, workspace: ctx.workspace });
+  openLauncherTab({ region: 'right', kind, workspace: ctx.workspace ?? undefined });
 }
 
 const HOTKEY_OPTS = { enableOnFormTags: true, enableOnContentEditable: true, preventDefault: true };

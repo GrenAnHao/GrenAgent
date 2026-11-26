@@ -48,6 +48,34 @@ describe('runningSessions', () => {
     expect(isSessionRunning(A)).toBe(true);
   });
 
+  it('manual compaction remains lit after reply settles and only its own terminal clears it', () => {
+    handleRunningEvent(ev(A, { type: 'compaction_activity', compaction: { operationId: 'a' } }));
+    expect(lit()).toEqual([A]);
+    handleRunningEvent(ev(A, { type: 'agent_end' }));
+    handleRunningEvent(ev(A, { type: 'agent_settled' }));
+    expect(lit()).toEqual([A]);
+    handleRunningEvent(ev(B, { type: 'agent_start' }));
+    handleRunningEvent(ev(A, { type: 'compaction_end' }));
+    expect(lit()).toEqual([B]);
+  });
+
+  it('a stale end for an earlier compression operation does not dim the newer one', () => {
+    handleRunningEvent(ev(A, { type: 'compaction_activity', compaction: { operationId: 'old' } }));
+    handleRunningEvent(ev(A, { type: 'compaction_activity', compaction: { operationId: 'new' } }));
+    handleRunningEvent(ev(A, { type: 'compaction_end', compaction: { operationId: 'old' } }));
+    expect(lit()).toEqual([A]);
+    handleRunningEvent(ev(A, { type: 'compaction_end', compaction: { operationId: 'new' } }));
+    expect(lit()).toEqual([]);
+  });
+
+  it('a late running snapshot cannot relight a completed compaction', () => {
+    handleRunningEvent(ev(A, { type: 'compaction_start' }));
+    const before = captureRunningEpochs();
+    handleRunningEvent(ev(A, { type: 'compaction_end' }));
+    reconcileRunningSessions([{ workspace: WS, sessionPath: A, isStreaming: false, isCompacting: true }], new Set(), sessionsMovedSince(before));
+    expect(lit()).toEqual([]);
+  });
+
   it('agent_end 带 willRetry 时保持点亮，不重试才熄灭', () => {
     handleRunningEvent(ev(A, { type: 'agent_start' }));
     handleRunningEvent(ev(A, { type: 'agent_end', willRetry: true }));

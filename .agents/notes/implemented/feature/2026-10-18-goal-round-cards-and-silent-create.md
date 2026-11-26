@@ -2,6 +2,8 @@
 
 Status: implemented
 
+hidden 消息和静默创建继续有效；批次 details 与卡片标题兼容由[生命周期修复](../bug-fix/2026-11-17-visual-review-and-goal-lifecycle.md)补充，不改写旧消息。
+
 ## Problem
 
 - Goal 每一轮续跑发给模型的正文是 `customType: "goal-round"`、`display: false` 的自定义消息。渲染层只把 `display: true` 的自定义消息画成通知，实时（`applyCustomMessage`）和历史（`messagesFromAgent`）都把它丢掉，对话里看不出「第 N 轮开始了」，只能去 Goal 详情抽屉的操作记录里翻。
@@ -10,8 +12,8 @@ Status: implemented
 ## Decision
 
 - 渲染层对 `goal-round` 例外：虽然是 `display: false`，实时和历史都还原成 `notice`（`agentReducer.ts` 的 `SHOWN_HIDDEN_CUSTOM_TYPES`）。其他 `display: false` 消息照旧不显示。
-- 卡片是 `GoalRoundPill`（复用 `NoticeSplitPill`）：标题把首行 `Goal Round 4/256。` 换成「目标续跑 · 第 4 轮」，不写轮次预算（与 Goal 条一致），默认收起，展开看这一轮模型收到的完整条件与要求。
-- 扩展仍按 `display: false` 发（TUI 不刷屏）、正文格式不变；卡片按 `extensions/goal/prompt.ts` 的首行格式取轮次，测试直接用 `buildGoalRoundPrompt` 造正文，格式一改测试就红。
+- 卡片是 `GoalRoundPill`（复用 `NoticeSplitPill`）：旧卡标题把首行 `Goal Round 4/256。` 换成「目标续跑 · 第 4 轮」，新 details 有批次时显示「目标续跑 · 第 X 批 · 第 Y 轮」，不写轮次预算（与 Goal 条一致），默认收起，展开看这一轮模型收到的完整条件与要求。
+- 扩展仍按 `display: false` 发（TUI 不刷屏）、正文格式不变；卡片优先读取新批次 details，旧卡按 `extensions/goal/prompt.ts` 的首行格式取轮次，测试直接用 `buildGoalRoundPrompt` 造正文，格式一改测试就红。
 - 输入栏 `/goal …` 走执行性命令分支时不再写 `commandInputStore`、不弹「已执行 /goal」，只补拉一次 Goal（见 `2026-10-18-goal-bar-pull-hydration.md`）。其他执行性命令（`/compact` 等）的命令行照旧。失败仍由扩展 `notify` 报错。
 
 ## Alternatives considered

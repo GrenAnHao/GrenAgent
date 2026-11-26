@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { assertToolCaller, hasGoalRound, hasHumanInput } from "./auth.js";
+import { assertGoalToolRound, assertToolCaller, hasHumanInput } from "./auth.js";
 import {
   blockGoal,
   completeGoal,
@@ -13,6 +13,7 @@ import {
   sessionIdOf,
 } from "./session.js";
 import { GOAL_BLOCKED_MIN_ROUNDS } from "./types.js";
+import { enrollCreatedGoalInRun } from "./continue.js";
 import { toolPrompt } from "../_shared/toolPrompt.js";
 
 const condition = Type.String({ minLength: 1, maxLength: 4000 });
@@ -29,17 +30,10 @@ function requireHuman(ctx: ExtensionContext): void {
   if (!hasHumanInput(sessionIdOf(ctx))) throw new Error("GOAL_TOOL_HUMAN");
 }
 
-function requireRoundOrHuman(ctx: ExtensionContext): void {
-  const sessionId = sessionIdOf(ctx);
-  if (hasHumanInput(sessionId)) return;
+function requireRound(ctx: ExtensionContext, toolCallId: string): void {
   const snapshot = readSnapshot(ctx);
-  if (
-    snapshot
-    && hasGoalRound(sessionId, { goalId: snapshot.goalId, revision: snapshot.revision, round: snapshot.roundsStarted })
-  ) {
-    return;
-  }
-  throw new Error("GOAL_TOOL_ROUND");
+  if (!snapshot) throw new Error("GOAL_TOOL_ROUND_STALE");
+  assertGoalToolRound(sessionIdOf(ctx), toolCallId, snapshot);
 }
 
 function requireCurrentRevision(ctx: ExtensionContext, goalId: string, expectedRevision: number) {
@@ -79,7 +73,8 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       if (typeof params.condition !== "string" || params.condition.length === 0 || params.condition.length > 4000) {
         throw new Error("INVALID_PARAMS");
       }
-      createGoal(pi, ctx, params.condition, typeof params.maxRounds === "number" ? params.maxRounds : undefined);
+      const created = createGoal(pi, ctx, params.condition, typeof params.maxRounds === "number" ? params.maxRounds : undefined);
+      enrollCreatedGoalInRun(sessionIdOf(ctx), created);
       return result(currentStatusSnapshot(ctx));
     },
   });
@@ -104,17 +99,17 @@ export function registerGoalTools(pi: ExtensionAPI): void {
         message: Type.String(),
       })),
     }),
-    async execute(_id, params, _signal, _update, ctx) {
+    async execute(toolCallId, params, _signal, _update, ctx) {
       assertToolCaller();
       const action = params.action;
       if (action === "edit" || action === "pause" || action === "resume") {
         requireHuman(ctx);
       }
       if (action === "complete" || action === "blocked") {
-        requireRoundOrHuman(ctx);
+        requireRound(ctx, toolCallId);
       }
       const snapshot = requireCurrentRevision(ctx, String(params.goalId ?? ""), Number(params.revision));
-      if (action === "resume" && snapshot.status === "paused") {
+      if (action === "resume" && (snapshot.status === "paused" || snapshot.runRoundsStarted >= snapshot.maxRounds)) {
         throw new Error("GOAL_TOOL_RESUME_PAUSED");
       }
       if (action === "edit") {

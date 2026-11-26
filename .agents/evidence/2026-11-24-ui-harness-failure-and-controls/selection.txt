@@ -1,0 +1,29 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs --changed --dry-run
+
+构建：1 个源文件有改动（ui-harness/probeClock.mjs）
+场景已构建（生产模式，11.1s）
+
+对比 HEAD，改动 450 个文件
+  electron-agent/src/components/QuestionSelector/answers.ts → agent-message, bash-job-card, chat-find, chat-follow, codemode-card, composer-prompt-clearance, dock-session-binding, goal-round-card, invalid-arguments-card, isolated-workspace, long-session-responsiveness, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-preferences, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-approval, subagent-conversation, subagent-detached, subagent-history, task-notices, visual-review, workbench-layout
+  electron-agent/src/components/QuestionSelector/index.tsx → agent-message, chat-find, chat-follow, composer-prompt-clearance, dock-session-binding, goal-round-card, isolated-workspace, long-session-responsiveness, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, visual-review, workbench-layout
+  electron-agent/src/features/chat/ChatInput.tsx → request-recovery-feedback, session-compaction, session-project-transfer, workbench-layout
+  electron-agent/src/features/chat/ChatListView.tsx → request-recovery-feedback, session-compaction, workbench-layout
+  electron-agent/src/features/chat/ChatMessageItems.tsx → agent-message, chat-find, chat-follow, dock-session-binding, goal-round-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  electron-agent/src/features/chat/ChatView.tsx → request-recovery-feedback, session-compaction, workbench-layout
+  electron-agent/src/features/chat/CompactionStatusRow.tsx → agent-message, chat-find, chat-follow, dock-session-binding, goal-round-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  electron-agent/src/features/chat/GoalRoundPill.tsx → agent-message, chat-find, chat-follow, dock-session-binding, goal-round-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  electron-agent/src/features/chat/InlineQuestionCard.tsx → composer-prompt-clearance, long-session-responsiveness, request-recovery-feedback, session-compaction, session-project-transfer, visual-review, workbench-layout
+  electron-agent/src/features/chat/SubAgentGroupInline.tsx → agent-message, chat-find, chat-follow, dock-session-binding, goal-round-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  electron-agent/src/features/chat/SubAgentInline.tsx → agent-message, chat-find, chat-follow, dock-session-binding, goal-round-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  electron-agent/src/features/chat/SubagentSettledPill.tsx → agent-message, chat-find, chat-follow, dock-session-binding, goal-round-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  electron-agent/src/features/chat/TurnTimeline.tsx → agent-message, bash-job-card, chat-find, chat-follow, codemode-card, dock-session-binding, goal-round-card, invalid-arguments-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  electron-agent/src/features/chat/conv/ConvStrip.tsx → agent-message, chat-find, chat-follow, dock-session-binding, goal-round-card, isolated-workspace, panel-resize, plan-panel, request-recovery-feedback, rule-injection, session-archive, session-compaction, session-project-transfer, session-title, sidebar-sections, steer-cancel, subagent-conversation, subagent-detached, subagent-history, task-notices, workbench-layout
+  … 还有 121 个文件
+
+没有任何场景覆盖这些改动（新组件 / 新页面请补场景，补完用 check.mjs <场景> 跑）：
+  electron-agent/src/App.tsx
+
+影响全部场景（63）：electron-agent/ui-harness/harness.config.mjs：公共文件
+--dry-run：只列出范围，没有运行任何场景。要跑就去掉 --dry-run，或点名跑其中几个

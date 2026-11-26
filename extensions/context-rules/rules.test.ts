@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { activeRuleContextFiles, createRuleCache, parseRule, ruleAppliesToMode } from "./rules.js";
+import { referencedRuleFiles, activeRuleContextFiles, createRuleCache, parseRule, ruleAppliesToMode } from "./rules.js";
 
 function dirWith(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "context-rules-"));
@@ -43,7 +43,7 @@ describe("parseRule", () => {
 });
 
 describe("ruleAppliesToMode", () => {
-  const base = { id: "r", scope: "global" as const, path: "/r.md", title: "t", enabled: true, body: "b" };
+  const base = { modes: undefined, id: "r", scope: "global" as const, path: "/r.md", title: "t", enabled: true, body: "b" };
 
   it("没有 modes 的旧规则适用所有模式", () => {
     for (const mode of ["agent", "ask", "debug", "plan", "ultra"] as const) {
@@ -103,4 +103,16 @@ describe("createRuleCache with modes", () => {
     const cache = createRuleCache(vi.fn());
     expect(cache.load([{ dir, scope: "global" }])[0].modes).toEqual(["ultra"]);
   });
+});
+
+it("injects Glob rules only for matching project files referenced this turn", () => {
+  const root = process.cwd();
+  const rule = parseRule("ts", "project", "ts.md", "---\nglobs: ['src/**/*.ts']\nmodes: [agent]\n---\nTypeScript only");
+  const files = referencedRuleFiles('review @"src/two words.ts" @../external.ts\n<pi:attachment type="file" path="src/core/main.ts">\n@outside.ts\n</pi:attachment>', root);
+  expect(files.sort()).toEqual(["src/core/main.ts","src/two words.ts"]);
+  expect(activeRuleContextFiles([rule], "agent", files)).toHaveLength(1);
+  expect(activeRuleContextFiles([rule], "ask", files)).toEqual([]);
+  expect(activeRuleContextFiles([rule], "agent", ["src/x.js"])).toEqual([]);
+  expect(activeRuleContextFiles([rule], "agent")).toEqual([]);
+  expect(parseRule("bad","project","bad.md","---\nglobs: false\n---\nx").enabled).toBe(false);
 });

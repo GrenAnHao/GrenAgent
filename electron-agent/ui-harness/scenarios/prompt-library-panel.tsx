@@ -13,10 +13,16 @@ import { exposeActions, exposeData, installBridge, track } from '../stubs'
 let commands = [
   { name: 'refactor', description: '按指定风格重构文件', body: '请把 {file} 重构成 {style=functional} 风格。', params: [{ name: 'file' }, { name: 'style', defaultValue: 'functional' }], path: '/a/prompts/refactor.md' }
 ]
-let rules = [
+let rules: import("../../src/lib/promptLibraryIo").RuleInfo[] = [
   { id: 'zh', scope: 'global', path: '/a/rules/zh.md', title: '中文回答', enabled: true, body: '- 中文' },
   { id: 'ultra', scope: 'global', path: '/a/rules/ultra.md', title: 'Ultra 调度', enabled: true, body: '- 派工', modes: ['ultra'] },
-  { id: 'pnpm', scope: 'project', path: '/w/.pi/rules/pnpm.md', title: '用 pnpm', enabled: false, body: '- pnpm' }
+  { id: 'pnpm', scope: 'project', path: '/w/.pi/rules/pnpm.md', title: '用 pnpm', enabled: false, body: '- pnpm' },
+  {id:'/w/AGENTS.md', title:'AGENTS.md', scope:'project', path:'/w/AGENTS.md', enabled:true, body:'# 项目说明', builtinProject:'/w', currentProject:true},
+  ...['gpui-cef-poc', 'desktop-shell'].map(name => {
+    const project = 'D:\\OneDrive\\Project Files\\' + name, path = project + '\\AGENTS.md'
+    return { id:path, title:'AGENTS.md', scope:'project' as const, path, enabled:true,
+      body: name === 'gpui-cef-poc' ? '# Build notes\n\nUse the native compositor.' : '# Development\n\nRun tests locally.', builtinProject: project }
+  })
 ]
 
 /** probe 断言用：最近一次写到「盘上」的规则 */
@@ -28,6 +34,7 @@ installBridge({
   invoke: async (command: string, args: Record<string, unknown>) => {
     track(command)
     switch (command) {
+      case 'extension_directory': return '/a/prompts'
       case 'list_prompt_commands': return commands
       case 'agent_get_commands': return [{ name: 'goal', source: 'extension' }, { name: 'refactor', source: 'prompt' }]
       case 'save_prompt_command': {
@@ -35,7 +42,8 @@ installBridge({
         commands = [...commands.filter((c) => c.name !== args.originalName && c.name !== args.name), saved]
         return saved
       }
-      case 'list_context_rules': return rules
+      case 'list_context_rules': return rules.filter((r) => !r.builtinProject || !!args.workspace)
+      case 'save_builtin_rule': rules = rules.map((r) => r.path === args.path ? {...r, body:String(args.content)} : r); return
       case 'set_context_rule_enabled':
         rules = rules.map((r) => (r.scope === args.scope && r.id === args.id ? { ...r, enabled: Boolean(args.enabled) } : r))
         return undefined
@@ -65,12 +73,13 @@ installBridge({
 
 export default function PromptLibraryPanelScenario(): ReactElement {
   const [workspace, setWorkspace] = useState('/w')
+  const frame = { height: 'calc(100vh - 48px)', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden', containerType: 'inline-size', containerName: 'extension-content' } as const
   exposeActions({ setWorkspace, lastSavedRule: () => lastSavedRule })
   return (
     <App>
       <div style={{ height: '100vh', boxSizing: 'border-box', padding: 24, overflow: 'auto', background: 'var(--gren-content-bg)' }}>
-        <div data-testid="commands-area" style={{ containerType: 'inline-size', containerName: 'extension-content' }}><CommandsPanel workspace={workspace} onResourcesChanged={() => track('resources-changed')} /></div>
-        <div data-testid="rules-area" style={{ marginTop: 24, containerType: 'inline-size', containerName: 'extension-content' }}><RulesPanel key={workspace} workspace={workspace} /></div>
+        <div data-testid="commands-area" style={frame}><CommandsPanel workspace={workspace} onResourcesChanged={() => track('resources-changed')} /></div>
+        <div data-testid="rules-area" style={{ ...frame, marginTop: 24 }}><RulesPanel key={workspace} workspace={workspace} /></div>
       </div>
     </App>
   )

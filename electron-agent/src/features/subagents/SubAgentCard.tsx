@@ -1,6 +1,7 @@
 import { ActionIcon, Block, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import {
+  AlertTriangle,
   Ban,
   CheckCircle2,
   CircleDot,
@@ -11,6 +12,7 @@ import {
   PencilLine,
   XCircle,
 } from 'lucide-react';
+import { bashTimeoutOf, bashTimeoutDescription, subagentBashLabel } from '@extensions/multi-agent/background-bash';
 import { useMemo, type MouseEvent } from 'react';
 import { formatRelative } from '../../lib/relativeTime';
 import type { SubAgentItem } from '../../lib/pi';
@@ -61,6 +63,8 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextTertiary};
   `,
   pill: css`
+    font-weight: 500;
+    letter-spacing: 0.01em;
     display: inline-flex;
     align-items: center;
     gap: 3px;
@@ -125,7 +129,9 @@ interface SubAgentCardProps {
 
 export function SubAgentCard({ item, label, onOpen, onStop }: SubAgentCardProps) {
   const type = useMemo(() => parseSubAgentType(item.profile), [item.profile]);
-  const sm = statusMeta(item.status);
+  const bashLabel = subagentBashLabel(item.status, item.bashState);
+  const timeout = item.status === 'error' ? bashTimeoutOf(item.bashState) : undefined;
+  const sm = timeout ? { icon: AlertTriangle, color: cssVar.colorWarning, spin: false } : statusMeta(item.status);
   const running = item.status === 'running';
   const access = accessLabel(type);
   // 供应商 / 模型 · 思考档位；没记到档位时只显示模型。
@@ -155,6 +161,7 @@ export function SubAgentCard({ item, label, onOpen, onStop }: SubAgentCardProps)
         <span className={styles.title} title={item.task}>
           {label || item.task || '子代理任务'}
         </span>
+        {bashLabel ? <div style={{ color: sm.color, fontSize: 12 }} title={timeout ? bashTimeoutDescription(timeout) : undefined}>{bashLabel}</div> : null}
         <div className={styles.meta}>
           <span className={styles.pill} title={`预设：${type.preset}`}>
             {presetLabel(type.preset)}

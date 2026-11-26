@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { CodeRetrievalPanel } from '../../src/features/agentData/CodeRetrievalPanel'
 import { styles } from '../../src/features/agentData/agentDataStyles'
+import { useSidebarPrefsStore } from '../../src/stores/sidebarPrefsStore';
 import { useSessionStore } from '../../src/store'
 import { exposeData, installBridge, track } from '../stubs'
 
@@ -68,9 +69,12 @@ installBridge({
     switch (command) {
       case 'agentData_code_projects': return [{ workspace: WORKSPACE, indexed: true }]
       case 'agentData_code_status':
-        return { workspace: WORKSPACE, connected: true, indexed: true, state: 'ready', files: FILE_COUNT, nodes: 21000, edges: 52000, lastIndexedAt: Date.parse('2026-10-14T00:00:00.000Z') }
+        return { workspace: WORKSPACE, connected: true, indexed: true, state: 'indexed', files: FILE_COUNT, nodes: 21000, edges: 52000, lastIndexedAt: Date.parse('2026-10-14T00:00:00.000Z') }
       case 'agentData_code_call': {
         if (args.tool === 'codegraph_files') {
+          const filter = args.args as {languageCounts?:boolean;format?:string};
+          if (filter.languageCounts) return toolResult(fileRows.slice(0,10).map((r,i) => ({...r,incomingFiles:20-i})), {languages:{typescript:FILE_COUNT}});
+          if (filter.format === 'children') return toolResult([{file:'src',kind:'directory',fileCount:FILE_COUNT}], {page:{offset:0,total:1}});
           const { offset = 0, limit = FILE_COUNT } = args.args as FilesArgs
           // 和主进程一样：先切页，再带上过滤后的总数；一页最多 500。
           const page = fileRows.slice(offset, offset + Math.min(limit, 500))
@@ -87,6 +91,7 @@ installBridge({
   },
 })
 
+useSidebarPrefsStore.setState({keptProjects:[]});
 useSessionStore.setState({ registeredProjects: [WORKSPACE] })
 
 export default function CodeRetrievalPanelScenario(): ReactElement {

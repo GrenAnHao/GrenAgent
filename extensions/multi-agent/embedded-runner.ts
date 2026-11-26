@@ -39,6 +39,7 @@ import {
   type ActivationSettledInfo,
   type AgentSessionLike,
 } from "./activation.js";
+import type { SubagentBashState } from "./background-bash.js";
 import { describeUnfinishedRun, extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
 import type { SettlementNotice } from "./settlement-notice.js";
 import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
@@ -47,7 +48,7 @@ import { abortQuietly, Teardown } from "./teardown.js";
 import { guardListener } from "../_shared/guard-listener.js";
 import { wipeSessionFile, withForkNote, writeSeed } from "./fork-seed.js";
 import { readMaxDepth } from "./depth.js";
-import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
+import { buildSubagentRuntimeConfig, startsSubagentResponse, type AgentResult, type AgentUpdate } from "./runner.js";
 import { appendTranscriptTail, transcriptLineFromEvent } from "./transcript-tail.js";
 import {
   createStructuredCapture,
@@ -86,6 +87,7 @@ export interface EmbeddedSubagentOpts {
 
 export interface ContinuableEmbeddedOpts extends EmbeddedSubagentOpts {
   onSettled?: (info: ActivationSettledInfo) => void;
+  onBashPhase?: (state: SubagentBashState | null, reply?: string) => void;
   /** 父会话没有登记宿主时，结算通知的退路（见 activation.ts notifyParent）。 */
   deliverFallback?: (notice: SettlementNotice) => void;
 }
@@ -438,10 +440,12 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
   const deliverProgress = guardListener(`sub-agent ${opts.agentId} progress`, (build: () => AgentUpdate) => {
     if (opts.onUpdate) opts.onUpdate(build());
   });
-  deliverProgress(() => ({ text: "", transcript: "", sessionPath, thinkingLevel: runningThinkingLevel }));
+  deliverProgress(() => ({ text: "", transcript: "", sessionPath, thinkingLevel: runningThinkingLevel, responseStarted: false }));
 
   let transcript = "";
   let streamingDelta = "";
+  // 首个实质活动（正文/思考/工具调用）之后置位；之后的心跳帧保持为 true，父卡不再等最终 output。
+  let responseStarted = false;
   let emitTimer: ReturnType<typeof setTimeout> | undefined;
   let lastEmitAt = 0;
   const streamThrottleMs = Number(getConfig("SUBAGENT_STREAM_THROTTLE_MS") ?? "") || 150;
@@ -453,7 +457,7 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
       lastEmitAt = Date.now();
       deliverProgress(() => {
         const { output } = extractAssistantOutput(session.messages, { streamingDelta, skipPrefix: inheritedEventCount });
-        return { text: output, transcript, sessionPath, thinkingLevel: session.thinkingLevel };
+        return { text: output, transcript, sessionPath, thinkingLevel: session.thinkingLevel, responseStarted };
       });
     };
     if (elapsed >= streamThrottleMs) {
@@ -498,6 +502,16 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
     // 原始事件仍交给界面；这里只留剥掉快照后的 64KB 尾部，避免 partial 按输出长度平方留在堆上。
     transcript = appendTranscriptTail(transcript, transcriptLineFromEvent(event));
     streamingDelta = streamingDeltaFromEvent(event, streamingDelta);
+    // 首次实质活动不被流式节流压后：父卡要尽快从「等待首响应」进入「正在处理」。
+    const firstResponse = !responseStarted && startsSubagentResponse(event as { type?: string; assistantMessageEvent?: { type?: string } });
+    if (firstResponse) responseStarted = true;
+    if (firstResponse) {
+      lastEmitAt = 0;
+      if (emitTimer) {
+        clearTimeout(emitTimer);
+        emitTimer = undefined;
+      }
+    }
     scheduleEmit();
     emitEmbeddedSubagentEvent(event as unknown as Record<string, unknown>, {
       sessionId: session.sessionId,
@@ -881,6 +895,7 @@ export async function startContinuableEmbedded(
           ...(opts.deliverFallback ? { deliverFallback: opts.deliverFallback } : {}),
           // 进程内的会话结算后留在驻留池；worker 会话结算即退出，不占 worker 名额。
           keepResident: open === openEmbeddedChildSession,
+          onBashPhase: opts.onBashPhase,
           onSettled: (info) => {
             // 记账（注册表、名额）放在最后一步，前面哪一步出错都要走到。
             const teardown = child ? release(child, false) : new Teardown(opts.agentId);

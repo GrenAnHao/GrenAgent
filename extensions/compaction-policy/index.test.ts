@@ -66,6 +66,7 @@ describe("compaction-policy factory", () => {
     } as never);
     const ctx = {
       hasUI: true,
+      sessionManager: { getSessionId: () => 'policy-80', getSessionFile: () => '/s/policy-80.jsonl' },
       ui: { confirm, setStatus: () => {} },
       getContextUsage: () => ({ percent: 79 }),
       compact,
@@ -113,12 +114,12 @@ describe("compaction-policy factory", () => {
       ui: { setStatus: () => {} },
       getContextUsage: () => ({ percent: 85 }),
       compact,
-      sessionManager: { getSessionFile: () => "/s/a.jsonl" },
+      sessionManager: { getSessionId: () => 'policy-override', getSessionFile: () => "/s/a.jsonl" },
     };
     await handlers.turn_end?.({}, ctx);
     expect(compact).not.toHaveBeenCalled();
 
-    ctx.sessionManager = { getSessionFile: () => "/s/other.jsonl" };
+    ctx.sessionManager = { getSessionId: () => 'policy-override', getSessionFile: () => "/s/other.jsonl" };
     await handlers.turn_end?.({}, ctx);
     expect(compact).toHaveBeenCalledTimes(1);
   });
@@ -164,6 +165,7 @@ describe("compaction-policy factory", () => {
     const ctx = {
       ui: { setStatus: () => {} },
       getContextUsage: () => ({ percent: 80 }),
+      sessionManager: { getSessionId: () => 'policy-resume', getSessionFile: () => '/s/policy-resume.jsonl' },
       compact,
       hasPendingMessages: () => false,
     };
@@ -204,6 +206,7 @@ describe("compaction-policy factory", () => {
     const ctx = {
       ui: { setStatus: () => {} },
       getContextUsage: () => ({ percent: 90 }),
+      sessionManager: { getSessionId: () => 'policy-cancel', getSessionFile: () => '/s/policy-cancel.jsonl' },
       compact,
       hasPendingMessages: () => true,
     };

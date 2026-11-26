@@ -27,19 +27,19 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.5.1",
-    "@earendil-works/pi-ai": "1.5.1",
-    "@earendil-works/pi-coding-agent": "1.5.1",
-    "vitest": "^4.1.9"
+    "@earendil-works/pi-agent-core": "1.6.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@ast-grep/napi": "^0.45.3",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@vscode/ripgrep": "^1.18.0",
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
-    "ignore": "7.0.5",
+    "ignore": "7.0.16",
     "tinyglobby": "^0.2.17",
-    "typebox": "*"
+    "typebox": "1.4.7"
   }
 }

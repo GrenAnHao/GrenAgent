@@ -73,6 +73,7 @@ export default async function (t) {
   const data = await t.data()
 
   // —— 空查询：浏览整个项目的文件，主进程按页返回 ——
+  await t.click('[aria-label="平铺列表"]');
   t.ok('文件列表渲染出来', await t.waitFor(ROWS))
   await t.waitUntil(`document.querySelectorAll('${ROWS}').length === ${data.pageSize}`)
   t.check('3000 个文件只画第一页', await t.count(ROWS), data.pageSize)
@@ -91,8 +92,8 @@ export default async function (t) {
     const title = row.querySelector('strong')
     return !!title && title.textContent === 'index.ts' && row.textContent.includes('src/module-0000/index.ts')
   })()`))
-  t.ok('未选结果时右栏有引导空态', (await t.text(MAIN)).includes('未选择结果'))
-  t.ok('空态带图标', await t.js(`!!document.querySelector('${MAIN} svg')`))
+  t.ok('未选文件时右栏显示项目概览', (await t.text(MAIN)).includes('项目索引概览'))
+  t.check('概览中可直接打开十个核心文件', await t.count('[data-ranked-file]'), 10)
 
   // 滚到栏底，「显示更多」就在眼前，点得到
   await scrollToEnd(t, SPLIT)
@@ -256,7 +257,9 @@ export default async function (t) {
   await t.waitFor(SRC)
   const fileMain = await t.js(metrics(MAIN))
   const fileSource = await t.rect(SRC)
-  t.ok(`文件行源码框铺满详情列、底部无死白（${Math.round(fileSource.h)}px）`, fileSource.h > 400 && fileSource.bottom >= fileMain.bottom - 40)
+  const refs = await t.rect('[aria-label="文件引用关系"]');
+  const card = await t.rect('[aria-label="源码预览"]');
+  t.ok(`源码框与文件引用关系紧邻（${Math.round(fileSource.h)}px）`, fileSource.h > 400 && Math.abs(refs.y - card.bottom) <= 16 && refs.bottom <= fileMain.bottom + 2)
   t.ok('文件行详情不挂符号废话', !(await t.text(MAIN)).includes('未提供符号'))
   await t.shot('detail-file')
 

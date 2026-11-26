@@ -139,11 +139,11 @@ export function listOpenBrowserTabs(
     kind: string;
     region: 'right' | 'bottom';
     title: string;
-    payload: { url?: string; title?: string; faviconUrl?: string };
+    payload: object;
   }>,
 ): OpenBrowserTab[] {
   return tabs
-    .filter((tab) => tab.kind === 'browser')
+    .filter((tab): tab is typeof tab & { payload: { url?: string; title?: string; faviconUrl?: string } } => tab.kind === 'browser')
     .map((tab) => ({
       id: tab.id,
       region: tab.region,

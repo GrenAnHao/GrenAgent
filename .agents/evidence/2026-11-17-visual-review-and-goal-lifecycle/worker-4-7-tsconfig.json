@@ -1,0 +1,17 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "compilerOptions": { "composite": false, "noEmit": true },
+  "include": [
+    "../../../electron-agent/electron/agent/responseAttempt.ts",
+    "../../../electron-agent/electron/agent/responseAttempt.sdk.integration.test.ts",
+    "../../../electron-agent/electron/agent/compactionActivity.sdk.integration.test.ts",
+    "../../../electron-agent/electron/agent/workspaceHandle.ts",
+    "../../../electron-agent/electron/app/piRuntimeService.ts",
+    "../../../electron-agent/src/features/chat/ChatView.tsx",
+    "../../../electron-agent/src/features/chat/ChatInput.tsx",
+    "../../../electron-agent/src/features/chat/input/ContextUsageTag.tsx",
+    "../../../electron-agent/src/hooks/useSessionStats.ts",
+    "../../../electron-agent/src/stores/restoreRunningTurns.ts"
+  ],
+  "exclude": ["../../../electron-agent/node_modules"]
+}

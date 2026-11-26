@@ -15,6 +15,9 @@ export type GoalHistoryRoundItem = {
   goalId: string;
   revision: number;
   round: number;
+  runNumber?: number;
+  runRound?: number;
+  roundId?: string;
   content?: string;
 };
 
@@ -49,9 +52,16 @@ function readGoalRoundItem(entry: unknown): GoalHistoryRoundItem | undefined {
   const round = firstPositiveInt(details?.round, data?.round);
   if (!goalId || revision === undefined || round === undefined) return undefined;
   const content = firstString(record.content, data?.content, details?.content);
-  return content === undefined
-    ? { source: "round", goalId, revision, round }
-    : { source: "round", goalId, revision, round, content };
+  const runNumber = firstPositiveInt(details?.runNumber, data?.runNumber);
+  const runRound = firstPositiveInt(details?.runRound, data?.runRound);
+  const roundId = firstString(details?.roundId, data?.roundId);
+  return {
+    source: "round", goalId, revision, round,
+    ...(content === undefined ? {} : { content }),
+    ...(runNumber === undefined ? {} : { runNumber }),
+    ...(runRound === undefined ? {} : { runRound }),
+    ...(roundId === undefined ? {} : { roundId }),
+  };
 }
 
 export function listGoalHistory(entries: unknown[]): GoalHistoryItem[] {

@@ -11,8 +11,10 @@ Status: implemented
 - `CodeSourceLines` 是 CodeMirror 6 只读 viewer：`lineNumbers`、`syntaxHighlighting`（暗 oneDark / 明 default，跟 `useThemeMode`）、按文件名异步加载语言（`LanguageDescription.matchFilename`，cancelled flag 防换文件竞态）、目标行用 `StateField` + `Decoration.line` 画橄榄绿底 + 左侧强调条（`.cm-target-line`）、`scrollToLine` 走 `EditorView.scrollIntoView(..., { y: 'center' })`。对外 API 不变（`lines` / `target` / ref `scrollToLine`），新增 `path` 供语言识别。换文件整份替换文档但保留扩展与语言。
 - 行号栏背景必须不透明（`colorBgContainer`，viewer 宿主同色）：横向滚动时代码从 sticky 行号栏下穿过，透明底会让行号叠在代码上——用户实际报过的 bug。
 - `CodeSourceDetail` 单行紧凑工具栏：`N 行 · 只读` + 小号行号输入 + 跳转到行 + 复制/系统打开图标按钮（aria-label 保留旧可访问名，系统打开的 tooltip 写明不保证定位行号）；删「项目根目录」「行号定位…」「未提供行号」三段说明；viewer `flex: 1` 铺满卡片剩余高度。
-- 详情列 flex 布局：源码卡 `flex: 1`（min-height 240px）铺满；有符号时节点上下文 + 调用关系收进底部 `max-height: 38%` 限高、栏内滚动区；无符号时什么都不挂。
+- 详情列 flex 布局：源码卡 `flex: 1`（min-height 240px）铺满；有符号时节点上下文 + 调用关系收进底部 `max-height: 38%` 限高、栏内滚动区；无符号时不挂符号占位。现在文件详情底部展示真实文件依赖，见[项目索引浏览](2026-11-25-code-index-project-browser.md)。
 - 测试策略：jsdom 编排类测试（CodeSourceDetail / navigation / workbench）经 `codeSourceLinesStub` 替换 viewer，`scrollToLine` 记 spy；真实 viewer 由 CodeSourceLines.test（jsdom 已验证 CM 可渲染；scrollTo 给无操作替身）与 ui-harness code-retrieval-panel 场景覆盖。probe 源码段断言在 `.cm-line` / `.cm-target-line` / `.cm-scroller` 上：铺满、窗口化、跳行居中、长行横向滚动、行号栏不透明；夹具源码带空行（每 7 行一空行）守着行号对齐。注意夹具里 200 的倍数行是长注释，跳行断言按 `// line N:` 前缀写。
+
+- 预览器和语言包必须共用一份 `@codemirror/view`。桌面和 harness 的 Vite 解析以及 Vitest 的外置依赖都指向同一副本；否则语法树虽已解析，高亮插件却不会挂上实际的 EditorView。
 
 ## Alternatives considered
 

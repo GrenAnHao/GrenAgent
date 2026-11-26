@@ -3,9 +3,12 @@
  * 用于在 iframe sandbox 内渲染 HTML 片段，提供与 brainstorming skill 兼容的样式。
  */
 
+import fontStacks from '../../theme/fontStacks.css?raw';
+
 // 从 brainstorming skill 的 frame-template.html 提取的 CSS
 // 强制深色主题（Tauri WebView 内 prefers-color-scheme 不可靠，直接写死深色变量）
 export const FRAME_CSS = `
+${fontStacks}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: auto !important; overflow: visible !important; }
 
@@ -28,7 +31,7 @@ html, body { height: auto !important; overflow: visible !important; }
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.55;
@@ -37,14 +40,16 @@ body {
 }
 
 /* ===== TYPOGRAPHY ===== */
-h2 { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
+h1, h2, h3 { font-weight: 600; letter-spacing: -0.015em; }
+h2 { font-size: 1.15rem; margin-bottom: 4px; }
 h3 { font-size: 0.92rem; font-weight: 600; margin-bottom: 1px; color: var(--text-primary); }
 h4 { font-size: 0.84rem; font-weight: 600; margin-bottom: 6px; }
 p, .desc { color: var(--text-secondary); font-size: 0.84rem; margin: 0; line-height: 1.45; }
+code, pre { font-family: var(--font-mono); font-variant-ligatures: none; }
 code { font-size: 0.8rem; background: #22222c; border-radius: 4px; padding: 1px 5px; color: #a5b4fc; }
 .subtitle { color: var(--text-secondary); margin-bottom: 14px; font-size: 0.85rem; }
 .section { margin-bottom: 18px; }
-.label { font-size: 0.68rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; display: block; }
+.label { font-size: 0.68rem; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.01em; margin-bottom: 8px; display: block; }
 
 /* ===== OPTIONS ===== */
 .options { display: flex; flex-direction: column; gap: 7px; }
@@ -67,7 +72,7 @@ code { font-size: 0.8rem; background: #22222c; border-radius: 4px; padding: 1px 
   width: 26px; height: 26px; min-width: 26px;
   border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 0.78rem;
+  font-weight: 500; letter-spacing: 0.01em; font-size: 0.78rem;
   flex-shrink: 0;
   background: #28283a;
   color: var(--text-secondary);
@@ -118,6 +123,39 @@ code { font-size: 0.8rem; background: #22222c; border-radius: 4px; padding: 1px 
 .indicator-bar, .header { display: none !important; }
 #claude-content { padding: 0; }`;
 
+// Preview-only helper. Old frame pages may still call toggleSelect/brainstorm.choice to
+// switch a demonstration, but the iframe never publishes an answer to its parent.
+export const PREVIEW_HELPER_JS = `(function() {
+  window.selectedChoice = null;
+  window.toggleSelect = function(el) {
+    const container = el.closest('.options, .cards');
+    const multi = container && container.dataset.multiselect !== undefined;
+    if (container && !multi) container.querySelectorAll('.option, .card').forEach((option) => option.classList.remove('selected'));
+    el.classList.toggle('selected', !!multi ? !el.classList.contains('selected') : true);
+    window.selectedChoice = el.dataset.choice || el.dataset.value || null;
+  };
+  document.addEventListener('click', (event) => {
+    const target = event.target.closest('[data-choice], [data-value]');
+    if (target && !(target.getAttribute('onclick') || '').includes('toggleSelect')) window.toggleSelect(target);
+  });
+  window.brainstorm = {
+    choice(value) {
+      const el = document.querySelector('[data-choice="' + CSS.escape(value) + '"], [data-value="' + CSS.escape(value) + '"]');
+      if (el) window.toggleSelect(el);
+    },
+    send(event) { if (event.type === 'choice') this.choice(event.choice || event.value); },
+  };
+  function notifyResize() {
+    const height = document.documentElement.scrollHeight || document.body.scrollHeight;
+    if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'visual-resize', height }, '*');
+  }
+  window.addEventListener('DOMContentLoaded', notifyResize);
+  window.addEventListener('load', notifyResize);
+  notifyResize();
+})();`;
+
+// Historical feedback implementation is intentionally not injected into any preview.
+// Retained separately for reading old template behavior; reviews now use ask_user.
 // 改造后的 helper.js（WebSocket 替换为 postMessage，适配 GrenAgent iframe）
 export const HELPER_JS = `(function() {
   // ── 原版 helper.js（WebSocket 重连逻辑在 iframe 内无效，保留结构但 connect() 是 no-op）──
@@ -311,7 +349,7 @@ export const HELPER_JS = `(function() {
       '#visual-confirm-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483646;',
       'display: flex; align-items: center; justify-content: space-between; gap: 12px;',
       'padding: 10px 14px; background: rgba(15,15,18,0.94); border-top: 1px solid #2e2e38;',
-      "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }",
+      "font-family: var(--font-sans); }",
       '#visual-confirm-hint { font-size: 13px; color: #8888a0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
       '#visual-confirm-btn { flex-shrink: 0; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; background: #7c7cf8; color: #fff; }',
       '#visual-confirm-btn:disabled { cursor: default; background: #2a2a36; color: #6a6a80; }',
@@ -370,13 +408,11 @@ const LAYOUT_PATCH = `
 `;
 
 const FILL_PATCH = `
-/* html 定高、body 用 min-height：内容矮时比较区撑满剩余空间，内容高时 body 跟着长、整页滚动。
-   body 定高的话，溢出的内容后面没有底边距，确认条给 body 留的 padding-bottom 不起作用，最后一个选项会被条盖住。 */
+/* html 定高、body 用 min-height：比较区矮时撑满，内容高时随页面自然滚动。 */
 html { height: 100% !important; }
 body { height: auto !important; min-height: 100% !important; box-sizing: border-box !important; display: flex !important; flex-direction: column !important; }
-/* 确认条的 style 挂在 body 上。display 一旦不是 none，浏览器会把 CSS 原文画进页面。
-   确认条本身也是 body 的直接子节点：它是 fixed 的单行横条，被改成竖向 flex 会变成两行高，盖住底部的选项。 */
-body > *:not(script):not(style):not(#visual-confirm-bar), #claude-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* 不把 script/style 节点当成伸缩的预览内容。 */
+body > *:not(script):not(style), #claude-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 h1, h2, h3, h4, p, .subtitle, .label, .options, .option { flex: 0 0 auto !important; }
 .split, .cards { flex: 1 1 auto !important; min-height: 0 !important; }
 .mockup { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }
@@ -397,7 +433,7 @@ function injectStyle(html: string, css: string): string {
  */
 export function buildSrcDoc(html: string, options?: { fill?: boolean }): string {
   const isFullDoc = /^\s*<!doctype|^\s*<html/i.test(html);
-  const helperTag = `<script>\n${HELPER_JS}\n</script>`;
+  const helperTag = `<script>\n${PREVIEW_HELPER_JS}\n</script>`;
   const patch = `${isFullDoc ? LAYOUT_PATCH : ''}${options?.fill ? FILL_PATCH : ''}`;
 
   if (isFullDoc) {

@@ -43,7 +43,7 @@ const withDetails = (details: Record<string, unknown>, text = '') => ({
 function Item({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ fontSize: 11, color: 'var(--gren-fg-muted)', opacity: 0.7, fontFamily: 'ui-monospace, monospace' }}>
+      <div style={{ fontSize: 11, color: 'var(--gren-fg-muted)', opacity: 0.7, fontFamily: 'var(--font-mono)' }}>
         {label}
       </div>
       <ErrorBoundary>{children}</ErrorBoundary>

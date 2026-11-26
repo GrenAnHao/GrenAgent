@@ -41,6 +41,13 @@ export default async function (t) {
   t.ok('失败原因与产出分开呈现', (await t.text(`${card('sa-error')} [data-testid="subagent-settled-diagnostic"]`)).includes('boom'));
   await open(t, 'sa-timeout');
   t.ok('超时原因含真实时间', (await t.text(`${card('sa-timeout')} [data-testid="subagent-settled-diagnostic"]`)).includes('30s'));
+  await open(t, 'sa-bash-timeout');
+  t.ok('后台命令超时不冒充回复中止', (await t.text(head('sa-bash-timeout'))).includes('回复已完成 · 后台命令超时'));
+  t.ok('结算保留最终回复中原有诊断字样', await t.waitForText(`${card('sa-bash-timeout')} [data-testid="subagent-settled-body"]`, '这是回复内容'));
+  const bashDiagnostic = await t.text(`${card('sa-bash-timeout')} [data-testid="subagent-settled-diagnostic"]`);
+  t.ok('两条命令各自显示实际停止结果', bashDiagnostic.includes('bash-1') && bashDiagnostic.includes('已确认退出') && bashDiagnostic.includes('bash-2') && bashDiagnostic.includes('停止未确认'));
+  await t.js(`document.querySelector('${card('sa-bash-timeout')}').scrollIntoView({ block: 'center' })`);
+  await t.shot('subagent-bash-timeout-notice');
   await open(t, 'sa-done');
   t.ok('成功正文中的Diagnostic是正文而非失败诊断', await t.waitForText(`${card('sa-done')} [data-testid="subagent-settled-body"]`, 'this is quoted output'));
   t.check('成功正文不凭引用文案生成错误块', await t.count(`${card('sa-done')} [data-testid="subagent-settled-diagnostic"]`), 0);

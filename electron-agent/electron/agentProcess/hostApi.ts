@@ -1,4 +1,4 @@
-import type { HostApi, HostMethod, McpServerEntry } from './contract';
+import type { ConfirmedGoalOwnerLoss, HostApi, HostMethod, McpServerEntry } from './contract';
 import type { PermissionAuthorization } from '../app/permissionManager';
 
 type Request = <T>(method: HostMethod, params?: Record<string, unknown>) => Promise<T>;
@@ -12,6 +12,10 @@ export function hostApiOverRequest(request: Request): HostApi {
     allowedPluginIds: () => request<string[]>('host.allowedPluginIds'),
     authorize: (operation, profile) => request<PermissionAuthorization>('host.authorize', { operation, profile }),
     mergeRuntimeSettings: async (patch) => { await request('host.mergeRuntimeSettings', { patch }); },
+    invalidateSessionRecords: async (paths) => { await request('host.invalidateSessionRecords', { paths }); },
+    goalLossClaim: async (sessionPath, sessionId) =>
+      (await request<ConfirmedGoalOwnerLoss | null>('host.goalLossClaim', { sessionPath, sessionId })) ?? undefined,
+    goalLossAck: (loss) => request<boolean>('host.goalLossAck', { loss }),
     thread: {
       createThread: (input) => request('host.thread.createThread', input),
       createTurn: (input) => request('host.thread.createTurn', input),

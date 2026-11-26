@@ -64,7 +64,7 @@ describe('restoreInlineQuestionOnLoad', () => {
       expect(item?.data.kind).toBe('questions');
       expect(item?.data.questions[0]?.title).toBe('选哪个');
     });
-    expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1');
+    expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1', '/s/a.jsonl');
   });
 
   it('does not overwrite a live waiting overlay', async () => {
@@ -140,7 +140,7 @@ describe('restoreInlineQuestionOnLoad', () => {
     });
 
     restoreInlineQuestionOnLoad('/ws', pendingMsgs, '/s/a.jsonl');
-    await vi.waitFor(() => expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1'));
+    await vi.waitFor(() => expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1', '/s/a.jsonl'));
 
     const mid = useInlineQuestionStore.getState().byWorkspace['/ws'];
     // 旧卡已清；草稿未就绪前不得出现同 toolCallId 且 draft:null 的中间 restored。
@@ -214,7 +214,7 @@ describe('restoreInlineQuestionOnLoad', () => {
     });
 
     restoreInlineQuestionOnLoad('/ws', pendingMsgs, '/s/a.jsonl');
-    await vi.waitFor(() => expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1'));
+    await vi.waitFor(() => expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1', '/s/a.jsonl'));
 
     const laterMsgs = [
       {

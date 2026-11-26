@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { ActionIcon, Button, Icon } from '@lobehub/ui';
+import { ActionIcon, Icon } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../../components/WorkbenchButton';
 import { Wand2, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { pi } from '../../../lib/pi';

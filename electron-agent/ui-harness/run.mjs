@@ -9,8 +9,9 @@
 import { app, BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
 import config from './harness.config.mjs'
-import { distDir } from './distDir.mjs'
+import { distDir, failureRoot } from './distDir.mjs'
 import { createProbe, fitViewport } from './probe.mjs'
+import { createFailureRecorder, installFailureObserver } from './failure-recorder.mjs'
 
 // 输出被外部截断时（例如 `| head` 提前关掉管道），console.log 会抛 EPIPE
 // 把主进程打崩，run 半途死掉、后面的断言跟着莫名失败。这里吞掉写失败。
@@ -23,13 +24,23 @@ if (!scenario) {
   process.exit(1)
 }
 
+let win
+const recorder = createFailureRecorder({
+  scenario, root: failureRoot, getWindow: () => win,
+  screenshot: !config.failureScreenshotsDisabled?.includes(scenario)
+})
 const timer = setTimeout(() => {
   console.log(`TIMEOUT ${scenario}（${config.timeoutMs}ms）`)
-  app.exit(2)
+  recorder.fail('timeout')
+  void finish(2)
 }, config.timeoutMs)
 
-function finish(code) {
+let finishing = false
+async function finish(code) {
+  if (finishing) return
+  finishing = true
   clearTimeout(timer)
+  await recorder.settle()
   app.exit(code)
 }
 
@@ -58,7 +69,7 @@ async function emulateFocus(wc) {
 
 app.whenReady().then(async () => {
   try {
-    const win = new BrowserWindow({
+    win = new BrowserWindow({
       width: config.window.width,
       height: config.window.height,
       useContentSize: true,
@@ -94,6 +105,9 @@ app.whenReady().then(async () => {
       }
     })
 
+    const observe = () => win.webContents.executeJavaScript('(' + installFailureObserver.toString() + ')()')
+    // A probe may reload its document. The listener in each new document is idempotent.
+    win.webContents.on('dom-ready', () => { void observe().catch(() => {}) })
     await win.loadFile(join(distDir, 'index.html'), { hash: scenario })
     if (visible) win.showInactive()
     // 离屏渲染的视口会比请求的内容区大一两个像素，按实测的 innerWidth / innerHeight 校正
@@ -110,15 +124,17 @@ app.whenReady().then(async () => {
       if (!ready) await sleep(100)
     }
     if (!ready) {
-      const errors = await win.webContents.executeJavaScript('window.__uiErrors ?? []')
-      console.log(`FAIL ${scenario}: 页面没就绪 ${JSON.stringify(errors).slice(0, 500)}`)
-      finish(1)
+      console.log(`FAIL ${scenario}: 页面没就绪`)
+      recorder.fail('not-ready')
+      void win.webContents.executeJavaScript('window.__uiErrors ?? []')
+        .then(errors => console.log('  ' + JSON.stringify(errors).slice(0, 500))).catch(() => {})
+      await finish(1)
       return
     }
 
     const probeUrl = new URL(`./probes/${scenario}.mjs`, import.meta.url).href
     const { default: runProbe } = await import(probeUrl)
-    const t = createProbe(win, scenario, config)
+    const t = createProbe(win, scenario, config, recorder)
 
     console.log(`\n▸ ${scenario}`)
     await runProbe(t)
@@ -127,15 +143,20 @@ app.whenReady().then(async () => {
     const pageErrors = await win.webContents.executeJavaScript('window.__uiErrors ?? []')
     for (const error of pageErrors) {
       if (config.ignoredPageErrors.some((pattern) => pattern.test(error))) continue
+      recorder.fail('page-error', { error: new Error(String(error)) })
       t.ok(`无页面异常: ${String(error).slice(0, 160)}`, false)
     }
     // 一条断言都没有的 probe 多半是提前 return 了，不能算通过
-    if (t.passed + t.failed === 0) t.ok('probe 至少有一条断言', false)
+    if (t.passed + t.failed === 0) {
+      recorder.fail('no-assertions')
+      t.ok('probe 至少有一条断言', false)
+    }
 
     console.log(`  ── ${t.passed} passed, ${t.failed} failed`)
-    finish(t.failed > 0 ? 1 : 0)
+    await finish(t.failed > 0 ? 1 : 0)
   } catch (error) {
     console.log(`ERROR ${scenario}: ${error?.stack ?? error}`)
-    finish(1)
+    recorder.fail('probe-error', { error })
+    await finish(1)
   }
 })

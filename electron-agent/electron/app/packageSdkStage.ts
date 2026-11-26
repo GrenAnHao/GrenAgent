@@ -36,7 +36,7 @@ export function packageInstallUnit(snapshot: PackageSnapshot, cwd: string, agent
 
 async function directVersions(root: string, target: string): Promise<Record<string, string>> {
   if (!existsSync(root)) return {};
-  const file = await manifest(root).catch(async (error) => {
+  const file: Manifest = await manifest(root).catch(async (error) => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT' && (await readdir(root)).length === 0) return {};
     throw new Error('PACKAGE_NPM_MANIFEST_INVALID');
   });

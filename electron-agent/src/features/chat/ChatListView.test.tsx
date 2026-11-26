@@ -30,6 +30,8 @@ const mockState: {
   retrying?: { attempt: number; max: number };
   runActive?: boolean;
   compacting?: boolean;
+  compaction?: { phase: 'preparing' | 'running' };
+  compactionUnconfirmed?: boolean;
   excluded: Set<number>;
   waitingUiPrompt?: { kind: 'select' | 'confirm' | 'input' | 'editor' | 'custom'; title?: string };
 } = {
@@ -63,6 +65,8 @@ afterEach(() => {
   delete mockState.retrying;
   delete mockState.runActive;
   delete mockState.compacting;
+  delete mockState.compaction;
+  delete mockState.compactionUnconfirmed;
   mockState.excluded = new Set();
   delete mockState.waitingUiPrompt;
   useSessionStore.setState({ activeSessionPath: null });
@@ -164,17 +168,38 @@ describe('ChatListView', { timeout: 60_000 }, () => {
     expect(screen.getByText('正在处理…')).toBeTruthy();
   });
 
-  it('压缩进行中在列表末尾显示压缩状态行', () => {
+  it('用同一分隔线呈现准备、运行、待确认和完成，不叠加普通等待提示', () => {
     mockState.compacting = true;
-    mockState.isStreaming = true;
+    mockState.compaction = { phase: 'preparing' };
+    mockState.runActive = true;
     setMessages([{ kind: 'user', id: 'u1', text: 'hi' } as ChatMessage]);
-    render(
+    const list = () => (
       <ThemeProvider themeMode="dark">
         <ChatListView />
-      </ThemeProvider>,
+      </ThemeProvider>
     );
-    expect(screen.getByTestId('compaction-indicator').textContent).toContain('正在压缩');
+    const { rerender } = render(list());
+    expect(screen.getByTestId('compaction-indicator').textContent).toBe('正在准备压缩上下文…');
+    expect(screen.getByTestId('compaction-spinner')).toBeTruthy();
     expect(screen.queryByText('正在处理…')).toBeNull();
+
+    mockState.compaction = { phase: 'running' };
+    rerender(list());
+    expect(screen.getByTestId('compaction-indicator').textContent).toBe('正在压缩上下文…');
+    expect(screen.getByTestId('compaction-spinner')).toBeTruthy();
+
+    mockState.compactionUnconfirmed = true;
+    rerender(list());
+    expect(screen.getByTestId('compaction-indicator').textContent).toBe('暂时无法确认压缩状态');
+    expect(screen.queryByTestId('compaction-spinner')).toBeNull();
+
+    mockState.compacting = false;
+    setMessages([...mockState.messages, { kind: 'compaction', id: 'c1' }]);
+    rerender(list());
+    expect(screen.queryByTestId('compaction-indicator')).toBeNull();
+    expect(screen.getByTestId('compaction-done').textContent).toBe('上下文已压缩');
+    expect(screen.queryByTestId('compaction-spinner')).toBeNull();
+    expect(screen.getByText('正在处理…')).toBeTruthy();
   });
 
   it('助手正在输出时仍显示正在处理', () => {
@@ -221,7 +246,7 @@ describe('ChatListView', { timeout: 60_000 }, () => {
 
   it('本地 command-input 行出现在列表中', () => {
     useSessionStore.getState().setActiveSession('/tmp/s.json');
-    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完' });
+    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完', beforeCount: mockState.messages.length });
     render(
       <ThemeProvider themeMode="dark">
         <ChatListView />
@@ -237,7 +262,7 @@ describe('ChatListView', { timeout: 60_000 }, () => {
 
   it('末尾有本地 command-input 时，会话未结束仍显示正在处理', () => {
     useSessionStore.getState().setActiveSession('/tmp/s.json');
-    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完' });
+    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完', beforeCount: mockState.messages.length });
     mockState.isStreaming = true;
     setMessages([
       { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,

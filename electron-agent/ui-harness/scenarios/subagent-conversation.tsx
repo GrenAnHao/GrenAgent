@@ -12,6 +12,8 @@ import type { DockTab } from '../../src/stores/dockStore'
 import { exposeActions, exposeData, installBridge, track } from '../stubs'
 
 const liveWorkspace = 'ui-harness-child-live'
+// 详情按「原父会话 + 稳定 agentId」的观察键记录状态；场景里父会话是固定的。
+const liveParentPath = '/ui/parent-live.jsonl'
 const livePath = '/ui/child-live.jsonl'
 const liveTask = '后台子代理思考预览'
 const livePrefix = '检查实时思考的折叠预览。'
@@ -48,6 +50,18 @@ installBridge({
         { id: 'sa-nopath', task: nopathTask, status: nopathFinished ? 'done' : 'running', sessionPath: nopathPath, createdAt: 1, updatedAt: nopathFinished ? 3 : 2 },
         { id: 'sa-done', task: doneTask, status: 'done', sessionPath: donePath, createdAt: 1, updatedAt: 3 },
       ] satisfies SubAgentItem[]
+    }
+    if (command === 'subagent_lookup') {
+      // 详情按「原父会话 + 稳定 agentId」查单行；形状照 SubagentService.lookup。
+      track(`subagent_lookup:${String(args?.agentId)}`)
+      if (args?.parentSessionPath !== liveParentPath) return { kind: 'not-found' }
+      const rows: Record<string, SubAgentItem> = {
+        'sa-live': { id: 'sa-live', task: liveTask, status: liveFinished ? 'done' : 'running', sessionPath: livePath, createdAt: 1, updatedAt: liveFinished ? 3 : 2 },
+        'sa-nopath': { id: 'sa-nopath', task: nopathTask, status: nopathFinished ? 'done' : 'running', sessionPath: nopathPath, createdAt: 1, updatedAt: nopathFinished ? 3 : 2 },
+        'sa-done': { id: 'sa-done', task: doneTask, status: 'done', sessionPath: donePath, createdAt: 1, updatedAt: 3 },
+      }
+      const item = rows[String(args?.agentId)]
+      return item ? { kind: 'found', item } : { kind: 'not-found' }
     }
     if (command === 'subagent_get_session_messages') {
       if (args?.sessionPath === nopathPath) return { messages: nopathFinished ? [nopathUser, nopathMessage] : [nopathUser] }
@@ -141,14 +155,14 @@ const liveState = [
   { type: 'tool_execution_start', toolCallId: 'live-spawn', toolName: 'spawn_agent', args: { task: liveTask } },
   { type: 'tool_execution_end', toolCallId: 'live-spawn', toolName: 'spawn_agent', result: liveResult, isError: false },
 ].reduce((current, event) => applyEvent(current, event as AgentEvent), initialAgentState())
-const liveCtx = { ...mockCtx, workspace: liveWorkspace, store: { useStore: (selector: (value: typeof liveState) => unknown) => selector(liveState) } as unknown as AgentStoreApi }
+const liveCtx = { ...mockCtx, workspace: liveWorkspace, store: { useStore: (selector: (value: typeof liveState) => unknown) => selector(liveState), getLoadedSessionPath: () => liveParentPath } as unknown as AgentStoreApi }
 const liveTab: DockTab = { id: 'live-tab', kind: 'subagent', region: 'right', title: liveTask, closable: true, order: 0, payload: { messageId: liveState.messages[0]!.id, toolCallId: 'live-spawn' } }
 const nopathResult = { content: [{ type: 'text', text: 'Background sub-agent started.\nAgent: sa-nopath' }], details: { agentId: 'sa-nopath', status: 'running' } }
 const nopathState = [
   { type: 'tool_execution_start', toolCallId: 'nopath-spawn', toolName: 'spawn_agent', args: { task: nopathTask } },
   { type: 'tool_execution_end', toolCallId: 'nopath-spawn', toolName: 'spawn_agent', result: nopathResult, isError: false },
 ].reduce((current, event) => applyEvent(current, event as AgentEvent), initialAgentState())
-const nopathCtx = { ...mockCtx, workspace: liveWorkspace, store: { useStore: (selector: (value: typeof nopathState) => unknown) => selector(nopathState) } as unknown as AgentStoreApi }
+const nopathCtx = { ...mockCtx, workspace: liveWorkspace, store: { useStore: (selector: (value: typeof nopathState) => unknown) => selector(nopathState), getLoadedSessionPath: () => liveParentPath } as unknown as AgentStoreApi }
 const nopathTab: DockTab = { id: 'nopath-tab', kind: 'subagent', region: 'right', title: nopathTask, closable: true, order: 0, payload: { messageId: nopathState.messages[0]!.id, toolCallId: 'nopath-spawn' } }
 const doneResult = { content: [{ type: 'text', text: 'Background sub-agent started.\nAgent: sa-done' }], details: { agentId: 'sa-done', status: 'running' } }
 useLayoutStore.setState({ rightPanelOpen: true, sidebarOpen: false, availableWidth: 1420 })

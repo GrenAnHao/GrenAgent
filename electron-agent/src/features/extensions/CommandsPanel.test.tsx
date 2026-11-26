@@ -12,6 +12,7 @@ vi.mock('antd', async (importOriginal) => {
 });
 
 const io = vi.hoisted(() => ({
+  extensionDirectory: vi.fn(async () => '/real/agent/prompts'),
   listPromptCommands: vi.fn(),
   savePromptCommand: vi.fn(),
   deletePromptCommand: vi.fn(),
@@ -51,6 +52,29 @@ afterEach(() => {
 });
 
 describe('CommandsPanel', () => {
+  it('starts from a template and inserts snippets at the cursor without executing them or saving the file', async () => {
+    io.listPromptCommands.mockResolvedValue([]);
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('template-commit'));
+    expect(screen.queryByTestId('command-list')).toBeNull();
+    expect(screen.getByTestId('command-name-input')).toHaveValue('commit');
+    const body = screen.getByTestId('prompt-body-input') as HTMLTextAreaElement;
+    fireEvent.change(body, {target:{value:'审查：'}});
+    body.setSelectionRange(3,3);
+    fireEvent.click(screen.getByRole('button', {name:'@file'}));
+    expect(body).toHaveValue('审查：@{文件}');
+    expect(screen.getByTestId('command-preview')).toHaveTextContent('/commit <文件>');
+    expect(screen.getByRole('button',{name:'$ARGUMENTS'})).toBeDisabled();
+    body.setSelectionRange(0,body.value.length);
+    fireEvent.click(screen.getByRole('button', {name:'Git Diff'}));
+    expect(body.value).toContain('git diff');
+    body.setSelectionRange(0,body.value.length);
+    fireEvent.click(screen.getByRole('button', {name:'$ARGUMENTS'}));
+    expect(body).toHaveValue('$ARGUMENTS');
+    expect(screen.getByTestId('command-preview')).toHaveTextContent('/commit [参数…]');
+    expect(io.savePromptCommand).not.toHaveBeenCalled();
+  });
+
   it('返回目录后重新打开当前命令保留草稿，宽窄切换不替换编辑器', async () => {
     io.listPromptCommands.mockResolvedValue([refactor]);
     const view = (width: number) => (
@@ -186,4 +210,19 @@ describe('CommandsPanel', () => {
     await waitFor(() => expect(screen.getByTestId('command-error')).toHaveTextContent('/compact'));
     expect(screen.getByTestId('command-save')).toBeDisabled();
   });
+});
+
+it('refreshes the selected command from disk while preserving an edited draft', async () => {
+  io.listPromptCommands.mockResolvedValue([refactor]);
+  renderPanel();
+  fireEvent.click(await screen.findByTestId('command-item-refactor'));
+  io.listPromptCommands.mockResolvedValue([{ ...refactor, body:'external' }]);
+  fireEvent.click(screen.getByTestId('command-refresh'));
+  await waitFor(() => expect(screen.getByTestId('prompt-body-input')).toHaveValue('external'));
+  fireEvent.change(screen.getByTestId('prompt-body-input'), {target:{value:'my draft'}});
+  io.listPromptCommands.mockResolvedValue([{ ...refactor, body:'another external edit' }]);
+  await waitFor(() => expect(screen.getByTestId('command-refresh')).not.toBeDisabled());
+  fireEvent.click(screen.getByTestId('command-refresh'));
+  await waitFor(() => expect(io.listPromptCommands).toHaveBeenCalledTimes(3));
+  expect(screen.getByTestId('prompt-body-input')).toHaveValue('my draft');
 });

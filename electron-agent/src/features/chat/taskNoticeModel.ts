@@ -5,6 +5,7 @@
  * 真话优先：通知里没有的字段就留空；快照没读到就说没读到；未知状态不折算成完成。
  */
 import { parseSandboxNote } from '@extensions/_shared/sandbox/facts';
+import { bashTimeoutDescription, bashTimeoutOf, BASH_WAIT_TIMED_OUT } from '@extensions/multi-agent/background-bash';
 import type { JobLiveView } from '../../lib/pi';
 import type { JobLiveEntry } from '../../stores/jobLiveStore';
 import { formatRunDuration, sandboxModeLabel } from '../tools/bashCardModel';
@@ -495,6 +496,7 @@ export interface SubagentNoticeModel {
   closing: string;
   /** 结算时没有收尾正文：如实说明，不补摘要。 */
   noClosing: boolean;
+  replyCompleted?: true;
   diagnostic?: string;
   diagnosticText?: string;
   sessionPath?: string;
@@ -539,6 +541,17 @@ export function parseSubagentSettled(content: string | undefined | null, details
   const childId = text(meta?.childId) ?? SUBAGENT_ID.exec(summary)?.[1];
   const stopReason = text(meta?.stopReason);
   const sessionPath = text(meta?.sessionPath);
+  const bashTimeout = stopReason === 'error' ? bashTimeoutOf(meta?.bashTimeout) : undefined;
+  if (bashTimeout && typeof meta?.reply === 'string') {
+    return {
+      ...(childId ? { childId } : {}),
+      ...(sessionPath ? { sessionPath } : {}),
+      stopReason, outcome: 'timeout', statusText: BASH_WAIT_TIMED_OUT, tone: 'warn', glyph: outcomeGlyph('timeout'),
+      title: childId ? `子代理 ${childId} ${BASH_WAIT_TIMED_OUT}` : BASH_WAIT_TIMED_OUT,
+      closing: meta.reply, noClosing: !meta.reply.trim(), replyCompleted: true,
+      diagnosticText: bashTimeoutDescription(bashTimeout),
+    };
+  }
 
   // 没有结构化的 stopReason 时按真实摘要措辞兜底；认不出就是未知，不当成完成。
   const inferred = stopReason ?? (

@@ -20,6 +20,7 @@ Status: implemented
 
 - 传输：Node IPC，`serialization: 'advanced'`（结构化克隆）。两端各一个 `RpcPeer`（`agentProcess/rpcPeer.ts`）：`{t:'req'|'res'|'evt'}`，两个方向都能发请求。
 - 方法名只从 `agentProcess/contract.ts` 取：`AGENT_METHODS`（主 → 子）和 `HOST_METHODS`（子 → 主）。子进程的处理表类型是 `Record<AgentMethod, MethodHandler>`，增删方法必须两边同改。
+- 子代理状态按工作区、父会话路径、子代理 ID 经 `subagent_lookup → subagent.lookup → SubagentService.lookup` 查单行。Electron 注册 IPC 命令并不等于子进程端口已接通：缺主进程代理方法时，子代理在跑但卡片只会不断收到查询错误。沿用子进程里的精确查询，不改成查最近 50 条列表（会漏旧记录），也不把查询错误当运行状态。
 - 子进程推给窗口的事件一律走 `broadcast` 通道 `{channel, payload}`，主进程原样 `webContents.send`。渲染层看到的 `pi://event` / `pi://ui-request` / `pi://exit` / `pi://jobs` 信封和原来一样。
 - 错误跨进程只保证 `message` / `name` / `code` 原样还原。渲染层靠 `message` 判断 `SESSION_BUSY`、`SESSION_SWITCH_CANCELLED` 这类错误码。
 
@@ -112,5 +113,6 @@ Status: implemented
 
 ## Verification
 
+- 子代理状态查询回归：修复前，真实 `createAgentPorts` 接到 Electron IPC 时抛出 `service.lookup is not a function`；补齐后，IPC 和 Agent Host 端口定向测试通过。隔离的 Agent Host 子进程通过真实 IPC 和 SQLite 读到「运行中 → 已完成」，仍拒绝其他父会话查询，也能查到不在最近 50 条列表里的子代理。
 - 单测：`npx vitest run electron/agentProcess`（RPC 往返、拉起 / 就绪 / 崩溃重启 / 关停 / 超时杀树）。
 - 冒烟：`npx electron-vite build --mode localrun --outDir <临时目录>` 之后跑 `node scripts/agent-host-smoke.mjs --entry <临时目录>/main/agent-host.js --tools 300`。生产 CJS 字节码产物在本机跑不起来（pi 包只有 `import` 导出条件），字节码路径只能在打包后验证。它在临时 HOME 里用真实 agent-host、pi SDK 和扩展跑完拉起 → 打开工作区 → MCP 开 / 关 / 开 → 读状态 → 关停，并断言主进程事件循环不超过 200ms、关停后 MCP 进程跟着退出。不要用真实 Electron 主进程做这类测试：`app.getPath('home')` 不认 `USERPROFILE`，会写到真实的 `~/.pi`。

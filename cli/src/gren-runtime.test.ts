@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { makeGrenRuntimeFactory } from "./gren-runtime.js";
+import { sessionProjectTransferContext } from "./session-project-transfer-context.js";
 
 function fakeDeps(captured: Record<string, unknown>) {
   return {
@@ -15,7 +16,8 @@ function fakeDeps(captured: Record<string, unknown>) {
     manifestExtensions: [
       { name: "safety", factory: () => ({}) },
       { name: "code-exec", manifest: { id: "code-exec" }, factory: () => ({}) },
-    ] as never[],
+      { name: "lsp", manifest: { id: "lsp" }, factory: () => ({}) },
+    ],
     getConfig: (key: string): string | undefined => (key === "EXTENSIONS_PROFILE" ? "project" : undefined),
   };
 }
@@ -36,32 +38,33 @@ test("转发注入的 modelRuntime 到 services", async () => {
 
 test("allowedExtensionsJson 参与 filterManagedExtensions（只留 core + 白名单 id）", async () => {
   const captured: Record<string, unknown> = {};
+  const deps = fakeDeps(captured);
+  const [safety, codeExec] = deps.manifestExtensions;
   const factory = makeGrenRuntimeFactory({
     allowedExtensionsJson: JSON.stringify(["code-exec"]),
     extraFactories,
-    deps: fakeDeps(captured) as never,
+    deps: deps as never,
   });
   await factory({ cwd: "D:/p", agentDir: "D:/a", sessionManager: {} as never });
   const opts = captured.servicesOptions as { resourceLoaderOptions: { extensionFactories: unknown[] } };
-  // safety 恒在（CORE_ALWAYS_ON），code-exec 因白名单命中，再接 extraFactories
-  const filteredManifestLength = 2;
-  assert.equal(opts.resourceLoaderOptions.extensionFactories.length, filteredManifestLength + extraFactories.length);
+  assert.deepEqual(opts.resourceLoaderOptions.extensionFactories, [
+    sessionProjectTransferContext, safety.factory, codeExec.factory, ...extraFactories,
+  ]);
 });
 
-test("PI_SYSTEM_WORKER 不是 1 时，工厂数等于过滤后的 manifest 再加 extraFactories", async () => {
+test("PI_SYSTEM_WORKER 不是 1 时，工厂数包含迁移上下文、托管扩展和 extraFactories", async () => {
   const captured: Record<string, unknown> = {};
+  const deps = fakeDeps(captured);
   const factory = makeGrenRuntimeFactory({
-    allowedExtensionsJson: JSON.stringify(["code-exec"]),
     extraFactories,
-    deps: fakeDeps(captured) as never,
+    deps: deps as never,
   });
   await factory({ cwd: "D:/p", agentDir: "D:/a", sessionManager: {} as never });
   const opts = captured.servicesOptions as { resourceLoaderOptions: { extensionFactories: unknown[] } };
-  const filteredManifestLength = 2;
-  assert.equal(opts.resourceLoaderOptions.extensionFactories.length, filteredManifestLength + extraFactories.length);
+  assert.equal(opts.resourceLoaderOptions.extensionFactories.length, 1 + deps.manifestExtensions.length + extraFactories.length);
 });
 
-test("PI_SYSTEM_WORKER 为 1 时不加载扩展，也不追加 extraFactories", async () => {
+test("PI_SYSTEM_WORKER 为 1 时只加载迁移上下文工厂", async () => {
   const captured: Record<string, unknown> = {};
   const deps = fakeDeps(captured);
   deps.getConfig = (key: string) => (key === "PI_SYSTEM_WORKER" ? "1" : key === "EXTENSIONS_PROFILE" ? "project" : undefined);
@@ -71,7 +74,7 @@ test("PI_SYSTEM_WORKER 为 1 时不加载扩展，也不追加 extraFactories", 
   });
   await factory({ cwd: "D:/p", agentDir: "D:/a", sessionManager: {} as never });
   const opts = captured.servicesOptions as { resourceLoaderOptions: { extensionFactories: unknown[] } };
-  assert.equal(opts.resourceLoaderOptions.extensionFactories.length, 0);
+  assert.deepEqual(opts.resourceLoaderOptions.extensionFactories, [sessionProjectTransferContext]);
 });
 
 function fakeDepsWithSession(captured: Record<string, unknown>, entries: unknown[]) {

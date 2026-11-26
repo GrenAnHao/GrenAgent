@@ -118,10 +118,13 @@ describe('applyEvent', () => {
     expect(s.lastError).toBe('context length exceeded');
   });
 
-  it('clears compacting on agent_end (defensive)', () => {
+  it('keeps compaction independent of agent_end and agent_settled', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'compaction_start', reason: 'auto' } as AgentEvent);
     s = applyEvent(s, { type: 'agent_end' } as AgentEvent);
+    s = applyEvent(s, { type: 'agent_settled' } as AgentEvent);
+    expect(s.compacting).toBe(true);
+    s = applyEvent(s, { type: 'compaction_end', aborted: false, willRetry: false } as AgentEvent);
     expect(s.compacting).toBe(false);
   });
 
@@ -849,6 +852,7 @@ describe('applyEvent', () => {
         toolCallId: 'bash-1',
         toolName: 'bash',
         args: { command: 'cargo test' },
+        result: undefined,
         status: 'running',
       }],
     };
@@ -1402,6 +1406,35 @@ describe('pi 自动重试', () => {
     expect(s.isStreaming).toBe(true);
     expect(s.lastError).toBeUndefined();
     expect(s.retrying).toMatchObject({ attempt: 1, max: 3, error: '503 Service Unavailable' });
+  });
+
+  it('only a meaningful delta from the current attempt hides the retry explanation', () => {
+    const current = { runId: 21, attempt: 1 };
+    let s = applyEvent(failingRun(), { ...retryStart(1), responseAttempt: current } as AgentEvent);
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] }, responseAttempt: current } as AgentEvent);
+    expect(s.retrying?.error).toBe('502 Bad Gateway');
+    s = applyEvent(s, { type: 'message_update', responseAttempt: { runId: 21, attempt: 0 }, assistantMessageEvent: { type: 'thinking_delta', delta: '旧' } } as AgentEvent);
+    expect(s.retrying?.error).toBe('502 Bad Gateway');
+    s = applyEvent(s, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '无身份' } } as AgentEvent);
+    expect(s.retrying?.error).toBe('502 Bad Gateway');
+    s = applyEvent(s, { type: 'message_update', responseAttempt: current, assistantMessageEvent: { type: 'thinking_delta', delta: '新' } } as AgentEvent);
+    expect(s.retrying).toMatchObject({ attempt: 1, max: 3, recovered: true });
+    expect(s.retrying?.error).toBeUndefined();
+    s = applyEvent(s, failed('再次失败'));
+    expect(s.retrying?.error).toBe('再次失败');
+  });
+
+  it('tool-call first and successful complete response both withdraw a stale explanation', () => {
+    const current = { runId: 22, attempt: 1 };
+    const start = { ...retryStart(1), responseAttempt: current } as AgentEvent;
+    let s = applyEvent(failingRun(), start);
+    s = applyEvent(s, { type: 'message_update', responseAttempt: current,
+      assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: '{', id: 'tool-1', toolName: 'bash' } } as AgentEvent);
+    expect(s.retrying?.recovered).toBe(true);
+    s = applyEvent(failingRun(), start);
+    s = applyEvent(s, { ...ok, responseAttempt: current } as AgentEvent);
+    expect(s.retrying?.recovered).toBe(true);
   });
 
   it('重试成功后清掉重试条', () => {

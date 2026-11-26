@@ -1,0 +1,60 @@
+@import './fontStacks.css';
+
+@font-face {
+  font-family: "Inter";
+  src: url('../assets/fonts/inter-latin-wght-normal.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url('../assets/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: block;
+  font-feature-settings: 'liga' 0, 'calt' 0;
+}
+
+:root {
+  --gren-font-heading: 18px;
+  --gren-font-section: 16px;
+  --gren-font-body: 13px;
+  --gren-font-secondary: 12px;
+  --gren-font-caption: 11px;
+  --gren-font-mono: 12.5px;
+}
+
+html, body {
+  font-family: var(--font-sans);
+  font-kerning: normal;
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.tool-description { color: var(--gren-description); line-height: 1.5; }
+
+/* No Tailwind build step in the desktop renderer. Use its utility names directly. */
+.font-sans { font-family: var(--font-sans); }
+.font-mono, code, pre, kbd, samp, .cm-scroller, .xterm {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+:where(code, pre, kbd, samp, .font-mono) { font-size: var(--gren-font-mono); }
+pre code { font-size: inherit; }
+
+/* Native form controls and tables can otherwise reset inherited font properties. */
+:where(button, input, select, textarea) { font-family: var(--font-sans); }
+.tabular-nums, table, :where(button, input, select, textarea),
+.ant-badge-count, .ant-statistic-content { font-variant-numeric: tabular-nums; }
+:is(h1, h2, h3), .ant-card-head-title, .ant-modal-title {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.ant-tag, .ant-btn-sm, .ant-segmented-sm .ant-segmented-item-label {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}

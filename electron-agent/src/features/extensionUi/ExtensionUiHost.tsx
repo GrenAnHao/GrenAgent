@@ -1,10 +1,10 @@
 import { App } from 'antd';
 import { useEffect } from 'react';
-import { onPiEvent, onPiUiRequest } from '../../lib/pi';
+import { extensionUiRespond, onPiExit, onPiUiRequest } from '../../lib/pi';
 import { usePlanModeStore } from '../../stores/planModeStore';
 import { parsePlanStatus, usePlanStore } from '../../stores/planStore';
 import { openPlanDockTab } from '../plan/openPlanDockTab';
-import { applyGoalStatus } from './goalStatus';
+import { applyGoalOwnerLoss, applyGoalStatus, refreshGoalStatus, shouldConfirmGoalOwner } from './goalStatus';
 import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
 import { isAgentMode, useModeStore } from '../../stores/modeStore';
 import { useUiPromptStore } from '../../stores/uiPromptStore';
@@ -18,7 +18,7 @@ import {
 } from '../../lib/sessionPreferences';
 import { useWechatStatusStore, type WechatStatus } from '../../stores/wechatStatusStore';
 import { useImMessagesStore, type ImConversation } from '../../stores/imMessagesStore';
-import { settleVisualOnTurnEnd, useVisualStore, type VisualOwner } from '../../stores/visualStore';
+import { useVisualStore, type VisualOwner } from '../../stores/visualStore';
 import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
 import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
 import { isGoalReceiptNotify } from './goalReceiptNotify';
@@ -89,6 +89,11 @@ export function ExtensionUiHost() {
       });
     };
 
+    register(onPiExit((event) => {
+      if (!Array.isArray(event.confirmedGoalLosses)) return;
+      for (const loss of event.confirmedGoalLosses) applyGoalOwnerLoss(loss);
+    }));
+
     register(onPiUiRequest((e) => {
       // Goal workers are headless; their UI requests must never surface in the
       // interactive session's prompt cards or modal flow.
@@ -150,7 +155,10 @@ export function ExtensionUiHost() {
             if (parsed.reason === 'created' && parsed.plan) openPlanDockTab(owner);
           }
         } else if (r.statusKey === 'goal') {
-          applyGoalStatus(r.statusText, e.sessionId, e.sessionPath);
+          const accepted = applyGoalStatus(r.statusText, e.sessionId, e.sessionPath);
+          if (!accepted && e.sessionPath && shouldConfirmGoalOwner(r.statusText, e.sessionId)) {
+            void refreshGoalStatus(e.workspace, e.sessionPath);
+          }
         } else if (r.statusKey === 'mcp') {
           let servers: McpServerStatus[] = [];
           try {
@@ -201,7 +209,7 @@ export function ExtensionUiHost() {
           try {
             const d = typeof r.statusText === 'string' ? JSON.parse(r.statusText) : null;
             if (d?.action === 'show' && typeof d.html === 'string') {
-              useVisualStore.getState().setVisual(visualOwnerOf(e), d.html, d.mode === 'panel' ? 'panel' : 'inline');
+              useVisualStore.getState().setVisual(visualOwnerOf(e), d.html, d.mode === 'panel' ? 'panel' : 'inline', typeof d.previewId === 'string' ? d.previewId : undefined);
             }
           } catch { /* ignore malformed */ }
         }
@@ -232,13 +240,16 @@ export function ExtensionUiHost() {
           else useInlineQuestionStore.getState().setRequest(item);
           return;
         }
-        // visual choice 哨兵：read_visual_choice 阻塞中，按发起会话标记 pending 并记录 requestId（后台会话也要记，切回去才点得动）
+        // 旧 bundle 遗留的视觉等待只取消原请求，不放进当前询问卡或审批队列。
         try {
           const titleStr = typeof (e.request as { title?: unknown }).title === 'string'
             ? (e.request as { title: string }).title : null;
           const sentinel = titleStr ? JSON.parse(titleStr) : null;
           if (sentinel?.__visualChoice === 1) {
-            useVisualStore.getState().setPending(visualOwnerOf(e), true, e.request.id);
+            dismissUiRequest(e.request.id);
+            useVisualStore.getState().dismissRequest(e.request.id);
+            void extensionUiRespond(e.workspace, { type: 'extension_ui_response', id: e.request.id, cancelled: true })
+              .catch((error) => console.error('[visual] 无法取消旧评审等待：', error));
             return;
           }
         } catch { /* not visual */ }
@@ -250,8 +261,6 @@ export function ExtensionUiHost() {
         else useUiPromptStore.getState().setRequest(item);
       }
     }));
-    // 视觉设计确认没有 dismiss（read_visual_choice 超时只是工具自己返回），回合结束时收掉。
-    register(onPiEvent(settleVisualOnTurnEnd));
     return () => {
       disposed = true;
       for (const un of unsubs.splice(0)) un();

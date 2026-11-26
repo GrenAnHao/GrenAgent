@@ -1,0 +1,16 @@
+{
+  "bytesBefore": 683424,
+  "bytesAfter": 683561,
+  "listCount": 365,
+  "refreshPickedUpExternalTitle": true,
+  "unchangedFileIo": {
+    "fullReads": 1,
+    "bytes": 9647,
+    "unique": 1
+  },
+  "changedFileIo": {
+    "fullReads": 2,
+    "bytes": 693208,
+    "unique": 2
+  }
+}

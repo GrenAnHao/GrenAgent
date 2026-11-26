@@ -27,7 +27,7 @@ vi.setConfig({ testTimeout: 45000 });
 
 const rules = [
   { id: 'zh', scope: 'global', path: '/g/zh.md', title: '中文回答', enabled: true, body: '- 中文' },
-  { id: 'pnpm', scope: 'project', path: '/w/pnpm.md', title: '用 pnpm', enabled: false, body: '- pnpm' },
+  { id: 'pnpm', scope: 'project', path: '/ws/.pi/rules/pnpm.md', title: '用 pnpm', enabled: false, body: '- pnpm' },
   { id: 'bad', scope: 'global', path: '/g/bad.md', title: 'bad', enabled: false, body: '', error: 'YAML 错误' },
 ];
 
@@ -57,6 +57,7 @@ describe('RulesPanel', () => {
     const { rerender } = render(view(900));
     await waitFor(() => expect(screen.getByTestId('rule-open-global-zh')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-zh'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     const editor = screen.getByTestId('rule-body-input');
     fireEvent.change(editor, { target: { value: '未保存的正文' } });
     rerender(view(600));
@@ -78,6 +79,7 @@ describe('RulesPanel', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByTestId('rule-open-global-zh')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-zh'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     expect(screen.queryByTestId('rule-dirty')).toBeNull();
     expect(screen.getByTestId('rule-save')).toBeDisabled();
     fireEvent.change(screen.getByTestId('rule-body-input'), { target: { value: '未保存的正文' } });
@@ -86,7 +88,7 @@ describe('RulesPanel', () => {
     await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('rule-body-input')).toHaveValue('未保存的正文');
     fireEvent.click(screen.getByTestId('rule-open-project-pnpm'));
-    await waitFor(() => expect(screen.getByTestId('rule-title-input')).toHaveValue('用 pnpm'));
+    await waitFor(() => expect(screen.getByTestId('rule-detail-title')).toHaveTextContent('用 pnpm'));
     expect(ask).toHaveBeenCalledTimes(2);
   });
 
@@ -97,8 +99,8 @@ describe('RulesPanel', () => {
     expect(screen.getByTestId('rule-item-project-pnpm')).toHaveAttribute('data-enabled', 'false');
     fireEvent.click(screen.getByTestId('rule-open-project-pnpm'));
     expect(screen.getByTestId('rule-editor')).toHaveTextContent('已停用');
-    expect(screen.getByTestId('rule-scope-path')).toHaveTextContent('.pi/rules');
-    expect(screen.getByTestId('rule-delete')).toHaveTextContent(/^删除$/);
+    expect(screen.getByRole('button', { name:'复制文件路径' })).toHaveTextContent('.pi/rules');
+    expect(screen.getByTestId('rule-delete')).toHaveAccessibleName('删除规则');
     expect(screen.getByTestId('rule-workbench')).not.toHaveTextContent('名称、范围和正文修改后需要保存');
   });
 
@@ -119,6 +121,19 @@ describe('RulesPanel', () => {
     expect(screen.getByTestId('rule-item-project-pnpm')).toBeInTheDocument();
   });
 
+  it('全局预算只统计已启用全局正文，仓库数与文件数独立', async () => {
+    io.listContextRules.mockResolvedValue([rules[0],rules[2],
+      {id:'/ws/AGENTS.md', path:'/ws/AGENTS.md', title:'AGENTS.md',scope:'project',enabled:true,body:'ABC',builtinProject:'/ws',currentProject:true},
+      {id:'/ws/CLAUDE.md',path:'/ws/CLAUDE.md',title:'CLAUDE.md',scope:'project',enabled:false,body:'shadowed',builtinProject:'/ws'},
+      {...rules[1], enabled:true},
+      {id:'/else/AGENTS.md',path:'/else/AGENTS.md',title:'AGENTS.md',scope:'project',enabled:true,body:'excluded',builtinProject:'/else',currentProject:false},
+    ]);
+    renderPanel();
+    expect(await screen.findByTestId('rule-detail-title')).toHaveTextContent('中文回答');
+    expect(screen.getByTestId('rule-global-budget')).toHaveTextContent('全局常驻已启用：4 字 (≈ 3 tokens) · 项目内置规则 (2 个仓库)');
+    expect(screen.getByTestId('rule-filter-project')).toHaveTextContent('项目 (4)');
+  });
+
   it('开关立即写盘', async () => {
     io.listContextRules.mockResolvedValue(rules);
     io.setContextRuleEnabled.mockResolvedValue(undefined);
@@ -134,6 +149,7 @@ describe('RulesPanel', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByTestId('rule-open-global-zh')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-zh'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     fireEvent.change(screen.getByTestId('rule-body-input'), { target: { value: '未保存的正文' } });
     fireEvent.click(screen.getByTestId('rule-detail-toggle'));
     await waitFor(() => expect(screen.getByTestId('rule-detail-toggle')).toHaveAttribute('aria-checked', 'false'));
@@ -177,6 +193,7 @@ describe('RulesPanel', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByTestId('rule-open-global-zh')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-zh'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     fireEvent.click(screen.getByTestId('rule-toggle-global-zh'));
     await waitFor(() => expect(io.setContextRuleEnabled).toHaveBeenCalledWith('/ws', { scope: 'global', id: 'zh' }, false));
     fireEvent.change(screen.getByTestId('rule-title-input'), { target: { value: '中文回答 2' } });
@@ -212,7 +229,7 @@ describe('RulesPanel', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('已保存'));
   });
 
-  it('工作区变化时清掉草稿', async () => {
+  it('工作区变化时清掉旧草稿并选中新列表首项', async () => {
     io.listContextRules.mockResolvedValue(rules);
     const view = (workspace: string) => (
       <ThemeProvider><App><RulesPanel workspace={workspace} /></App></ThemeProvider>
@@ -220,9 +237,11 @@ describe('RulesPanel', () => {
     const { rerender } = render(view('/ws'));
     await waitFor(() => expect(screen.getByTestId('rule-open-global-zh')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-zh'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     expect(screen.getByTestId('rule-title-input')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('rule-title-input'), { target:{value:'旧草稿'} });
     rerender(view('/other'));
-    await waitFor(() => expect(screen.queryByTestId('rule-title-input')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('rule-detail-title')).toHaveTextContent('中文回答'));
   });
 
   it('保存挂起期间换工作区，完成后不回填草稿也不提示', async () => {
@@ -283,6 +302,7 @@ describe('RulesPanel 模式范围', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByTestId('rule-open-global-ultra')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-ultra'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     expect(screen.getByTestId('rule-mode-ultra')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('rule-mode-agent')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('rule-mode-all')).toHaveAttribute('aria-pressed', 'false');
@@ -315,6 +335,7 @@ describe('RulesPanel 模式范围', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByTestId('rule-open-global-ultra')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-ultra'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     fireEvent.click(screen.getByTestId('rule-mode-ultra'));
     fireEvent.click(screen.getByTestId('rule-save'));
     await waitFor(() => expect(io.saveContextRule).toHaveBeenCalledWith(expect.objectContaining({ modes: undefined })));
@@ -325,6 +346,7 @@ describe('RulesPanel 模式范围', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByTestId('rule-open-global-zh')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('rule-open-global-zh'));
+    fireEvent.click(screen.getByTestId('rule-edit'));
     expect(screen.getByTestId('rule-mode-all')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByTestId('rule-mode-plan'));
     expect(screen.getByTestId('rule-mode-all')).toHaveAttribute('aria-pressed', 'false');

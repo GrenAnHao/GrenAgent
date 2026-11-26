@@ -2,6 +2,8 @@
 
 Status: implemented
 
+部分取代：原会话 owner、预览／标签归属和跨会话可见性继续有效；下文的页面确认条、supplement 回传、`submitVisualChoice` 与 `read_visual_choice` 等待仅记录已退出的实现，不是现行输入规范。当前唯一评审通道为带 previewId 的原生 ask_user，见[视觉评审与生命周期修复](2026-11-17-visual-review-and-goal-lifecycle.md)。旧页面能预览，不能批准新版。
+
 ## Problem
 
 会话 A 发起视觉设计（`show_visual` + `read_visual_choice`），不结束就切到会话 B；在 B 里从右侧标签入口打开预览，看到的标签挂在 B 名下，点「确定」没有任何反应，A 里的 `read_visual_choice` 一直等到超时。单会话内一切正常。

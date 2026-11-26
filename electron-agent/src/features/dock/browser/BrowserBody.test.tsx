@@ -309,7 +309,7 @@ describe('BrowserBody', () => {
       expect(document.querySelectorAll('webview')).toHaveLength(1);
       expect(document.querySelector('webview')).not.toBe(view);
     });
-    const rebuilt = document.querySelector('webview')!;
+    const rebuilt = document.querySelector<HTMLElement>('webview')!;
     expect(rebuilt).not.toBe(view);
     expect(rebuilt.getAttribute('src')).toBe('https://live.test/');
   });
@@ -339,7 +339,7 @@ describe('BrowserBody', () => {
     await waitFor(() => {
       expect(document.querySelector('webview')).not.toBe(view);
     });
-    const rebuilt = document.querySelector('webview')!;
+    const rebuilt = document.querySelector<HTMLElement>('webview')!;
     dispatchGone(rebuilt, { reason: 'crashed', exitCode: 1 });
     expect(document.querySelector('webview')).toBe(rebuilt);
     act(() => {

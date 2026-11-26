@@ -143,7 +143,7 @@ async function initializeDraft(workspace: string, ownerKey: string): Promise<Pre
   return { ok: true };
 }
 
-/** 同一 owner 的在途会话读取：三个控件同时挂载只打一次后端。 */
+/** 同一 owner 的在途初始化读取（草稿与会话都算）：三个控件同时挂载只打一次后端。 */
 const inflightEnsure = new Map<string, Promise<PreferenceWriteResult>>();
 
 /**
@@ -151,20 +151,20 @@ const inflightEnsure = new Map<string, Promise<PreferenceWriteResult>>();
  * 会话：带原始路径读 getState（只读，不调用 setter）；草稿：本地快照/默认。
  *
  * 会话每次都重新读后端（切回/重挂都要看到另一个窗口写入的新版本）；缓存只负责先显示，
- * 不能用它短路读取。同一 owner 并发调用会合并成一次。
+ * 不能用它短路读取。同一 owner 并发调用会合并成一次——草稿也合并：三个控件同时挂载
+ * 只发一次初始化，否则并发 defaults 读会在后端前景会话锁上互撞出 LEASE_BUSY。
  */
 export async function ensureComposerPreferences(
   workspace: string,
   ownerKey: string,
 ): Promise<PreferenceWriteResult> {
-  if (isDraftOwner(ownerKey)) return initializeDraft(workspace, ownerKey);
-
   const key = canonicalOwnerKey(ownerKey);
   const inflight = inflightEnsure.get(key);
   if (inflight) return inflight;
-  const pending = loadSessionPreferences(workspace, ownerKey).finally(() => {
-    if (inflightEnsure.get(key) === pending) inflightEnsure.delete(key);
-  });
+  const pending = (isDraftOwner(ownerKey) ? initializeDraft(workspace, ownerKey) : loadSessionPreferences(workspace, ownerKey))
+    .finally(() => {
+      if (inflightEnsure.get(key) === pending) inflightEnsure.delete(key);
+    });
   inflightEnsure.set(key, pending);
   return pending;
 }

@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { onSend, cancelPendingOverlay, getDocument, cleanDocument, setDocument, dispatchCommand, toastError, abortEnhancePrompt, chatState, sessionState } = vi.hoisted(() => ({
   sessionState: { activeSessionPath: null as string | null },
-  onSend: vi.fn(() => Promise.resolve()),
-  cancelPendingOverlay: vi.fn(() => Promise.resolve('cancelled' as const)),
+  onSend: vi.fn<import("react").ComponentProps<typeof import("./ChatInput").ChatInput>["onSend"]>(() => Promise.resolve()),
+  cancelPendingOverlay: vi.fn<typeof import('./input/overlayPrompt').cancelPendingOverlay>(() => Promise.resolve('cancelled' as const)),
   getDocument: vi.fn(() => 'hello'),
   cleanDocument: vi.fn(),
   setDocument: vi.fn(),
@@ -223,8 +223,8 @@ describe('ChatInput send overlay cancel', () => {
   });
 
   it('A 发送失败的迟到回执只恢复 A 的草稿，不覆盖当前 B 的编辑器', async () => {
-    let finish!: (value: string) => void;
-    onSend.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve; }));
+    let finish!: (value: 'failed') => void;
+    onSend.mockImplementationOnce(() => new Promise<'failed'>((resolve) => { finish = resolve; }));
     sessionState.activeSessionPath = '/ws/a.jsonl';
     const view = render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
     fireEvent.click(screen.getByTestId('do-send'));

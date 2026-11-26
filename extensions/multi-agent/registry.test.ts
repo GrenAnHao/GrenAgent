@@ -176,6 +176,62 @@ describe("SubAgentRegistry", () => {
     r.close();
   });
 
+  it("markResponseStarted records the first activity once and finish clears the temporary flag", () => {
+    const r = reg();
+    r.create({ id: "sa-resp0001", task: "t" });
+    expect(r.get("sa-resp0001")?.responseStarted).toBe(0);
+    r.markResponseStarted("sa-resp0001");
+    expect(r.get("sa-resp0001")?.responseStarted).toBe(1);
+    // 结算后临时位清回 0；终态显示不依赖它。
+    r.finish("sa-resp0001", { status: "done", output: "out", exitCode: 0 });
+    expect(r.get("sa-resp0001")?.responseStarted).toBe(0);
+    r.close();
+  });
+
+  it("markResponseStarted is not throttled by progress and is a no-op after finish", () => {
+    const r = reg();
+    r.create({ id: "sa-resp0002", task: "t" });
+    r.progress("sa-resp0002", "frame");
+    r.markResponseStarted("sa-resp0002");
+    expect(r.get("sa-resp0002")?.responseStarted).toBe(1);
+    r.finish("sa-resp0002", { status: "done", output: "out", exitCode: 0 });
+    r.markResponseStarted("sa-resp0002");
+    expect(r.get("sa-resp0002")?.responseStarted).toBe(0);
+    r.close();
+  });
+
+  it("reopens a settled row for a follow-up round with the flag cleared", () => {
+    const r = reg();
+    r.create({ id: "sa-resp0003", task: "t" });
+    r.markResponseStarted("sa-resp0003");
+    r.finish("sa-resp0003", { status: "done", output: "out", exitCode: 0 });
+    // 续聊把同一行重新打开：新一轮还没有活动，重新等待证据。
+    r.finish("sa-resp0003", { status: "running" });
+    expect(r.get("sa-resp0003")).toMatchObject({ status: "running", responseStarted: 0 });
+    r.markResponseStarted("sa-resp0003");
+    expect(r.get("sa-resp0003")?.responseStarted).toBe(1);
+    r.close();
+  });
+
+  it("migrates an old db by adding the responseStarted column", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sa-reg-resp-"));
+    dirs.push(dir);
+    const file = join(dir, "registry.db");
+    const raw = new DatabaseSync(file);
+    raw.exec(
+      `CREATE TABLE subagents (id TEXT PRIMARY KEY, task TEXT NOT NULL, profile TEXT, model TEXT, status TEXT NOT NULL, output TEXT, error TEXT, exitCode INTEGER, transcript TEXT, sessionPath TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)`,
+    );
+    raw.prepare("INSERT INTO subagents VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run("sa-old00001", "t", null, null, "running", null, null, null, null, null, 1, 1);
+    raw.close();
+    const reg = new SubAgentRegistry(file);
+    reg.load();
+    expect(reg.get("sa-old00001")?.responseStarted).toBe(0);
+    reg.markResponseStarted("sa-old00001");
+    expect(reg.get("sa-old00001")?.responseStarted).toBe(1);
+    reg.close();
+  });
+
   it("migrates an old db without parentId/depth and persists them on create", () => {
     const dir = mkdtempSync(join(tmpdir(), "sa-reg-mig-"));
     dirs.push(dir);

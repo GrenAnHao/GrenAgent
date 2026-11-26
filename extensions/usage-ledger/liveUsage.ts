@@ -1,3 +1,4 @@
+import { usageSessionMetadata } from "./sessionMetadata.js";
 import { callFromMessage, callKey, defaultLedgerPath, sharedLedger, warmFromEntry, warmKey, type UsageLedger } from './ledger.js';
 import { sharedOriginRegistry, type UsageOriginRegistry } from './originRegistry.js';
 
@@ -14,7 +15,11 @@ export function attachUsageEntryTracking(session:any,agentDir:string,options:{le
       const call=entry.type==='message'?callFromMessage(entry.message,sessionId,entry.timestamp):null;
       if(!warm&&!call)return;
       registry.registerLocalEntry(ref,manager.getSessionFile());
-      if(warm){ledger.recordWarm(warm);registry.bindLedgerKey(ref,warmKey(warm));}
+      if (warm) {
+        // Warming can precede the first assistant reply; it must still belong to the right project.
+        ledger.transaction(() => { ledger.upsertSession(usageSessionMetadata(manager)); ledger.recordWarm(warm); });
+        registry.bindLedgerKey(ref, warmKey(warm));
+      }
       else if(call){call.entryId=entry.id;const key=callKey(call);if(key){ledger.record(call,'live');registry.bindLedgerKey(ref,key);}}
     }catch {console.error('[usage-ledger] persisted usage could not be registered');}
   };

@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { listRunningTurns } = vi.hoisted(() => ({ listRunningTurns: vi.fn() }));
+const { listRunningTurns, getState } = vi.hoisted(() => ({ listRunningTurns: vi.fn(), getState: vi.fn(async () => ({})) }));
 vi.mock('../lib/pi', () => ({
-  pi: { listRunningTurns, getState: vi.fn(async () => ({})) },
+  pi: { listRunningTurns, getState },
   onPiEvent: () => Promise.resolve(() => {}),
   onPiExit: () => Promise.resolve(() => {}),
 }));
 
 import { loadRunningTurns, planRunningRestore, restoreRunningTurns, restoredRunStartedAt, type RunningTurn } from './restoreRunningTurns';
 import { handleRunningEvent, resetRunningSessionsForTest } from './runningSessions';
-import { useAgentRegistryStore } from './agentStoreRegistry';
+import { agentStoreRegistry, useAgentRegistryStore } from './agentStoreRegistry';
 
 const live: RunningTurn = { workspace: '/proj', sessionId: 's1', sessionPath: '/proj/s1.jsonl' };
 
@@ -34,8 +34,14 @@ describe('loadRunningTurns', () => {
     const getState = vi.fn(async () => ({ isStreaming: true, sessionId: 's1', sessionFile: '/proj/s1.jsonl' }));
     await expect(loadRunningTurns(async () => {
       throw new Error('Electron command is not registered: agent_list_running_turns');
-    }, getState, '/proj')).resolves.toEqual([live]);
+    }, getState, '/proj')).resolves.toEqual([{ ...live, isStreaming: true, isCompacting: false }]);
     expect(getState).toHaveBeenCalledWith('/proj');
+  });
+
+  it('recovers standalone compaction without fabricating a streaming reply', async () => {
+    const getState = vi.fn(async () => ({ isStreaming: false, isCompacting: true, sessionId: 's1', sessionFile: '/proj/s1.jsonl' }));
+    await expect(loadRunningTurns(async () => { throw Error('old host'); }, getState, '/proj'))
+      .resolves.toEqual([{ ...live, isStreaming: false, isCompacting: true }]);
   });
 
   it('does not clear running state when getState also fails', async () => {
@@ -63,6 +69,8 @@ describe('restoreRunningTurns', () => {
   afterEach(() => {
     resetRunningSessionsForTest();
     listRunningTurns.mockReset();
+    getState.mockReset().mockResolvedValue({});
+    agentStoreRegistry.release('/proj');
   });
 
   it('按主进程快照对账：跑完的会话熄灭，仍在跑的点亮', async () => {
@@ -70,6 +78,26 @@ describe('restoreRunningTurns', () => {
     listRunningTurns.mockResolvedValue([live]);
     await restoreRunningTurns();
     expect(useAgentRegistryStore.getState().runningSessionPaths).toEqual(['/proj/s1.jsonl']);
+  });
+
+  it('marks live compaction unconfirmed when both host reads fail without clearing its last known state', async () => {
+    const store = agentStoreRegistry.getOrCreate('/proj');
+    store.bindSessionPath(live.sessionPath!);
+    store.useStore.setState({ compacting: true, isStreaming: false });
+    listRunningTurns.mockRejectedValue(new Error('host not ready'));
+    getState.mockRejectedValueOnce(new Error('host not ready'));
+    await restoreRunningTurns();
+    expect(store.useStore.getState()).toMatchObject({ compacting: true, compactionUnconfirmed: true });
+    listRunningTurns.mockResolvedValue([{ ...live, isStreaming: false, isCompacting: true }]);
+    await restoreRunningTurns();
+    expect(store.useStore.getState()).toMatchObject({ compacting: true, compactionUnconfirmed: false });
+  });
+
+  it('lists standalone compaction while the reply flag stays off', async () => {
+    listRunningTurns.mockResolvedValue([{ ...live, isStreaming: false, isCompacting: true,
+      compaction: { ownerEpoch: 'epoch', operationId: 'compact-1', phase: 'running', startedAt: 123, sequence: 1 } }]);
+    await restoreRunningTurns();
+    expect(useAgentRegistryStore.getState().runningSessionPaths).toContain(live.sessionPath);
   });
 
   it('快照里没有它、等待期间它自己也没动：熄灭（同项目别的会话在跑也算）', async () => {

@@ -8,6 +8,7 @@ const styles = createStaticStyles(({ css }) => ({
     max-width: 100%;
     overflow: auto;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12.5px;
     line-height: 1.65;
     white-space: pre-wrap;

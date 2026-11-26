@@ -11,6 +11,9 @@ import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, PromptOption
 import { expandSpacedSkillCommand, skillsFromSession } from './expandSkillCommand.js';
 import { SessionUiAdapter } from './sessionUiAdapter.js';
 import { toRendererEvent } from './streamingEvent.js';
+import { createResponseAttemptBinder } from './responseAttempt.js';
+import { captureGoalOwnerFailureFence, controlGoal, reportGoalOwnerFailure, type GoalControlRequest, type GoalControlReceipt } from '../../../extensions/goal/control.js';
+import { forgetCompactionActivity, getCompactionActivity, getCompactionContextRevision, getCompactionOwnerEpoch, getCompactionSequence, observeCompactionEvent, subscribeCompactionActivity } from '../../../extensions/_shared/compaction-activity.js';
 import { createDeltaCoalescer, createToolcallDeltaCoalescer, STREAM_DELTA_TYPES } from './toolcallDeltaCoalescer.js';
 
 /**
@@ -70,6 +73,7 @@ export function snapshotSessionModel(model: unknown): Record<string, unknown> | 
 export class WorkspaceHandle {
   readonly ui: SessionUiAdapter;
   private unsubscribe: (() => void) | undefined;
+  private unsubscribeCompaction: (() => void) | undefined;
   private unsubChildEvents: (() => void) | undefined;
   private unsubCatalogEvents: (() => void) | undefined;
   private disposed = false;
@@ -79,6 +83,7 @@ export class WorkspaceHandle {
   private unregisterParentHost: (() => void) | undefined;
   private switching = false;
   private deltas = createToolcallDeltaCoalescer((event) => this.forward(event));
+  private readonly responseAttempt = createResponseAttemptBinder();
   /** 每个子会话一个合并器（按 sessionPath），子会话结束或 handle 拆掉时冲掉。 */
   private readonly childDeltas = new Map<string, DeltaCoalescer>();
 
@@ -161,13 +166,41 @@ export class WorkspaceHandle {
   }
 
   async prompt(text: string, options: { images?: ImageContent[]; streamingBehavior?: 'steer' | 'followUp' }, origin: TurnOrigin): Promise<void> {
-    const config = await this.options.resolveConfig(origin);
+    const session = this.session;
+    const sessionId = session.sessionId;
+    const ownsWork = !session.isStreaming && !session.isCompacting && !text.trimStart().startsWith('/');
+    let failureFence = ownsWork ? captureGoalOwnerFailureFence(sessionId) : undefined;
+    let sdkSettled = false;
+    let capturedStart = false;
+    const reportFailure = () => {
+      if (!failureFence || sdkSettled) return;
+      reportGoalOwnerFailure(sessionId, { kind: 'runtime-error', ...failureFence }, failureFence.ownerEpoch);
+    };
+    let config: Readonly<Record<string, string>>;
+    let prepared: string;
+    try {
+      config = await this.options.resolveConfig(origin);
+      prepared = expandSpacedSkillCommand(text, skillsFromSession(session));
+    } catch (error) {
+      reportFailure();
+      throw error;
+    }
     this.turnOrigin = origin;
-    // Pi 按第一个空格切 `/skill:` 名字。含空格的技能在这里展开，否则对不上已加载的技能。
-    const prepared = expandSpacedSkillCommand(text, skillsFromSession(this.session));
+    // SDK awaits extension agent_start handlers before notifying public listeners.
+    // Capture this runner once at that boundary, not the current pending in catch.
+    const offGoal = ownsWork ? session.subscribe((event) => {
+      if (event.type === 'agent_start' && !capturedStart) {
+        capturedStart = true;
+        failureFence = captureGoalOwnerFailureFence(sessionId);
+      }
+      if (event.type === 'tool_execution_end' && event.toolName === 'create_goal' && !event.isError && !failureFence) {
+        failureFence = captureGoalOwnerFailureFence(sessionId);
+      }
+      if (event.type === 'agent_settled') sdkSettled = true;
+    }) : () => {};
     return runInWorkspace(this.ctx(origin, config), () => new Promise<void>((resolve, reject) => {
       let settled = false;
-      void this.session.prompt(prepared, {
+      void session.prompt(prepared, {
         images: options.images,
         streamingBehavior: options.streamingBehavior,
         source: 'rpc',
@@ -184,13 +217,29 @@ export class WorkspaceHandle {
           }
         })
         .catch((error: unknown) => {
-          // preflight 前失败 → reject；preflight 成功后的回合内错误由事件流上报，吞掉。
+          // Preparation/post-run exceptions may have no ordinary end message.
+          // The original owner/runner fence prevents an old catch pausing new work.
+          reportFailure();
           if (!settled) {
             this.turnOrigin = 'main';
             reject(error);
           }
-        });
+        })
+        .finally(offGoal);
     }));
+  }
+
+  controlGoal(request: GoalControlRequest): Promise<GoalControlReceipt> {
+    const session = this.session;
+    const sessionId = session.sessionId;
+    const path = session.sessionFile;
+    return controlGoal(sessionId, request, async (start) => {
+      // Typed controls don't pass through prompt(). Only a new dispatch needs
+      // the original owner's endpoint, approval preset and Goal origin.
+      const config = await this.options.resolveConfig('goal');
+      if (this.disposed || this.session !== session || session.sessionFile !== path) return;
+      await runInWorkspace({ ...this.ctx('goal', config), sessionId: () => sessionId }, start);
+    });
   }
 
   async newSession(options?: Parameters<AgentSessionRuntime['newSession']>[0]): Promise<{ cancelled: boolean }> {
@@ -230,7 +279,11 @@ export class WorkspaceHandle {
       model: snapshotSessionModel(s.model),
       thinkingLevel: s.thinkingLevel,
       isStreaming: s.isStreaming,
-      isCompacting: s.isCompacting,
+      isCompacting: s.isCompacting || Boolean(getCompactionActivity(s.sessionId)),
+      compaction: getCompactionActivity(s.sessionId),
+      ownerEpoch: getCompactionOwnerEpoch(),
+      activitySequence: getCompactionSequence(s.sessionId),
+      contextRevision: getCompactionContextRevision(s.sessionId),
       steeringMode: s.steeringMode,
       followUpMode: s.followUpMode,
       sessionFile: s.sessionFile,
@@ -267,10 +320,13 @@ export class WorkspaceHandle {
     this.childDeltas.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.unsubscribeCompaction?.();
+    this.unsubscribeCompaction = undefined;
     this.unsubChildEvents?.();
     this.unsubChildEvents = undefined;
     this.unsubCatalogEvents?.();
     this.unsubCatalogEvents = undefined;
+    forgetCompactionActivity(this.session.sessionId);
     try { await this.options.runtime.dispose(); } catch { /* 同上 */ }
     try { await this.options.onDispose?.(this.options.workspace, this.options.cwd); } catch { /* 同上 */ }
   }
@@ -371,6 +427,12 @@ export class WorkspaceHandle {
     });
     this.deltas.flush();
     this.unsubscribe?.();
+    this.unsubscribeCompaction?.();
+    const boundSessionId = this.session.sessionId;
+    this.unsubscribeCompaction = subscribeCompactionActivity(boundSessionId, (activity) => {
+      if (this.disposed || !activity) return;
+      this.forward({ type: 'compaction_activity', compaction: activity, contextRevision: getCompactionContextRevision(boundSessionId) });
+    });
     // 推给界面这一步（合并、广播；agent-host 和主进程断开时发送会抛）出错不能抛回 SDK，
     // 否则这一轮的工具调用会失败（extensions/_shared/guard-listener.ts）。
     const onEvent = guardListener('main session events', (event: AgentSessionEvent) => {
@@ -381,6 +443,25 @@ export class WorkspaceHandle {
       } catch {
         return; // 畸形事件丢单条，不断流
       }
+      const identity = { sessionId: this.session.sessionId, sessionPath: this.session.sessionFile ?? undefined };
+      const attempt = this.responseAttempt(event as unknown as Record<string, unknown>);
+      const intent = getCompactionActivity(identity.sessionId);
+      const failedMessage = downgraded.type === 'message_end' ? downgraded.message as { stopReason?: string; errorMessage?: string } | undefined : undefined;
+      if (intent?.phase === 'preparing' && intent.origin === 'policy-auto' && failedMessage?.stopReason === 'aborted'
+        && /abort/i.test(failedMessage.errorMessage ?? 'aborted')) {
+        downgraded = { ...downgraded, internalAbort: { origin: 'policy-auto', operationId: intent.operationId } };
+      }
+      if (downgraded.type === 'compaction_start' || downgraded.type === 'compaction_end') {
+        const activity = observeCompactionEvent(identity, downgraded as { type: 'compaction_start' | 'compaction_end'; reason?: string; aborted?: boolean; errorMessage?: string });
+        downgraded = {
+          ...downgraded,
+          ...(activity ? { compaction: activity } : {}),
+          contextRevision: getCompactionContextRevision(identity.sessionId),
+          ownerEpoch: getCompactionOwnerEpoch(),
+          activitySequence: getCompactionSequence(identity.sessionId),
+        };
+      }
+      if (attempt) downgraded = { ...downgraded, responseAttempt: attempt };
       this.deltas.push(downgraded);
       if (downgraded.type === 'agent_end' && downgraded.willRetry !== true) this.turnOrigin = 'main';
     });

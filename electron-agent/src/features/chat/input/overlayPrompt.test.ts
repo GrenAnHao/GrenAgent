@@ -1,3 +1,4 @@
+import type { ChatMessage } from '../../../stores/agentReducer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { respond, completeAskUser, deleteAskUserDraft, resolvePermission } = vi.hoisted(() => ({
@@ -58,14 +59,14 @@ describe('parseUiPromptReceipt', () => {
 
 describe('appendUiPromptReceipt', () => {
   it('appends a local notice with local- id', () => {
-    const messages: Array<{ kind: string; id: string; customType?: string; content?: string }> = [];
+    const messages: ChatMessage[] = [];
     const setState = (fn: (s: { messages: typeof messages }) => { messages: typeof messages }) => {
       const next = fn({ messages });
       messages.splice(0, messages.length, ...next.messages);
     };
     appendUiPromptReceipt(setState, { outcome: 'confirmed', title: '信任', value: '确定' });
     expect(messages).toHaveLength(1);
-    expect(messages[0]?.kind).toBe('notice');
+    if (messages[0]?.kind !== 'notice') throw new Error('expected a prompt receipt notice');
     expect(messages[0]?.customType).toBe('ui-prompt-receipt');
     expect(messages[0]?.id.startsWith('local-')).toBe(true);
     expect(JSON.parse(messages[0]!.content!)).toEqual({ outcome: 'confirmed', title: '信任', value: '确定' });

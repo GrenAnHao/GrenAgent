@@ -20,6 +20,7 @@ function wire(engine: Partial<Engine>) {
   child.handleAll(createCodeGraphHostMethods(engine as Engine, (jobId, progress) => child.emit('codegraph.progress', { jobId, progress }), tracker));
   const shutdown = vi.fn(async () => { running = false; });
   const process: CodeGraphHostProcess = {
+    start: async () => { running = true; },
     request: (method, params = {}) => running ? main.request(method, params) : Promise.reject(new Error('AGENT_HOST_STOPPED')),
     shutdown,
     get isRunning() { return running; },
@@ -43,7 +44,7 @@ describe('CodeGraphHostClient', () => {
   it('forwards status, call and search with the same result shape', async () => {
     const result = { content: [{ type: 'text' as const, text: 'ok' }], structuredContent: { title: 't', rows: [{ symbol: 'parse', file: 'a.ts' }] } } as unknown as Awaited<ReturnType<Engine['call']>>;
     const engine = {
-      status: vi.fn(async (workspace: string) => ({ workspace, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.2', state: 'indexed' as const })),
+      status: vi.fn(async (workspace: string) => ({ workspace, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.4', state: 'indexed' as const })),
       call: vi.fn(async () => result),
       search: vi.fn(async (workspace: string) => ({ workspace, available: true, results: [{ symbol: 'parse', file: 'a.ts' }] })),
     };
@@ -64,6 +65,14 @@ describe('CodeGraphHostClient', () => {
     const { client, crash } = wire({});
     crash(new Error('AGENT_HOST_EXITED: code=1'));
     await expect(client.search('/w', 'x', 5)).resolves.toEqual({ workspace: '/w', available: false, results: [], message: 'AGENT_HOST_STOPPED' });
+  });
+
+  it('forwards an explicit full rebuild to the engine across RPC', async () => {
+    const runSync = vi.fn(async () => undefined);
+    const { client } = wire({ runSync });
+    await client.runSync('rebuild-1', '/w', undefined, { mode: 'full' });
+    expect(runSync).toHaveBeenCalledWith('rebuild-1', '/w', expect.any(Function), { mode: 'full' });
+    await client.close();
   });
 
   it('streams progress to the caller of runSync and stops routing it afterwards', async () => {

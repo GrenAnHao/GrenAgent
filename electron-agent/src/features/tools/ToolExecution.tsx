@@ -83,6 +83,9 @@ interface ToolExecutionProps {
   durationMs?: number;
   /** 挂在本工具下的嵌套调用（codemode 脚本里的 tools.* 调用）。 */
   nested?: ToolSegment[];
+  /** Frozen transfer provenance for tool-local relative resources. */
+  sourceCwd?: string;
+  sourceRefs?: Record<string, string>;
 }
 
 function codeSearchPatterns(args: unknown): string {
@@ -347,6 +350,8 @@ function ToolDetail({
   status,
   workspace,
   argsStreaming = false,
+  sourceCwd,
+  sourceRefs,
 }: {
   toolName: string;
   args: unknown;
@@ -354,8 +359,10 @@ function ToolDetail({
   status: ConvStatus;
   workspace?: string;
   argsStreaming?: boolean;
+  sourceCwd?: string;
+  sourceRefs?: Record<string, string>;
 }) {
-  const extensionCard = renderExtensionCard({ toolName, args, result, status });
+  const extensionCard = renderExtensionCard({ toolName, args, result, status, sourceCwd, sourceRefs });
   if (extensionCard) {
     return (
       <ErrorBoundary>
@@ -615,6 +622,8 @@ function PlainToolExecution({
   argsComplete,
   startedAt,
   durationMs,
+  sourceCwd,
+  sourceRefs,
 }: ToolExecutionProps) {
   const { workspace } = useAgentStoreContext();
   const hasPendingQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
@@ -713,7 +722,7 @@ function PlainToolExecution({
 
   // generate_image：作为独立卡片常驻展示，不套通用工具行。
   if (bareName === 'generate_image') {
-    const card = renderExtensionCard({ toolName, args, result, status });
+    const card = renderExtensionCard({ toolName, args, result, status, sourceCwd, sourceRefs });
     if (card) {
       return (
         <div className={cardStyles.toolRow}>
@@ -755,6 +764,8 @@ function PlainToolExecution({
                 status={status}
                 workspace={workspace}
                 argsStreaming={argsStreaming}
+                sourceCwd={sourceCwd}
+                sourceRefs={sourceRefs}
               />
             </ErrorBoundary>
           ) : undefined

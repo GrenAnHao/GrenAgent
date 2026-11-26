@@ -17,3 +17,6 @@ export const distDir = join(tmpdir(), `${config.id}-ui-harness-${checkout}`)
 
 /** 截图目录 */
 export const shotDir = join(tmpdir(), `${config.id}-ui-shots`)
+
+/** 每次失败再建独立运行目录；既有手动截图路径不变。 */
+export const failureRoot = join(tmpdir(), `${config.id}-ui-failures`, checkout)

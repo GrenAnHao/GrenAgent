@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { foldCatalog } from "./catalog.js";
 import * as catalogEvents from "./catalog-events.js";
 
@@ -25,8 +25,10 @@ const registryRows = vi.hoisted(() => {
   const rows = new Map<string, Record<string, unknown>>();
   return {
     rows,
+    findStuck: vi.fn((_threshold: number): Record<string, unknown>[] => []),
     reset() {
       rows.clear();
+      this.findStuck.mockReset().mockReturnValue([]);
     },
   };
 });
@@ -41,6 +43,8 @@ const jobsMock = vi.hoisted(() => {
     kill: vi.fn(() => "requested"),
     snapshot: vi.fn(() => ({ status: "running" })),
     hasLive: vi.fn(() => false),
+    liveWithActivity: vi.fn((_owner: string) => [] as Array<{ id: string; label: string; status: string; startedAt: number; lastActivityAt: number }>),
+    stopForSubagentTimeout: vi.fn(() => ({ confirmed: Promise.resolve(true) })),
     onJobDone: vi.fn(() => () => {}),
   };
 });
@@ -64,6 +68,10 @@ vi.mock("./registry.js", () => {
       registryRows.rows.set(id, { ...(registryRows.rows.get(id) ?? { id }), ...patch });
     }
     touch() {}
+    setBashPhase(id: string, state: unknown) {
+      const row = registryRows.rows.get(id);
+      if (row) row.bashState = state;
+    }
     progress() {}
     setSessionPath() {}
     setJobId(id: string, jobId: string) {
@@ -77,8 +85,8 @@ vi.mock("./registry.js", () => {
     list() {
       return [...registryRows.rows.values()];
     }
-    findStuck() {
-      return [];
+    findStuck(threshold: number) {
+      return registryRows.findStuck(threshold);
     }
     close() {}
   }
@@ -124,7 +132,12 @@ type Execute = (
   onUpdate:
     | ((update: { content?: unknown; details?: Record<string, unknown> }) => void)
     | null,
-  ctx: { cwd: string; model?: { provider?: string; id?: string } },
+  ctx: {
+    cwd: string;
+    model?: { provider?: string; id?: string };
+    modelRegistry?: { getAvailable: () => unknown[] };
+    sessionManager?: { getSessionFile?: () => string; getSessionId?: () => string; getEntries?: () => unknown[]; buildContextEntries?: () => unknown[] };
+  },
 ) => Promise<{ content: Array<{ type: string; text: string }>; details?: Record<string, unknown>; isError?: boolean }>;
 
 type SessionHandler = (event: unknown, ctx: unknown) => unknown;
@@ -725,7 +738,7 @@ describe("spawn_agent · parent catalog write", () => {
       exitCode: opts.task === "B" ? 1 : 0,
       error: opts.task === "B" ? "boom" : undefined,
       transcript: "",
-      sessionPath: opts.task === "B" ? undefined : `/tmp/${opts.task}.jsonl`,
+      sessionPath: opts.task === "B" ? "" : `/tmp/${opts.task}.jsonl`,
       stopReason: opts.task === "B" ? ("error" as const) : ("completed" as const),
     }));
     const { execute, appendEntry } = loadSpawnHarness();
@@ -816,6 +829,7 @@ describe("spawn_agent · parent catalog write", () => {
       output: "embedded-out",
       exitCode: 0,
       transcript: "",
+      sessionPath: "",
       stopReason: "completed",
     });
     const { execute, appendEntry } = loadSpawnHarness();
@@ -1282,6 +1296,132 @@ describe("spawn_agent · background delivery (subagent-settled, no jobs)", () =>
     ...ctx,
     sessionManager: { getSessionFile: () => "/sessions/parent.jsonl", getSessionId: () => "parent-1" },
   };
+
+  it.each(["confirmed", "unconfirmed", "cancelled", "later-error"] as const)("does not reap a normally answered child as an unresponsive session while its Bash job drains (%s)", async (outcome) => {
+    vi.useFakeTimers();
+    const listeners = new Set<(event: AgentSessionEvent) => void>();
+    const final = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Finished reply" }] };
+    let running = false;
+    let end!: () => void;
+    const idle = new Promise<void>((resolve) => { end = resolve; });
+    const session = {
+      get isStreaming() { return running; },
+      pendingMessageCount: 0,
+      messages: [] as unknown[],
+      prompt: vi.fn(),
+      abort: vi.fn(),
+      dispose: vi.fn(),
+      waitForIdle: () => running ? idle : Promise.resolve(),
+      subscribe(listener: (event: AgentSessionEvent) => void) {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+    };
+    const emit = (event: Record<string, unknown>) => { for (const listener of listeners) listener(event as AgentSessionEvent); };
+    jobsMock.hasLive.mockReturnValue(true);
+    const startedAt = Date.now();
+    let busy = true;
+    let confirm!: (value: boolean) => void;
+    const confirmation = new Promise<boolean>((resolve) => { confirm = resolve; });
+    jobsMock.stopForSubagentTimeout.mockReturnValueOnce({ confirmed: confirmation });
+    jobsMock.liveWithActivity.mockImplementation(() => [
+      { id: "bash-stale", label: "stale command", status: "running", startedAt, lastActivityAt: startedAt },
+      ...(busy ? [{ id: "bash-busy", label: "busy command", status: "running", startedAt, lastActivityAt: Date.now() }] : []),
+    ]);
+    registryRows.findStuck.mockImplementation((threshold) =>
+      Date.now() - startedAt >= threshold ? [...registryRows.rows.values()].filter((row) => row.status === "running") : [],
+    );
+    vi.mocked(startContinuableEmbedded).mockImplementationOnce(async (opts) => {
+      activation.installActivation({
+        childId: opts.agentId, sessionPath: "/tmp/child.jsonl", parentSessionId: "parent-1",
+        parentSessionPath: "/sessions/parent.jsonl", workspace: opts.cwd, session, keepResident: true,
+        onSettled: opts.onSettled, onBashPhase: opts.onBashPhase, deliverFallback: opts.deliverFallback,
+      });
+      running = true;
+      emit({ type: "agent_start" });
+      activation.markAnnounced(opts.agentId);
+      return { agentId: opts.agentId, sessionPath: "/tmp/child.jsonl" };
+    });
+    try {
+      const h = loadSpawnHarness();
+      await h.execute("t", { task: "x", action: "spawn" }, null, null, { ...parentCtx, isIdle: () => false } as never);
+      session.messages.push(final);
+      emit({ type: "agent_end", messages: [final] });
+      emit({ type: "agent_settled", aborted: false });
+      running = false;
+      end();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.sendMessage).not.toHaveBeenCalled();
+      expect(activation.activationIsWaitingForBash("sa_test")).toBe(true);
+      expect(registryRows.rows.get("sa_test")).toMatchObject({ bashState: { phase: "waiting-for-bash" } });
+      const waiting = h.tools.wait_agent!("w", { timeout_ms: 320_000 }, null, null, {
+        ...parentCtx, hasPendingMessages: () => false,
+      } as never);
+      await vi.advanceTimersByTimeAsync(300_000);
+      const row = registryRows.rows.get("sa_test");
+      expect(row?.error).not.toBe("stuck: no activity for >300s");
+      expect(jobsMock.liveWithActivity).toHaveBeenCalledWith("sa_test");
+      expect(jobsMock.stopForSubagentTimeout).toHaveBeenCalledTimes(1);
+      expect(jobsMock.stopForSubagentTimeout).toHaveBeenCalledWith("bash-stale", "sa_test", startedAt);
+      expect(h.sendMessage).not.toHaveBeenCalled();
+      busy = false;
+      if (outcome === "cancelled") {
+        await activation.disposeActivation("sa_test", "cancel");
+        confirm(true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.sendMessage).toHaveBeenCalledTimes(1);
+        expect(h.sendMessage.mock.calls[0]?.[0]).toMatchObject({ details: { stopReason: "aborted" } });
+        expect((await waiting).details?.settled).toEqual([{ childId: "sa_test", stopReason: "aborted" }]);
+        return;
+      }
+      if (outcome === "later-error") {
+        running = true;
+        emit({ type: "agent_start" });
+        const failed = { ...final, stopReason: "error", content: [{ type: "text", text: "New round failed" }] };
+        session.messages.push(failed);
+        emit({ type: "agent_end", messages: [failed] });
+        emit({ type: "agent_settled", aborted: false });
+        running = false;
+        confirm(true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.sendMessage.mock.calls[0]?.[0]).toMatchObject({ details: { stopReason: "error" }, content: expect.stringContaining("New round failed") });
+        expect(h.sendMessage.mock.calls[0]?.[0]).not.toHaveProperty("details.bashTimeout");
+        expect((await waiting).details?.settled).toEqual([{ childId: "sa_test", stopReason: "error" }]);
+        return;
+      }
+      if (outcome === "confirmed") confirm(true);
+      else {
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(h.sendMessage).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      const bashTimeout = {
+        reason: "background-bash-timeout", replyCompleted: true,
+        jobs: [{ id: "bash-stale", label: "stale command", stopConfirmed: outcome === "confirmed" }],
+      };
+      expect(registryRows.rows.get("sa_test")).toMatchObject({ status: "error", output: "Finished reply", bashState: bashTimeout });
+      expect(h.sendMessage.mock.calls[0]?.[0]).toMatchObject({ details: { stopReason: "error", bashTimeout } });
+      expect((await waiting).details?.settled).toEqual([{ childId: "sa_test", stopReason: "error", reason: "background-bash-timeout" }]);
+      confirm(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.sendMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      activation.__resetActivationsForTest();
+      jobsMock.hasLive.mockReturnValue(false);
+      jobsMock.liveWithActivity.mockReturnValue([]);
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the generic stuck policy for a child without a normally finished round", async () => {
+    const h = loadSpawnHarness();
+    await h.execute("t", { task: "x", action: "spawn" }, null, null, parentCtx);
+    registryRows.findStuck.mockReturnValue([registryRows.rows.get("sa_test")!]);
+    await h.execute("s", { action: "status", agentId: "sa_test" }, null, null, parentCtx);
+    expect(registryRows.rows.get("sa_test")).toMatchObject({ error: "stuck: no activity for >300s" });
+    expect(jobsMock.liveWithActivity).not.toHaveBeenCalled();
+  });
 
   it("mode omitted → continuable path; no job", async () => {
     await loadSpawnAgent()("t", { task: "x", action: "spawn" }, null, null, ctx);

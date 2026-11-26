@@ -17,7 +17,7 @@ const NOTES = Array.from(
 ).join('\n')
 
 const OPTIONS = `
-<h3>这一版可以吗?</h3>
+<h3>方案预览（评审请在提问卡作答）</h3>
 <div class="options">
   <div class="option" data-choice="ok" onclick="toggleSelect(this)">
     <div class="letter">A</div>
@@ -25,7 +25,7 @@ const OPTIONS = `
   </div>
   <div class="option" data-choice="change" onclick="toggleSelect(this)">
     <div class="letter">B</div>
-    <div class="content"><h3>要改</h3><p>提交后在对话里说改哪里</p></div>
+    <div class="content"><h3>要改</h3><p>这里只切换预览，评审请在提问卡作答</p></div>
   </div>
 </div>`
 
@@ -49,7 +49,7 @@ ${OPTIONS}
 `
 }
 
-/** 很矮：比面板低得多，比较区应该撑满中间的剩余空间，选项贴在确认条上方。 */
+/** 很矮：比面板低得多，比较区仍撑满中间剩余空间。 */
 export function shortHtml(): string {
   return `
 <h2>敏感操作确认卡片</h2>

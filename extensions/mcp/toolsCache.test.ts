@@ -40,6 +40,15 @@ describe("writeToolsCacheEntry", () => {
     expect(cacheFile().deepwiki.probedAt).toBe("sentinel");
   });
 
+  it("保留最近成功的定义供离线查看，不把旧工具当作活连接", async () => {
+    const { writeToolsCacheEntry, readToolsCache } = await loadCache();
+    const tool = {name:"read",fullName:"mcp__a__read",description:"read file"};
+    writeToolsCacheEntry("a", {ok:true,toolNames:[tool.fullName],catalog:[tool]});
+    writeToolsCacheEntry("a", {ok:false,toolNames:[],error:"timeout"});
+    expect(cacheFile().a).toMatchObject({ok:false,toolNames:[],catalog:[tool],error:"timeout"});
+    expect(readToolsCache()).toEqual({a:[]});
+  });
+
   it("工具列表变了照常写入", async () => {
     const { writeToolsCacheEntry, readToolsCache } = await loadCache();
     writeToolsCacheEntry("deepwiki", { ok: true, toolNames: ["ask"] });

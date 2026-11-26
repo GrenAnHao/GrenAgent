@@ -40,8 +40,6 @@ const styles = createStaticStyles(({ css }) => ({
     /* Let clicks fall through to the drag-region parent so the brand area is draggable. */
     pointer-events: none;
 
-    font-size: 13px;
-    font-weight: 500;
     color: ${cssVar.colorText};
   `,
   controls: css`

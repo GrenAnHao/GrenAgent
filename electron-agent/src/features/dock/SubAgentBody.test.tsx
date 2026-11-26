@@ -6,7 +6,10 @@ import type { SubAgentItem } from '../../lib/pi';
 
 const { parent } = vi.hoisted(() => ({ parent: { messages: [] as ChatMessage[] } }));
 vi.mock('../../stores/AgentStoreContext', () => ({
-  useAgentStore: () => ({ useStore: (select: (state: typeof parent) => unknown) => select(parent) }),
+  useAgentStore: () => ({
+    useStore: (select: (state: typeof parent) => unknown) => select(parent),
+    getLoadedSessionPath: () => '/s/parent.jsonl',
+  }),
   useOptionalAgentStoreContext: () => ({ workspace: '/workspace' }),
 }));
 vi.mock('../../stores/layoutStore', () => ({
@@ -18,7 +21,7 @@ vi.mock('../panels/SubAgentConversation', () => ({
 }));
 
 import { SubAgentBody } from './SubAgentBody';
-import { useSubAgentLiveStore } from '../../stores/subagentLiveStore';
+import { observationKey, useSubAgentLiveStore } from '../../stores/subagentLiveStore';
 
 const tab: DockTab = {
   id: 'child-tab', kind: 'subagent', region: 'right', title: '子代理', closable: true, order: 0,
@@ -36,22 +39,31 @@ function backgroundSpawn(): ChatMessage {
   };
 }
 
+/**
+ * 详情现在按「原父会话 + 稳定 agentId」的观察记录读状态，不再看全量列表；
+ * 这里把一行快照写进同名观察键，等价于共享轮询刚回包。
+ */
 function registry(status: string, error: string | null = null) {
   const row: SubAgentItem = {
     id: 'sa-live', task: '检查模块', status, model: null, thinkingLevel: null,
     sessionPath: '/sessions/child.jsonl', profile: null, output: null, error, exitCode: null,
     transcript: null, createdAt: 1, updatedAt: 2,
   };
-  useSubAgentLiveStore.setState({ itemsByWorkspace: new Map([['/workspace', [row]]]) });
+  useSubAgentLiveStore.setState({
+    observations: new Map([[observationKey('/workspace', '/s/parent.jsonl', 'sa-live'),
+      { generation: 1, attempts: 0, state: 'found', item: row }]]),
+  });
 }
+
+const emptyLive = () => useSubAgentLiveStore.setState({ itemsByWorkspace: new Map(), observations: new Map() });
 
 beforeEach(() => {
   parent.messages = [backgroundSpawn()];
-  useSubAgentLiveStore.setState({ itemsByWorkspace: new Map() });
+  emptyLive();
 });
 afterEach(() => {
   cleanup();
-  useSubAgentLiveStore.setState({ itemsByWorkspace: new Map() });
+  emptyLive();
 });
 
 describe('SubAgentBody 后台子代理真实运行态', () => {

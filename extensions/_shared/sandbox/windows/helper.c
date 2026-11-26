@@ -68,6 +68,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <io.h>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "advapi32.lib")
@@ -567,10 +568,13 @@ static void wipe_password(wchar_t *password) {
     HeapFree(GetProcessHeap(), 0, password);
 }
 
+static DWORD WINAPI read_tracked_stop(LPVOID event);
+static DWORD wait_tracked_tree(HANDLE job, HANDLE process);
+
 /* Run command as the dedicated sandbox account. Named pipes it creates are owned
  * by that account, so piped grandchild spawn (node --test, vitest) is allowed.
  * Workspace writes are granted to the account before this process starts. */
-static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, int argc, wchar_t **argv, int commandIndex) {
+static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, int argc, wchar_t **argv, int commandIndex, BOOL tracked) {
     wchar_t *password;
     wchar_t *commandLine;
     wchar_t *env;
@@ -581,9 +585,15 @@ static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, 
     HANDLE job = NULL;
     DWORD wait;
     DWORD exitCode;
+    BOOL assigned = FALSE;
 
     if (commandIndex < 0 || commandIndex >= argc) {
         fail("argv");
+    }
+    if (tracked) {
+        HANDLE control = (HANDLE)_get_osfhandle(3);
+        if (control == INVALID_HANDLE_VALUE || !control ||
+            !SetHandleInformation(control, HANDLE_FLAG_INHERIT, 0)) fail("tracked bash control pipe");
     }
     password = password_from_blob(blobPath);
     commandLine = buildCommandLine(argc - commandIndex, argv + commandIndex);
@@ -603,7 +613,7 @@ static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, 
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    if (!si.hStdInput || si.hStdInput == INVALID_HANDLE_VALUE) {
+    if (tracked || !si.hStdInput || si.hStdInput == INVALID_HANDLE_VALUE) {
         nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
         si.hStdInput = nul;
     }
@@ -757,7 +767,7 @@ static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, 
                 if (!TerminateProcess(pi.hProcess, HELPER_FAIL_EXIT)) {
                     fail("TerminateProcess");
                 }
-            }
+            } else assigned = TRUE;
             CloseHandle(pi.hThread);
             pi.hThread = NULL;
         }
@@ -772,12 +782,16 @@ static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, 
     if (pi.hThread) {
         CloseHandle(pi.hThread);
     }
-    wait = WaitForSingleObject(pi.hProcess, INFINITE);
-    if (wait != WAIT_OBJECT_0) {
-        fail("WaitForSingleObject");
-    }
-    if (!GetExitCodeProcess(pi.hProcess, &exitCode)) {
-        fail("GetExitCodeProcess");
+    if (tracked && assigned) {
+        exitCode = wait_tracked_tree(job, pi.hProcess);
+    } else {
+        wait = WaitForSingleObject(pi.hProcess, INFINITE);
+        if (wait != WAIT_OBJECT_0) {
+            fail("WaitForSingleObject");
+        }
+        if (!GetExitCodeProcess(pi.hProcess, &exitCode)) {
+            fail("GetExitCodeProcess");
+        }
     }
     CloseHandle(pi.hProcess);
     /* Last job handle: KILL_ON_JOB_CLOSE reaps detached descendants that outlived the launcher. */
@@ -804,6 +818,108 @@ static void addInheritHandle(HANDLE *list, DWORD *n, HANDLE h) {
     SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
 }
 
+/* Only the tracked Bash caller uses this mode. stdin is its stop channel;
+ * CRT fd 3 is a private acknowledgement pipe, never inherited by the command. */
+static DWORD WINAPI read_tracked_stop(LPVOID event) {
+    char byte;
+    DWORD count;
+    ReadFile(GetStdHandle(STD_INPUT_HANDLE), &byte, 1, &count, NULL);
+    SetEvent((HANDLE)event);
+    return 0;
+}
+
+static HANDLE tracked_stop_event(void) {
+    HANDLE stop = CreateEventW(NULL, TRUE, FALSE, NULL);
+    HANDLE reader;
+    if (!stop) fail("CreateEventW");
+    reader = CreateThread(NULL, 0, read_tracked_stop, stop, 0, NULL);
+    if (!reader) fail("CreateThread");
+    CloseHandle(reader);
+    return stop;
+}
+
+static DWORD wait_and_ack_tracked_tree(HANDLE job, HANDLE process, HANDLE stop) {
+    HANDLE waits[2] = { process, stop };
+    HANDLE control = (HANDLE)_get_osfhandle(3);
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+    DWORD code, wait, written;
+    BOOL terminated = FALSE;
+    if (control == INVALID_HANDLE_VALUE || !control) fail("tracked bash control pipe");
+    wait = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+    if (wait == WAIT_OBJECT_0) {
+        if (!GetExitCodeProcess(process, &code)) fail("GetExitCodeProcess");
+    } else if (wait == WAIT_OBJECT_0 + 1) {
+        code = 1;
+    } else fail("WaitForMultipleObjects");
+    for (;;) {
+        if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), NULL))
+            fail("QueryInformationJobObject");
+        if (accounting.ActiveProcesses == 0) break;
+        if (!terminated && WaitForSingleObject(stop, 20) == WAIT_OBJECT_0) {
+            if (!TerminateJobObject(job, 1)) fail("TerminateJobObject");
+            terminated = TRUE;
+        }
+        if (terminated) Sleep(20);
+    }
+    if (!WriteFile(control, "exit\n", 5, &written, NULL) || written != 5) fail("tracked bash acknowledgement");
+    return code;
+}
+
+static DWORD wait_tracked_tree(HANDLE job, HANDLE process) {
+    return wait_and_ack_tracked_tree(job, process, tracked_stop_event());
+}
+
+static int run_tracked_bash(int argc, wchar_t **argv) {
+    HANDLE job, stop, nul, inherit[3];
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {0};
+    STARTUPINFOEXW si = {0};
+    PROCESS_INFORMATION pi = {0};
+    SIZE_T bytes = 0;
+    DWORD code;
+    wchar_t *command;
+    if (argc < 1) fail("tracked bash argv");
+    job = CreateJobObjectW(NULL, NULL);
+    if (!job) fail("CreateJobObjectW");
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) fail("SetInformationJobObject");
+    stop = tracked_stop_event();
+
+    nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+    if (nul == INVALID_HANDLE_VALUE) fail("CreateFileW(NUL)");
+    inherit[0] = si.StartupInfo.hStdInput = nul;
+    inherit[1] = si.StartupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    inherit[2] = si.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    si.StartupInfo.cb = sizeof(si);
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &bytes);
+    si.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, bytes);
+    if (!si.lpAttributeList ||
+        !InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &bytes) ||
+        !UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            inherit, sizeof(inherit), NULL, NULL)) fail("tracked bash std handles");
+    command = buildCommandLine(argc, argv);
+    if (!CreateProcessW(argv[0], command, NULL, NULL, TRUE,
+            CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+            NULL, NULL, &si.StartupInfo, &pi)) fail("CreateProcessW");
+    HeapFree(GetProcessHeap(), 0, command);
+    DeleteProcThreadAttributeList(si.lpAttributeList);
+    HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
+    CloseHandle(nul);
+    if (!AssignProcessToJobObject(job, pi.hProcess)) {
+        DWORD error = GetLastError();
+        TerminateProcess(pi.hProcess, HELPER_FAIL_EXIT);
+        SetLastError(error);
+        fail("AssignProcessToJobObject");
+    }
+    if (WaitForSingleObject(stop, 0) != WAIT_OBJECT_0 && ResumeThread(pi.hThread) == (DWORD)-1) fail("ResumeThread");
+    CloseHandle(pi.hThread);
+    code = wait_and_ack_tracked_tree(job, pi.hProcess, stop);
+    CloseHandle(pi.hProcess);
+    CloseHandle(job);
+    return (int)code;
+}
+
 static int run(int argc, wchar_t **argv) {
     LPCWSTR workspacePath = NULL;
     LPCWSTR workspaceSidText = NULL;
@@ -812,6 +928,7 @@ static int run(int argc, wchar_t **argv) {
     LPCWSTR logonUser = NULL;
     LPCWSTR logonBlob = NULL;
     LPCWSTR sandboxHome = NULL;
+    BOOL tracked = FALSE;
     int commandIndex = -1;
     int i;
     HANDLE processToken = NULL;
@@ -841,6 +958,10 @@ static int run(int argc, wchar_t **argv) {
     ZeroMemory(&pi, sizeof(pi));
 
     for (i = 1; i < argc; i++) {
+        if (wcscmp(argv[i], L"--track-logon-bash") == 0) {
+            tracked = TRUE;
+            continue;
+        }
         if (wcscmp(argv[i], L"--") == 0) {
             commandIndex = i + 1;
             break;
@@ -901,7 +1022,7 @@ static int run(int argc, wchar_t **argv) {
         if (!logonUser || !logonBlob) {
             fail("argv");
         }
-        return run_as_user(logonUser, logonBlob, sandboxHome, argc, argv, commandIndex);
+        return run_as_user(logonUser, logonBlob, sandboxHome, argc, argv, commandIndex, tracked);
     }
 
     if (commandIndex < 0 || commandIndex >= argc) {
@@ -1086,7 +1207,9 @@ int main(void) {
     if (!wargv) {
         fail("CommandLineToArgvW");
     }
-    rc = run(argc, wargv);
+    rc = argc >= 2 && wcscmp(wargv[1], L"--tracked-bash") == 0
+        ? run_tracked_bash(argc - 2, wargv + 2)
+        : run(argc, wargv);
     LocalFree(wargv);
     return rc;
 }

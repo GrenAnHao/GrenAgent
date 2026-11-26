@@ -87,7 +87,6 @@ const styles = createStaticStyles(({ css }) => ({
     max-height: min(50vh, 360px);
     padding: 2px 0 2px 12px;
     border-inline-start: 1px solid ${cssVar.colorBorderSecondary};
-    scrollbar-width: thin;
     color: ${cssVar.colorText};
     overflow-wrap: anywhere;
 
@@ -128,12 +127,12 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: ${cssVar.borderRadius};
     background: ${cssVar.colorFillQuaternary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.6;
     color: ${cssVar.colorText};
     white-space: pre-wrap;
     word-break: break-word;
-    scrollbar-width: thin;
   `,
   diagnostic: css`
     padding-inline-start: 12px;

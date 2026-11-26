@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionInfo } from './pi';
 import {
   LAST_OPEN_KEY,
@@ -23,13 +23,13 @@ describe('lastOpen 读写', () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => localStorage.clear());
 
-  it('草稿重载还原同一身份，而不是复用同项目另一份草稿', () => {
+  it('草稿重载还原同一身份，而不是复用同项目另一份草稿', async () => {
     writeLastOpen({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' });
     expect(readLastOpen()).toEqual({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' });
     expect(lastOpenFromState({ activeWorkspace: 'D:/proj', activeSessionPath: '', draftConversationCwd: 'D:/proj', draftConversationId: 'draft:one' }))
       .toEqual({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' });
     expect(lastOpenEquals({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' }, { workspace: 'D:/proj', sessionPath: null, draftId: 'draft:two' })).toBe(false);
-    expect(pickStartupTarget({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' }, [], works))
+    expect(await pickStartupTarget({ workspace: 'D:/proj', sessionPath: null, draftId: 'draft:one' }, disk()))
       .toEqual({ kind: 'projectDraft', workspace: 'D:/proj', draftId: 'draft:one' });
   });
 
@@ -74,43 +74,53 @@ describe('lastOpenFromState', () => {
   });
 });
 
+function disk(row: SessionInfo | null = null, used = false) {
+  return {
+    lookupStartupSession: vi.fn(async (_path: string) => row),
+    startupScratchHasSessions: vi.fn(async (_workspace: string) => used),
+    getWorksDir: vi.fn(async () => works),
+  };
+}
+
 describe('pickStartupTarget', () => {
-  const sessions = [
-    session('D:/proj', 'D:/proj/.pi/a.jsonl'),
-    session(`${works}/conv1`, `${works}/conv1/.pi/b.jsonl`),
-    session('D:/old', 'D:/old/.pi/c.jsonl', true),
-  ];
-
-  it('记住的会话还在：打开它，工作区以列表里的 cwd 为准（分隔符无关）', () => {
-    expect(pickStartupTarget({ workspace: 'D:\\proj', sessionPath: 'D:\\proj\\.pi\\a.jsonl' }, sessions, works)).toEqual({
-      kind: 'session',
-      workspace: 'D:/proj',
-      sessionPath: 'D:/proj/.pi/a.jsonl',
+  it('只查记住的文件；迁移后用文件的当前归属，不必等待 worksDir', async () => {
+    const moved = session('D:/new', 'D:/sessions/a.jsonl');
+    const io = disk(moved);
+    expect(await pickStartupTarget({ workspace: 'D:/old', sessionPath: moved.path }, io)).toEqual({
+      kind: 'session', workspace: 'D:/new', session: moved,
     });
-    expect(pickStartupTarget({ workspace: `${works}/conv1`, sessionPath: `${works}/conv1/.pi/b.jsonl` }, sessions, works)).toEqual({
-      kind: 'session',
-      workspace: `${works}/conv1`,
-      sessionPath: `${works}/conv1/.pi/b.jsonl`,
-    });
+    expect(io.lookupStartupSession).toHaveBeenCalledExactlyOnceWith(moved.path);
+    expect(io.getWorksDir).not.toHaveBeenCalled();
+    expect(io.startupScratchHasSessions).not.toHaveBeenCalled();
   });
 
-  it('会话已删或已归档：不恢复', () => {
-    expect(pickStartupTarget({ workspace: 'D:/proj', sessionPath: 'D:/proj/.pi/gone.jsonl' }, sessions, works)).toBeNull();
-    expect(pickStartupTarget({ workspace: 'D:/old', sessionPath: 'D:/old/.pi/c.jsonl' }, sessions, works)).toBeNull();
+  it('已删除、已归档或没有记忆的会话不恢复', async () => {
+    const last = { workspace: 'D:/old', sessionPath: 'D:/sessions/a.jsonl' };
+    expect(await pickStartupTarget(last, disk())).toBeNull();
+    expect(await pickStartupTarget(last, disk(session(last.workspace, last.sessionPath, true)))).toBeNull();
+    const io = disk();
+    expect(await pickStartupTarget(null, io)).toBeNull();
+    expect(io.lookupStartupSession).not.toHaveBeenCalled();
+    expect(io.getWorksDir).not.toHaveBeenCalled();
   });
 
-  it('项目里的空草稿回到那个项目；works 下的空白对话交给原来的 scratch 逻辑', () => {
-    expect(pickStartupTarget({ workspace: 'D:/proj', sessionPath: null }, sessions, works)).toEqual({ kind: 'projectDraft', workspace: 'D:/proj' });
-    expect(pickStartupTarget({ workspace: `${works}/abc`, sessionPath: null }, sessions, works)).toBeNull();
-    // worksDir 取不到时没法判断是不是 works 下的目录，按项目草稿处理
-    expect(pickStartupTarget({ workspace: `${works}/abc`, sessionPath: null }, sessions, '')).toEqual({ kind: 'projectDraft', workspace: `${works}/abc` });
+  it('项目草稿不读会话，works 草稿只在原身份存在且目录仍未使用时恢复', async () => {
+    const io = disk();
+    expect(await pickStartupTarget({ workspace: 'D:/proj', sessionPath: null }, io))
+      .toEqual({ kind: 'projectDraft', workspace: 'D:/proj' });
+    expect(io.startupScratchHasSessions).not.toHaveBeenCalled();
+    const last = { workspace: works + '/conv', sessionPath: null, draftId: 'draft:one' };
+    expect(await pickStartupTarget(last, io)).toEqual({ kind: 'projectDraft', workspace: last.workspace, draftId: last.draftId });
+    expect(io.startupScratchHasSessions).toHaveBeenCalledExactlyOnceWith(last.workspace);
+    expect(await pickStartupTarget(last, disk(null, true))).toBeNull();
+    expect(await pickStartupTarget({ ...last, draftId: undefined }, io)).toBeNull();
+    expect(io.lookupStartupSession).not.toHaveBeenCalled();
   });
 
-  it('works 草稿已被另一窗口首发使用时，不再把同一目录当未使用草稿恢复', () => {
-    expect(pickStartupTarget({ workspace: `${works}/conv1`, sessionPath: null, draftId: 'draft:already-used' }, sessions, works)).toBeNull();
-  });
-
-  it('没有记忆：null', () => {
-    expect(pickStartupTarget(null, sessions, works)).toBeNull();
+  it('worksDir 暂不可用时保留原有的项目草稿恢复规则', async () => {
+    const io = disk();
+    io.getWorksDir.mockRejectedValue(new Error('offline'));
+    expect(await pickStartupTarget({ workspace: 'D:/proj', sessionPath: null }, io))
+      .toEqual({ kind: 'projectDraft', workspace: 'D:/proj' });
   });
 });

@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+(node:69892) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ multi-agent/index.test.ts (101 tests | 1 failed | 100 skipped) 41ms
+     × does not reap a normally answered child as an unresponsive session while its Bash job drains 39ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  multi-agent/index.test.ts > spawn_agent · background delivery (subagent-settled, no jobs) > does not reap a normally answered child as an unresponsive session while its Bash job drains
+AssertionError: expected 'stuck: no activity for >300s' not to be 'stuck: no activity for >300s' // Object.is equality
+ ❯ multi-agent/index.test.ts:1336:30
+    1334|       await vi.advanceTimersByTimeAsync(300_000);
+    1335|       const row = registryRows.rows.get("sa_test");
+    1336|       expect(row?.error).not.toBe("stuck: no activity for >300s");
+       |                              ^
+    1337|     } finally {
+    1338|       activation.__resetActivationsForTest();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 100 skipped (101)
+   Start at  18:00:15
+   Duration  7.08s (transform 971ms, setup 0ms, import 6.52s, tests 41ms, environment 0ms)
+

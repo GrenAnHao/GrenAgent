@@ -29,6 +29,34 @@ export interface AgentUpdate {
   sessionPath?: string;
   /** Set by embedded runner: the level the child session actually runs at (after model clamping). */
   thinkingLevel?: string;
+  /**
+   * Set by embedded runner once the child produced its first substantive activity (text/thinking
+   * delta or a tool call). Monotonic: once true, later heartbeats keep it true. Lets the registry
+   * answer "has it responded yet" without waiting for the final `output`.
+   */
+  responseStarted?: boolean;
+}
+
+/**
+ * 算作「首响应」的实质活动：正文 / 思考 / 工具调用的开始与增量。
+ * 空启动帧（assistant start、无内容收尾）不算，避免普通启动被画成已响应。
+ */
+export function startsSubagentResponse(event: { type?: string }): boolean {
+  if (event.type === "tool_execution_start") return true;
+  if (event.type !== "message_update") return false;
+  const ame = (event as { assistantMessageEvent?: { type?: string } }).assistantMessageEvent;
+  switch (ame?.type) {
+    case "text_start":
+    case "text_delta":
+    case "thinking_start":
+    case "thinking_delta":
+    case "toolcall_start":
+    case "toolcall_delta":
+    case "toolcall_end":
+      return true;
+    default:
+      return false;
+  }
 }
 
 /** User-configured sub-agent model. Mode `inherit` forces the main-agent default; otherwise use `SUBAGENT_MODEL` (empty → inherit). */

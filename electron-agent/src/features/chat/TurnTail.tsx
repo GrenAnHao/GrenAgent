@@ -85,6 +85,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     display: inline-flex;
     gap: 6px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 18px;
   `,
@@ -113,6 +114,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     background: transparent;
     color: ${cssVar.colorTextSecondary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 18px;
     text-align: start;

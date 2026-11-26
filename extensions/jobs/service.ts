@@ -58,6 +58,8 @@ interface TrackedJob {
   workspace: string;
   outputLimitBytes: number;
   cancel: (reason?: string) => void;
+  exitConfirmed?: Promise<boolean>;
+  producerFinished: boolean;
   status: JobStatus;
   ring: OutputRing;
   /** 模型的消耗式游标；readAt 从不移动它。 */
@@ -65,6 +67,7 @@ interface TrackedJob {
   state: ProducerState;
   detail: string | undefined;
   startedAt: number;
+  lastActivityAt: number;
   finishedAt: number | undefined;
   killReason: string | undefined;
   settleCause: JobSettleCause | undefined;
@@ -148,12 +151,15 @@ export class JobsService {
       workspace: spec.workspace,
       outputLimitBytes: spec.outputLimitBytes ?? DEFAULT_OUTPUT_LIMIT_BYTES,
       cancel: hooks.cancel.bind(hooks),
+      ...(hooks.exitConfirmed ? { exitConfirmed: hooks.exitConfirmed } : {}),
+      producerFinished: false,
       status: "running",
       ring,
       modelCursor: 0,
       state,
       detail: undefined,
       startedAt: Date.now(),
+      lastActivityAt: Date.now(),
       finishedAt: undefined,
       killReason: undefined,
       settleCause: undefined,
@@ -191,6 +197,7 @@ export class JobsService {
       );
     }
     void producerDone.then(async (outcome) => {
+      job.producerFinished = true;
       if (job.pump !== undefined) await job.pump.done;
       this.settle(job, outcome, job.settleCause ?? "producer");
     });
@@ -259,6 +266,23 @@ export class JobsService {
     return "requested";
   }
 
+  stopForSubagentTimeout(id: string, owner: string, startedAt: number): { confirmed: Promise<boolean> } | undefined {
+    const job = this.store.get(id);
+    if (!job || job.owner !== owner || job.startedAt !== startedAt || job.status !== "running" || job.producerFinished) return;
+    const previous = job.settleCause;
+    job.settleCause = "subagent-timeout";
+    try {
+      job.cancel("sub-agent background command timed out");
+      job.status = "stopping";
+      job.killReason = "sub-agent background command timed out";
+      this.emit({ type: "stopping", job: this.view(job) });
+    } catch {
+      job.settleCause = previous;
+      return { confirmed: Promise.resolve(false) };
+    }
+    return { confirmed: job.exitConfirmed ?? Promise.resolve(false) };
+  }
+
   /** 移除一条已结算记录：给自己收了终态、从没把 id 交给模型的调用方。 */
   remove(id: string, caller: string): void {
     const job = this.expect(id, caller);
@@ -278,6 +302,13 @@ export class JobsService {
       if (job.owner === owner && !isTerminal(job.status)) return true;
     }
     return false;
+  }
+
+  /** In-process drain policy: only live instances, without consuming their output. */
+  liveWithActivity(owner: string): Array<JobSnapshot & { lastActivityAt: number }> {
+    return [...this.store.values()]
+      .filter((job) => job.owner === owner && !isTerminal(job.status))
+      .map((job) => ({ ...this.view(job), lastActivityAt: job.lastActivityAt }));
   }
 
   onJobDone(listener: JobDoneListener): () => void {
@@ -412,7 +443,10 @@ export class JobsService {
     const job = state.job;
     if (job !== undefined && isTerminal(job.status)) return;
     if (!ring.append(text, options, this.config.retainBytes)) return;
-    if (job !== undefined) this.emitOutput(job);
+    if (job !== undefined) {
+      job.lastActivityAt = Date.now();
+      this.emitOutput(job);
+    }
   }
 
   /** 源第一次抛错后当作耗尽：job 照常跑到自己的结算，不因泵失败卡住。 */
@@ -435,6 +469,7 @@ export class JobsService {
   private updateProgress(state: ProducerState, line: string): void {
     const job = state.job;
     if (job !== undefined && isTerminal(job.status)) return;
+    if (line !== state.progress && job !== undefined) job.lastActivityAt = Date.now();
     state.progress = line;
     if (job !== undefined) this.emit({ type: "progress", job: this.view(job) });
   }

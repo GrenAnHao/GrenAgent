@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useSubAgentLiveStore, selectSubAgentById } from '../../stores/subagentLiveStore';
+import { useSubAgentLiveStore, selectSubAgentById, selectSubAgentObservation, subAgentObservationUnconfirmed } from '../../stores/subagentLiveStore';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { SubAgentLogPayload } from '../../stores/dockStore';
-import { mapSubAgentStatus } from '../panels/subagentUtils';
+import { mapSubAgentStatus, subAgentHasResponded } from '../panels/subagentUtils';
 import { SubAgentConversation } from '../panels/SubAgentConversation';
 import type { DockBodyProps } from './TabBodyRenderer';
 
@@ -19,22 +19,24 @@ export function SubAgentLogBody({ tab }: DockBodyProps) {
   const workspace = useOptionalAgentStoreContext()?.workspace ?? '';
   const startPolling = useSubAgentLiveStore((s) => s.startPolling);
 
-  // 用 subagentLiveStore 获取最新状态（轻量，无 transcript）
-  const liveItem = useSubAgentLiveStore(
-    selectSubAgentById(workspace, payload.agentId),
-  );
+  const ownerPath = tab.ownerSessionPath ?? '';
+  const observation = useSubAgentLiveStore(selectSubAgentObservation(workspace, ownerPath, payload.agentId));
+  const listItem = useSubAgentLiveStore(selectSubAgentById(workspace, payload.agentId));
+  const liveItem = ownerPath ? observation.item : listItem;
 
-  // 初始状态来自 payload 快照；一旦 store 有数据就用 store 的
+  // payload 的明确终态是水位：旧 running 快照不得重新打开轮询。
   const [initStatus] = useState(() => payload.status);
+  const liveStatus = liveItem ? mapSubAgentStatus(liveItem.status, liveItem.error) : null;
   const status: 'running' | 'done' | 'error' =
-    liveItem ? mapSubAgentStatus(liveItem.status) : initStatus;
+    initStatus !== 'running' && liveStatus === 'running' ? initStatus : liveStatus ?? initStatus;
   const output = liveItem?.output ?? payload.output ?? '';
 
   // 在运行中时启动轮询（store 引用计数，多个消费者共享一个 interval）
+  const watch = useSubAgentLiveStore((s) => s.watch);
   useEffect(() => {
     if (!workspace || status !== 'running') return;
-    return startPolling(workspace);
-  }, [workspace, status, startPolling]);
+    return ownerPath ? watch(workspace, ownerPath, payload.agentId) : startPolling(workspace);
+  }, [workspace, ownerPath, payload.agentId, status, watch, startPolling]);
 
   // 用 result 形状包装 output（无 transcript 时的纯文本兜底）
   const result = output
@@ -50,6 +52,10 @@ export function SubAgentLogBody({ tab }: DockBodyProps) {
       status={status}
       workspace={workspace}
       agentId={payload.agentId}
+      parentSessionPath={ownerPath}
+      phase={status !== 'running' ? status
+        : subAgentObservationUnconfirmed(observation) ? 'status-unconfirmed'
+          : !subAgentHasResponded(liveItem) ? liveItem?.status === 'running' ? 'awaiting-first-response' : 'starting' : 'running'}
     />
   );
 }

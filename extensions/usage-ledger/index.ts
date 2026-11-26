@@ -1,3 +1,4 @@
+import { usageSessionMetadata } from "./sessionMetadata.js";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { callFromMessage,callKey,warmFromEntry,warmKey, defaultLedgerPath, sharedLedger, type UsageLedger } from "./ledger.js";
 
@@ -37,8 +38,11 @@ export function createUsageLedgerExtension(options: UsageLedgerOptions = {}) {
           const call=entry.type==='message'?callFromMessage(entry.message,sessionId,entry.timestamp):null;
           if(!warm&&!call){known.add(entry.id);continue;}
           const ref={sessionId,entryId:entry.id};registry.registerLocalEntry(ref,manager.getSessionFile());
-          if(warm){ledger.recordWarm(warm);registry.bindLedgerKey(ref,warmKey(warm));}
-          else if(call){call.entryId=entry.id;const key=callKey(call);if(key){ledger.record(call,'live');registry.bindLedgerKey(ref,key);}}
+          if (warm) {
+            // Warming can precede the first assistant reply.
+            ledger.transaction(() => { ledger.upsertSession(usageSessionMetadata(manager, ctx.cwd)); ledger.recordWarm(warm); });
+            registry.bindLedgerKey(ref, warmKey(warm));
+          } else if(call){call.entryId=entry.id;const key=callKey(call);if(key){ledger.record(call,'live');registry.bindLedgerKey(ref,key);}}
           known.add(entry.id);
         }
       }catch{console.error('[usage-ledger] delayed persisted usage could not be registered');}
@@ -56,13 +60,7 @@ export function createUsageLedgerExtension(options: UsageLedgerOptions = {}) {
         if (!call) return;
         const ledger = ledgerOf();
         ledger.transaction(() => {
-          ledger.upsertSession({
-            id: sessionId,
-            path: manager.getSessionFile() ?? null,
-            cwd: ctx.cwd || null,
-            startedAt: manager.getHeader()?.timestamp ?? null,
-            name: manager.getSessionName()?.trim() || null,
-          });
+          ledger.upsertSession(usageSessionMetadata(manager, ctx.cwd));
           ledger.record(call, "live");
         });
       } catch (error) {

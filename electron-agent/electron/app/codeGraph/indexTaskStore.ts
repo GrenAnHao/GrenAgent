@@ -14,7 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 export type IndexTaskState = 'pending' | 'running' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
-export interface IndexTaskStageCounts { processed: number; total: number }
+export interface IndexTaskStageCounts { processed: number; total?: number }
 
 export interface IndexTask {
   id: string;
@@ -35,6 +35,11 @@ export interface IndexTask {
 const ACTIVE = new Set<IndexTaskState>(['pending', 'running', 'blocked', 'paused']);
 const TERMINAL = new Set<IndexTaskState>(['completed', 'failed', 'cancelled']);
 
+// The picker and session records can spell the same Windows project with different slashes/casing.
+const winKey = (column: 'workspace' | '?') => "lower(rtrim(replace(" + column + ", char(92), '/'), '/'))";
+function workspaceMatch(path: string) {
+  return /^(?:[a-z]:[\\/]|[/\\]{2})/i.test(path) ? winKey('workspace') + '=' + winKey('?') : 'workspace=?';
+}
 export class IndexTaskStore {
   private readonly db: DatabaseSync;
 
@@ -61,6 +66,7 @@ export class IndexTaskStore {
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS index_tasks_workspace ON index_tasks(workspace, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS index_tasks_win_workspace ON index_tasks(${winKey('workspace')}, created_at DESC);
       CREATE INDEX IF NOT EXISTS index_tasks_state ON index_tasks(state, updated_at DESC);
     `);
   }
@@ -79,6 +85,11 @@ export class IndexTaskStore {
     return row ? mapRow(row) : undefined;
   }
 
+  latestManual(workspace: string): IndexTask | undefined {
+    const row = this.db.prepare("SELECT * FROM index_tasks WHERE " + workspaceMatch(workspace) + " AND origin='manual' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(workspace) as Row | undefined;
+    return row && mapRow(row);
+  }
+
   list(query: { workspace?: string; activeOnly?: boolean } = {}): IndexTask[] {
     const where: string[] = [];
     const params: string[] = [];
@@ -95,12 +106,12 @@ export class IndexTaskStore {
 
   stage(id: string, stage: string, counts?: IndexTaskStageCounts): IndexTask | undefined {
     if (!stage.trim() || stage.length > 120) throw new Error('INVALID_STAGE');
-    if (counts && (!Number.isSafeInteger(counts.processed) || !Number.isSafeInteger(counts.total) || counts.processed < 0 || counts.total < 0 || counts.processed > counts.total)) throw new Error('INVALID_COUNTS');
+    if (counts && (!Number.isSafeInteger(counts.processed) || counts.processed < 0 || (counts.total !== undefined && (!Number.isSafeInteger(counts.total) || counts.total < 0 || counts.processed > counts.total)))) throw new Error('INVALID_COUNTS');
     const current = this.get(id);
     if (!current || !ACTIVE.has(current.state)) return current;
-    const progress = counts && counts.total > 0 ? Math.max(0, Math.min(99, Math.round((counts.processed / counts.total) * 100))) : current.progress;
+    const progress = counts?.total ? Math.max(0, Math.min(99, Math.round((counts.processed / counts.total) * 100))) : current.progress;
     this.db.prepare('UPDATE index_tasks SET stage=?,processed=?,total=?,progress=?,updated_at=? WHERE id=?')
-      .run(stage, counts?.processed ?? current.processed ?? null, counts?.total ?? current.total ?? null, progress, this.now(), id);
+      .run(stage, counts?.processed ?? null, counts?.total ?? null, progress, this.now(), id);
     return this.get(id);
   }
 
@@ -121,7 +132,8 @@ export class IndexTaskStore {
 
   /** 同一工作区已有在跑的索引任务时不允许重复派发。 */
   activeFor(workspace: string): IndexTask | undefined {
-    return this.list({ workspace, activeOnly: true })[0];
+    const row = this.db.prepare("SELECT * FROM index_tasks WHERE " + workspaceMatch(workspace) + " AND state IN ('pending','running','paused','blocked') ORDER BY updated_at DESC, created_at DESC LIMIT 1").get(workspace) as Row | undefined;
+    return row && mapRow(row);
   }
 
   remove(id: string): { deleted: boolean } {

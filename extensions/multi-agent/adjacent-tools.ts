@@ -16,6 +16,7 @@ import {
 import { getRegistry } from "./controlPlane.js";
 import { SubagentError, type Delivery } from "./inbox.js";
 import { lookupParentHost } from "./parent-host.js";
+import { isSessionOperationBlocked, withSessionOperationGuard } from "./session-operation-guard.js";
 
 function callerWorkspace(ctx: { cwd: string }): string {
   return currentWorkspaceContext()?.workspace ?? ctx.cwd;
@@ -125,6 +126,17 @@ function senderIdOf(ctx: { sessionManager?: { getSessionId?: () => string } }): 
   throw new SubagentError("session id is unavailable", "PARENT_UNAVAILABLE");
 }
 
+/** 调用方（父会话）自己的 sessionPath；拿不到时 undefined，guard 只锁子会话。 */
+function parentPath(ctx: { sessionManager?: unknown } | null | undefined): string | undefined {
+  try {
+    const manager = ctx?.sessionManager as { getSessionFile?: () => string | undefined } | undefined;
+    const path = manager?.getSessionFile?.();
+    return typeof path === "string" && path.trim() ? path.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function registrySessionPath(cwd: string, agentId: string): string | undefined {
   const path = getRegistry(cwd).get(agentId)?.sessionPath;
   return typeof path === "string" && path.trim() ? path.trim() : undefined;
@@ -172,18 +184,25 @@ async function executeSendMessage(
       if (sessionPath) {
         const peek = peekParentSessionId(sessionPath);
         if (peek.readable && peek.parentSessionId === senderId) {
+          // 迁移中的族不唤醒、不追加：读闸门先拒（同项目其他子代理不受影响），
+          // 写入口再和迁移共用会话族 lease（冷恢复的 JSONL 追加不能与迁移同时进行）。
+          if (isSessionOperationBlocked(sessionPath) || isSessionOperationBlocked(parentPath(ctx))) {
+            throw new SubagentError(`child ${agentId} is being moved between projects`, "SESSION_TRANSFER_PENDING");
+          }
+          const guardPaths = [parentPath(ctx), sessionPath].filter((path): path is string => Boolean(path));
           if (!wake) {
             // 驻留池里的追加进会话；已卸载的直接追加到 JSONL，不加载会话。
-            const how = await deliverWithoutWaking(agentId, { sessionPath, message: agentMessage(senderId, message) });
+            const how = await withSessionOperationGuard(guardPaths, () =>
+              deliverWithoutWaking(agentId, { sessionPath, message: agentMessage(senderId, message) }),
+            );
             return deliveredQuietly(agentId, how);
           }
-          if (senderAct) {
-            await coldResumeAndDeliver(agentId, sessionPath, text, "followUp", {
-              senderActivationId: senderId,
-            });
-          } else {
-            await coldResumeAndDeliver(agentId, sessionPath, text, "followUp");
-          }
+          await withSessionOperationGuard(guardPaths, () =>
+            coldResumeAndDeliver(agentId, sessionPath, text, "followUp", {
+              registry: getRegistry(projectCwd(ctx)),
+              ...(senderAct ? { senderActivationId: senderId } : {}),
+            }),
+          );
           const resumed = getActivation(agentId);
           return delivered(agentId, lastUserMessageId(resumed?.session.messages));
         }

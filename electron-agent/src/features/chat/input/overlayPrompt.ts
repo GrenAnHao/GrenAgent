@@ -67,9 +67,9 @@ export async function cancelPendingOverlay(
           type: 'extension_ui_response',
           id: inline.id,
           cancelled: true,
+          ...(inline.toolCallId ? { askUserDraftToolCallId: inline.toolCallId } : {}),
         });
       }
-      await pi.deleteAskUserDraft(workspace).catch(() => {});
       useInlineQuestionStore.getState().clear(workspace, inline.id);
       return 'cancelled';
     } catch {

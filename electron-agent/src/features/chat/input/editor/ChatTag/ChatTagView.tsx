@@ -46,16 +46,12 @@ const styles = createStaticStyles(({ css }) => ({
     background: color-mix(in srgb, ${cssVar.purple} 16%, transparent);
   `,
   toolCommand: css`
-    color: #bce641;
-    background: color-mix(in srgb, #bce641 16%, transparent);
+    color: var(--gren-tool-command);
+    background: color-mix(in srgb, var(--gren-tool-command) 16%, transparent);
   `,
   // 链接对齐 Codex 的 --color-token-text-link-foreground（亮色 blue-300，暗色 blue-100），不加底色。
   link: css`
-    color: #339cff;
-
-    html[data-theme='dark'] & {
-      color: #99ceff;
-    }
+    color: var(--gren-inline-link);
   `,
   openable: css`
     cursor: pointer;
@@ -77,7 +73,7 @@ export function ChatTagView({
   /** 只在只读展示处（消息气泡）传入；输入框里的 chip 不传，避免编辑时误触打开。 */
   onOpen?: () => void;
 }) {
-  // 工具命令(extension) chip 用 #BCE641 突出；其它命令/文件/目录沿用各自类目色。
+  // 工具命令与普通命令分色；文件、目录和链接沿用各自的类别色。
   const colorClass =
     category === 'command' && commandGroup === 'extension' ? styles.toolCommand : styles[category];
   const fileName = label.split('/').pop() || label;

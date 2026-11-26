@@ -48,7 +48,8 @@ const styles = createStaticStyles(({ css }) => ({
     flex: 0 1 220px;
     min-width: 120px;
     padding-inline: 0;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     font-size: 12px;
   `,
   chk: css`
@@ -60,6 +61,8 @@ const styles = createStaticStyles(({ css }) => ({
     width: 132px;
   `,
   chip: css`
+    font-weight: 500;
+    letter-spacing: 0.01em;
     flex: 0 0 auto;
     padding: 1px 8px;
     border-radius: 999px;

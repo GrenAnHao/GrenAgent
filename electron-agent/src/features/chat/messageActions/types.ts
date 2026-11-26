@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import type { UserImage } from '../../stores/agentReducer';
+import type { UserImage } from '../../../stores/agentReducer';
 
 export type MessageRole = 'user' | 'assistant';
 

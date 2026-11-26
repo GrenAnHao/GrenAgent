@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "scenario": "assertion",
+  "first": {
+    "kind": "assertion",
+    "at": "2026-11-24T09:53:48.801Z",
+    "stepSeq": 6,
+    "site": {
+      "file": "probes/assertion.mjs",
+      "line": 17,
+      "column": 11
+    },
+    "label": "Receiver count",
+    "actual": 0,
+    "expected": 1
+  },
+  "steps": [
+    {
+      "seq": 1,
+      "ms": 1093,
+      "kind": "click",
+      "point": {
+        "x": 38,
+        "y": 192
+      }
+    },
+    {
+      "seq": 2,
+      "ms": 1523,
+      "kind": "type"
+    },
+    {
+      "seq": 3,
+      "ms": 1924,
+      "kind": "insertText"
+    },
+    {
+      "seq": 4,
+      "ms": 2276,
+      "kind": "js"
+    },
+    {
+      "seq": 5,
+      "ms": 2277,
+      "kind": "act"
+    },
+    {
+      "seq": 6,
+      "ms": 2330,
+      "kind": "click",
+      "point": {
+        "x": 251,
+        "y": 192
+      }
+    }
+  ],
+  "window": {
+    "status": "available",
+    "at": 1795514028809,
+    "focus": {
+      "tag": "button",
+      "sibling": 1,
+      "testId": "receiver"
+    },
+    "lastPasteAt": 1795514028318,
+    "lastMouseDown": {
+      "at": 1795514028372,
+      "point": {
+        "x": 251,
+        "y": 192
+      },
+      "target": {
+        "tag": "button",
+        "sibling": 1,
+        "testId": "receiver"
+      }
+    }
+  },
+  "screenshot": {
+    "status": "available",
+    "file": "window.png",
+    "at": "2026-11-24T09:53:48.823Z"
+  }
+}

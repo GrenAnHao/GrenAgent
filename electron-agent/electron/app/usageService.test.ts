@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -40,9 +40,9 @@ describe('UsageService', () => {
     const report = await service.report();
 
     expect(report.totals).toEqual({ input: 10, output: 5, cacheRead: 4, cacheWrite: 1, totalTokens: 20, cost: 0.25, sessions: 1, messages: 1, cacheHitRate: 4 / 14 });
-    expect(report.byDay).toEqual([{ date: '2026-08-30', tokens: 20, cost: 0.25 }]);
-    expect(report.byModel).toEqual([{ provider: 'openai', model: 'gpt-5', tokens: 20, cost: 0.25, messages: 1 }]);
-    expect(report.byProject).toEqual([{ cwd: 'C:/work', name: 'Latest', tokens: 20, cost: 0.25, sessions: 1 }]);
+    expect(report.byDay).toEqual([{ date: '2026-08-30', tokens: 20, cost: 0.25, recordedCost: 0.25, messages: 1, cacheHitRate: 4 / 14 }]);
+    expect(report.byModel).toEqual([{ provider: 'openai', model: 'gpt-5', tokens: 20, cost: 0.25, recordedCost: 0.25, messages: 1 }]);
+    expect(report.byProject).toEqual([{ projectId: 'cwd:c:/work', cwd: 'C:/work', name: 'work', tokens: 20, cost: 0.25, recordedCost: 0.25, sessions: 1 }]);
     expect(report.recentSessions[0]).toMatchObject({ id: 's1', name: 'Latest', tokens: 20, cost: 0.25, path: join(sessionDir, 'a.jsonl') });
     expect(report.calls).toEqual([{ responseModel:null,costSource:'unknown',timestamp: '2026-08-30T10:00:00Z', provider: 'openai', model: 'gpt-5', input: 10, output: 5, cacheRead: 4, cacheWrite: 1, totalTokens: 20, cost: 0.25 }]);
   });
@@ -98,6 +98,19 @@ describe('UsageService', () => {
     expect((await service.report()).totals).toMatchObject({ messages: 2, totalTokens: 30 });
   });
 
+  it('classifies both the configured works directory and its real junction target as global conversations', async () => {
+    const { agent, sessionDir, service } = await setup();
+    const target = join(agent, 'scratch-storage');
+    const alias = join(agent, 'works');
+    await mkdir(target); await symlink(target, alias, 'junction');
+    for (const [i, root] of [target, alias].entries()) {
+      await writeFile(join(sessionDir, `conversation-${i}.jsonl`), [header('c' + i, join(root, 'chat-' + i)), assistant('2026-11-20T22:00:00Z', i + 1, 50)].join('\n'));
+    }
+    const r = await service.report({ projectId: 'global' });
+    expect(r.projects).toEqual([{ projectId: 'global', name: '未归属会话 (全局对话)' }]);
+    expect(r.byProject).toMatchObject([{ projectId: 'global', sessions: 2, tokens: 100 }]);
+  });
+
   it('shares one import between concurrent requests', async () => {
     const { sessionDir, service } = await setup();
     await writeFile(join(sessionDir, 'a.jsonl'), `${header('s1')}\n${assistant('2026-08-30T10:00:00Z', 1, 10)}\n`);
@@ -130,8 +143,8 @@ it('cold reconciliation freezes legacy, ignores unmanaged/forged/imported histor
 });
 it('a new file spoofing a registered header and entry cannot backfill original metadata',async()=>{
  const {sessionDir,service,ledger}=await setup();await writeFile(join(sessionDir,'original.jsonl'),`${header('same')}\n${assistant('2026-11-10T00:00:00Z',1,12)}\n`);await service.report();
- await writeFile(join(sessionDir,'a-spoof.jsonl'),`${header('same')}\n${assistant('2026-11-10T00:00:00Z',1,999,{responseModel:'poison',usage:{cost:{total:999,totalFromProvider:true}}})}\n`);
- await service.reconcile();expect(ledger.report().calls[0]).toMatchObject({responseModel:null,costSource:'unknown',cost:0.12});expect(ledger.report().totals.messages).toBe(1);
+ await writeFile(join(sessionDir,'a-spoof.jsonl'),`${header('same','C:/spoofed')}\n${assistant('2026-11-10T00:00:00Z',1,999,{responseModel:'poison',usage:{cost:{total:999,totalFromProvider:true}}})}\n`);
+ await rm(join(sessionDir,'original.jsonl'));await service.reconcile();expect(ledger.report().byProject[0].cwd).toBe('C:/work');expect(ledger.report().calls[0]).toMatchObject({responseModel:null,costSource:'unknown',cost:0.12});expect(ledger.report().totals.messages).toBe(1);
 });
 it('reconciles only exact persisted cache_warm envelopes and keeps auxiliary/tool usages outside assistant totals',async()=>{
  const {agent,sessionDir,service,ledger}=await setup();const file=join(sessionDir,'native.jsonl');const usage={input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{total:0.03,totalFromProvider:false}};

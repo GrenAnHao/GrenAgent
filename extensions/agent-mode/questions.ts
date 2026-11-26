@@ -28,6 +28,7 @@ export interface QuestionsCardData {
   /** allowExtra 为 true 时是否允许贴图，默认 true。 */
   allowExtraImages?: boolean;
   extraPlaceholder?: string;
+  visualReview?: { previewId: string };
 }
 
 // AI 经 ask_user 工具传入的原始问题（宽松形状，运行时规范化）。
@@ -44,6 +45,7 @@ export interface RawAskUserParams {
   allowExtra?: boolean;
   allowExtraImages?: boolean;
   extraPlaceholder?: string;
+  visualReview?: { previewId: string };
 }
 
 /**
@@ -71,6 +73,15 @@ export function makeQuestionsId(now: Date = new Date(), rand: string = Math.rand
 // 规范化：补全问题/选项 id、去空白、过滤空项；无任何合法问题时返回 null（调用方据此报错）。
 export function normalizeQuestions(raw: RawQuestion[], id: string, card?: Omit<RawAskUserParams, "questions">): QuestionsCardData | null {
   const questions: QuestionSpec[] = [];
+  if (card?.visualReview?.previewId) {
+    questions.push({
+      id: "visual-review",
+      title: "这版视觉产出是否通过评审？",
+      options: [{ id: "approve", label: "通过" }, { id: "redo", label: "打回重做" }],
+      allowMultiple: false,
+      allowCustom: false,
+    });
+  }
   raw.forEach((q) => {
     const title = (q?.question ?? "").trim();
     if (!title) return;
@@ -81,7 +92,8 @@ export function normalizeQuestions(raw: RawQuestion[], id: string, card?: Omit<R
       const rawId = typeof o === "string" ? "" : (o?.id ?? "").trim();
       options.push({ id: rawId || `o${options.length + 1}`, label });
     });
-    const allowCustom = Boolean(q.allowCustom);
+    // Only normalize new requests here; persisted cards are parsed as-is by the renderer.
+    const allowCustom = q.allowCustom !== false;
     if (allowCustom && !options.some((o) => o.id === CUSTOM_OPTION_ID)) {
       const customLabel = (q.customLabel ?? "其他（自定义）").trim() || "其他（自定义）";
       options.push({ id: CUSTOM_OPTION_ID, label: customLabel });
@@ -100,9 +112,10 @@ export function normalizeQuestions(raw: RawQuestion[], id: string, card?: Omit<R
     kind: "questions",
     id,
     questions,
-    ...(card?.allowExtra ? { allowExtra: true } : {}),
-    ...(card?.allowExtraImages === false ? { allowExtraImages: false } : card?.allowExtra ? { allowExtraImages: true } : {}),
+    ...(card?.allowExtra || card?.visualReview?.previewId ? { allowExtra: true } : {}),
+    ...(card?.allowExtraImages === false ? { allowExtraImages: false } : card?.allowExtra || card?.visualReview?.previewId ? { allowExtraImages: true } : {}),
     ...(card?.extraPlaceholder?.trim() ? { extraPlaceholder: card.extraPlaceholder.trim() } : {}),
+    ...(card?.visualReview?.previewId ? { visualReview: { previewId: card.visualReview.previewId } } : {}),
   };
 }
 
@@ -113,12 +126,14 @@ export interface AskUserAnswerImage {
 }
 
 /** 前端有贴图时会把回包装成 `{ __askUserAnswer, text, images }`；无图仍是纯 `[我的选择]` 文本。 */
-export function decodeAskUserAnswer(raw: unknown): { text: string; images: AskUserAnswerImage[] } {
+export interface VisualReviewAnswer { previewId: string; outcome: "approved" | "redo" }
+
+export function decodeAskUserAnswer(raw: unknown): { text: string; images: AskUserAnswerImage[]; review?: VisualReviewAnswer } {
   if (typeof raw !== "string") return { text: "", images: [] };
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) {
     try {
-      const obj = JSON.parse(trimmed) as { __askUserAnswer?: unknown; text?: unknown; images?: unknown };
+      const obj = JSON.parse(trimmed) as { __askUserAnswer?: unknown; text?: unknown; images?: unknown; review?: unknown };
       if (obj && obj.__askUserAnswer && typeof obj.text === "string") {
         const images = Array.isArray(obj.images)
           ? obj.images.flatMap((item) => {
@@ -129,7 +144,13 @@ export function decodeAskUserAnswer(raw: unknown): { text: string; images: AskUs
               return [{ type: "image" as const, mimeType: img.mimeType, data: img.data }];
             })
           : [];
-        return { text: obj.text, images };
+        const review = obj.review as Partial<VisualReviewAnswer> | undefined;
+        return {
+          text: obj.text,
+          images,
+          ...(review && typeof review.previewId === "string" && (review.outcome === "approved" || review.outcome === "redo")
+            ? { review: { previewId: review.previewId, outcome: review.outcome } } : {}),
+        };
       }
     } catch {
       /* 不是哨兵信封，当纯文本 */

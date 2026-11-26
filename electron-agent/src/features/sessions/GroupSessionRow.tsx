@@ -19,6 +19,8 @@ interface GroupSessionRowProps {
   onReveal: (cwd: string) => void;
   onArchive?: (cwd: string, path: string) => void;
   onRegenerateTitle?: (cwd: string, path: string) => void;
+  /** 移动到项目…；未提供则菜单不出现该项。 */
+  onTransfer?: (cwd: string, path: string, title: string) => void;
 }
 
 export const GroupSessionRow = memo(function GroupSessionRow({
@@ -36,6 +38,7 @@ export const GroupSessionRow = memo(function GroupSessionRow({
   onReveal,
   onArchive,
   onRegenerateTitle,
+  onTransfer,
 }: GroupSessionRowProps) {
   const path = session.path;
   const handleClick = useCallback(() => onOpen(cwd, path), [onOpen, cwd, path]);
@@ -46,11 +49,16 @@ export const GroupSessionRow = memo(function GroupSessionRow({
   const handleReveal = useCallback(() => onReveal(cwd), [onReveal, cwd]);
   const handleArchive = useCallback(() => onArchive?.(cwd, path), [onArchive, cwd, path]);
   const handleRegenerateTitle = useCallback(() => onRegenerateTitle?.(cwd, path), [onRegenerateTitle, cwd, path]);
+  const title = session.name || friendlyTime(session.timestamp);
+  const handleTransfer = useCallback(
+    () => onTransfer?.(cwd, path, title),
+    [onTransfer, cwd, path, title],
+  );
   const attention = useSessionAttention(path, running);
 
   return (
     <SessionItem
-      title={session.name || friendlyTime(session.timestamp)}
+      title={title}
       active={active}
       running={running}
       attention={attention}
@@ -64,6 +72,7 @@ export const GroupSessionRow = memo(function GroupSessionRow({
       onReveal={handleReveal}
       onArchive={onArchive ? handleArchive : undefined}
       onRegenerateTitle={onRegenerateTitle ? handleRegenerateTitle : undefined}
+      onTransfer={onTransfer ? handleTransfer : undefined}
     />
   );
 });

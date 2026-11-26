@@ -8,6 +8,10 @@ export interface CodeRetrievalRow {
   symbol?: string;
   kind?: string;
   snippet?: string;
+  /** Number of distinct other indexed files referencing this file. */
+  incomingFiles?: number;
+  /** Descendant files in a directory entry. */
+  fileCount?: number;
 }
 
 export interface CodeRetrievalResult {

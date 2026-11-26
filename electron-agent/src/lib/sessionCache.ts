@@ -3,7 +3,9 @@ import type { SessionInfo } from './pi';
 const ALL_SESSIONS_TTL_MS = 30_000;
 
 let allSessionsCache: { data: SessionInfo[]; expiresAt: number } | null = null;
-let allSessionsInflight: Promise<SessionInfo[]> | null = null;
+// 过期请求返回 undefined，任何等待同一请求的调用方都不能重新发布它。
+type SessionsRequest = Promise<SessionInfo[] | undefined>;
+let allSessionsInflight: SessionsRequest | null = null;
 
 export function getCachedAllSessions(): SessionInfo[] | null {
   if (!allSessionsCache) return null;
@@ -22,11 +24,11 @@ export function invalidateAllSessionsCache(): void {
   allSessionsCache = null;
 }
 
-export function getAllSessionsInflight(): Promise<SessionInfo[]> | null {
+export function getAllSessionsInflight(): SessionsRequest | null {
   return allSessionsInflight;
 }
 
-export function setAllSessionsInflight(promise: Promise<SessionInfo[]> | null): void {
+export function setAllSessionsInflight(promise: SessionsRequest | null): void {
   allSessionsInflight = promise;
 }
 

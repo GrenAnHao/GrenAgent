@@ -14,17 +14,19 @@ vi.mock('../../platform/runtime', () => ({
   openPath: async () => {},
 }));
 
+import { useSessionStore } from '../../store';
 import { CodeIndexWorkspace } from './CodeIndexWorkspace';
 
 describe('code index module entry', () => {
   it('renders the code index without going through the Agent Data workbench', async () => {
     // Load the renderer module before mounting the lazy entry so the assertion
     // does not race the first transform of the editor dependency graph.
+    useSessionStore.setState({registeredProjects:['D:/repo']});
     await import('../agentData/CodeRetrievalPanel');
     await act(async () => { render(<CodeIndexWorkspace visible initialProject="D:/repo" />); });
     expect(await screen.findByText('代码索引')).toBeInTheDocument();
     // 只请求代码索引自己的数据，不请求工作台的概览/审计/诊断/资料 Wiki。
-    expect(invoked).toContain('agentData_code_projects');
+    expect(invoked).toContain('agentData_code_status');
     expect(invoked).not.toContain('agentData_overview');
     expect(invoked).not.toContain('agentData_audit_query');
     expect(invoked).not.toContain('agentData_diagnostics_check');

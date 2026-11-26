@@ -1,0 +1,155 @@
+{
+  "hostEntry": "source",
+  "facts": [
+    "production host opens the fixture main session with stable identity",
+    "source listing includes the fixture main session",
+    "preview of the same real path is a no-op without a journal or write",
+    "preview binds identity, confirmed leaf, revision, family and target policy",
+    "preview writes no session bytes and makes zero model requests",
+    "an active production turn blocks the transfer without cancelling it",
+    "post-commit open failure reports committed-needs-open with the durable operation id",
+    "moving itself makes zero model requests",
+    "canonical path, session id and every original entry survive the move",
+    "one versioned transfer marker plus target working directory are appended",
+    "children moved with the family and keep their identities",
+    "registry rows move record-by-record; unrelated source rows stay in the source project",
+    "committed-needs-open family is hidden from both project lists instead of half-migrated",
+    "durable commit already moves usage grouping to the target project",
+    "status reports the same unfinished durable fact without re-running the move",
+    "a repeated commit receipt returns the same operation fact without a second marker or rewritten history",
+    "retry-open completes the committed transaction and opens the same canonical session",
+    "retry-open invalidates the exact family paths on the main side",
+    "a second retry-open is idempotent and keeps the single logical identity",
+    "after open the family is listed only in the target project",
+    "target runtime owns the moved canonical path and narrowed permissions",
+    "old source workspace refuses to reopen the moved session",
+    "commit, repeated commit, status and both retry-opens made no model request",
+    "explicit post-move request persists a terminal entry and settles before reporting done",
+    "a real tool in the moved main session reads the target project file, not the source one",
+    "the next model context carries target project instructions and rules, not the source ones",
+    "the next model context states the migration fact without a fake user turn",
+    "a continuable child cold-resumes in the target: real tool read hits target file, not source",
+    "a one-shot child stays read-only after the move",
+    "null-root preview exposes the confirmed empty root instead of the physical leaf",
+    "null-root commit opens in the target",
+    "reopened null-root session still has an empty confirmed leaf",
+    "null-root file retains its original messages and gains only the migration metadata",
+    "deleting the source project keeps the moved main, children and null-root history readable",
+    "the explicit post-move main and child calls were each recorded once, so the later equality is meaningful",
+    "second move preview uses the durable target as source",
+    "second move opens the same identity in the third project with a new directory segment",
+    "third move back to the target keeps a single identity and history",
+    "no later move, retry-open, null-root or repeated receipt made another model request",
+    "repeated moves and reconciliation never re-count historical tokens or cost",
+    "every transfer journal finished at a terminal state (opened), with no leftovers blocking later commands",
+    "every model request in this probe went to the local loopback server",
+    "every model request is attributable to an explicit user action, its tool continuation or that child settlement",
+    "after the explicit phase no migration, retry, reconcile or null-root step requested the model",
+    "no remote provider request was attempted",
+    "migration never used the real user agent directory or credentials"
+  ],
+  "requestCount": 7,
+  "requestTriggers": [
+    {
+      "index": 0,
+      "trigger": "explicit-busy"
+    },
+    {
+      "index": 1,
+      "trigger": "explicit-main"
+    },
+    {
+      "index": 2,
+      "trigger": "tool-continuation"
+    },
+    {
+      "index": 3,
+      "trigger": "explicit-child"
+    },
+    {
+      "index": 4,
+      "trigger": "tool-continuation"
+    },
+    {
+      "index": 5,
+      "trigger": "child-settlement"
+    },
+    {
+      "index": 6,
+      "trigger": "tool-continuation"
+    }
+  ],
+  "postExplicitRequestCount": 7,
+  "invalidated": [
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-153Z_01a1e80b-9b20-7081-8aa9-b5699280bc8f.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-155Z_sa-continuable.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-157Z_sa-oneshot.jsonl"
+    ],
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-nullroot--\\2026-11-17T05-47-17-197Z_01a1e80b-9b4d-7081-8aa9-b56ca8b0d96a.jsonl"
+    ],
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-153Z_01a1e80b-9b20-7081-8aa9-b5699280bc8f.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-155Z_sa-continuable.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-157Z_sa-oneshot.jsonl"
+    ],
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-153Z_01a1e80b-9b20-7081-8aa9-b5699280bc8f.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-155Z_sa-continuable.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\agent\\sessions\\--fixture-main--\\2026-11-17T05-47-17-157Z_sa-oneshot.jsonl"
+    ]
+  ],
+  "journals": {
+    "remainingBlocks": [],
+    "manifests": [
+      {
+        "operationId": "695ff079-c86b-4874-b1b2-a80e5d9b5b86",
+        "state": "opened",
+        "opened": true,
+        "targetWorkspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\projects\\other"
+      },
+      {
+        "operationId": "6a34d02b-266f-47aa-a667-f6cb6589a986",
+        "state": "opened",
+        "opened": true,
+        "targetWorkspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\projects\\target"
+      },
+      {
+        "operationId": "ad87c7f9-a51c-4f99-9e24-b4d4c2da4b30",
+        "state": "opened",
+        "opened": true,
+        "targetWorkspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\projects\\fourth"
+      },
+      {
+        "operationId": "caed0234-3783-41f1-8ed8-32811de01998",
+        "state": "opened",
+        "opened": true,
+        "targetWorkspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-NRCbag\\projects\\target"
+      }
+    ]
+  },
+  "totalsBefore": {
+    "input": 65,
+    "output": 19,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 84,
+    "cost": 0.020052,
+    "sessions": 4,
+    "messages": 11,
+    "cacheHitRate": 0
+  },
+  "totalsAfter": {
+    "input": 65,
+    "output": 19,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 84,
+    "cost": 0.020052,
+    "sessions": 4,
+    "messages": 11,
+    "cacheHitRate": 0
+  },
+  "stderr": "(node:42184) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n"
+}

@@ -1,7 +1,7 @@
 import type { MenuProps } from 'antd';
 import { createElement } from 'react';
 import { Icon } from '@lobehub/ui';
-import { Archive, FolderOpen, PencilLine, Pin, PinOff, Sparkles, Trash2 } from 'lucide-react';
+import { Archive, FolderOpen, Folders, PencilLine, Pin, PinOff, Sparkles, Trash2 } from 'lucide-react';
 
 export interface SessionMenuParams {
   pinned: boolean;
@@ -16,6 +16,8 @@ export interface SessionMenuParams {
   onArchive?: () => void;
   /** 回合还在跑：归档置灰，免得会话在后台跑着、侧栏却没有入口。 */
   archiveDisabled?: boolean;
+  /** 移动到项目…：未提供（已归档、未落盘）则不显示该项。 */
+  onTransfer?: () => void;
 }
 
 type Items = NonNullable<MenuProps['items']>;
@@ -51,6 +53,16 @@ export function buildSessionMenuItems(p: SessionMenuParams): Items {
             icon: createElement(Icon, { icon: Sparkles, size: 'small' }),
             label: '重新生成标题',
             onClick: p.onRegenerateTitle,
+          },
+        ]
+      : []),
+    ...(p.onTransfer
+      ? [
+          {
+            key: 'transfer',
+            icon: createElement(Icon, { icon: Folders, size: 'small' }),
+            label: '移动到项目…',
+            onClick: p.onTransfer,
           },
         ]
       : []),

@@ -72,6 +72,7 @@ import {
   type RawAskUserParams,
 } from "./questions.js";
 import { applyUltraRules, isSubagentSession, subagentProbeOf } from "./ultra-rules.js";
+import { bindVisualReview, getVisualReview, onVisualReviewSuperseded, settleVisualReview, visualReviewOwner } from "../visual-companion/reviewRegistry.js";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
   return m.role === "assistant" && Array.isArray(m.content);
@@ -419,9 +420,10 @@ export default function (pi: ExtensionAPI) {
     name: "ask_user",
     label: "Ask User",
     description:
-      "向用户提一个或多个选择题，让用户在可点击的选项卡上做选择。" +
+      "向用户提一个或多个选择题，让用户在可点击的选项卡上做选择。visualReview.previewId 绑定 show_visual 的具体产出，首题固定为封闭的通过/打回评审题，补充可选；取消和无界面绝不视为通过。" +
       "当你需要用户在若干选项中做决策（选方案 / 测验答题 / 确认方向 / 风险操作前确认等）时调用。" +
       "禁止在 assistant 正文里写 A/B/C/D 纯文本选项——必须用本工具。" +
+      "非封闭题默认提供自定义答案；只有确认、审批或测验等真正封闭题才显式设置 allowCustom=false。" +
       "本工具会阻塞直到用户作答，并把用户的选择作为工具结果返回（形如 [我的选择] …）——不要替用户作答，也不要预测答案。",
     promptSnippet: "Ask the user a clickable multiple-choice question.",
     promptGuidelines: [
@@ -430,6 +432,8 @@ export default function (pi: ExtensionAPI) {
       "The card shows only the question text and the option labels — it cannot render code, command output, tables, or diagrams. Put any context the question depends on in your reply BEFORE calling the tool (e.g. show the code, then ask what it prints).",
       "Autonomy still applies: when the answer is discoverable from the repo (read/grep first) or a single recommendation is obviously right, just act — reserve ask_user for genuine forks where the user's preference changes the outcome.",
       "ask_user BLOCKS until the user answers and returns their choice as the tool result (a `[我的选择]` block) — never pre-fill, guess, or answer the question yourself. State your recommendation in the question text; keep 2–5 short, mutually exclusive options.",
+      "Use ask_user with allowCustom omitted for open choices (defaults to true); set allowCustom=false only on a truly closed question. Supplement text never substitutes for a required answer.",
+      "After show_visual, use ask_user with visualReview.previewId to review that exact output. A redo or cancellation is not approval: regenerate, call show_visual again, and ask_user again; never infer approval from preview clicks.",
     ],
     parameters: Type.Object({
       allowExtra: Type.Optional(
@@ -439,6 +443,7 @@ export default function (pi: ExtensionAPI) {
         Type.Boolean({ description: "allowExtra 为 true 时是否允许贴图，默认 true" }),
       ),
       extraPlaceholder: Type.Optional(Type.String({ description: "补充说明输入框占位提示" })),
+      visualReview: Type.Optional(Type.Object({ previewId: Type.String({ description: "show_visual 返回的不可复用 previewId；首题固定为通过／打回且不可预选" }) })),
       questions: Type.Array(
         Type.Object({
           question: Type.String({ description: "问题文本" }),
@@ -453,14 +458,14 @@ export default function (pi: ExtensionAPI) {
           ),
           allowMultiple: Type.Optional(Type.Boolean({ description: "是否允许多选，默认单选" })),
           allowCustom: Type.Optional(
-            Type.Boolean({ description: "是否提供「其他/自定义」选项（选中后需填写文本）" }),
+            Type.Boolean({ description: "是否提供「其他/自定义」选项，默认 true；仅真正封闭题显式设 false，选中自定义需填写非空文本" }),
           ),
           customLabel: Type.Optional(Type.String({ description: "自定义选项标签，默认「其他（自定义）」" })),
         }),
         { description: `一个或多个问题（逐题分页渲染），最多 ${MAX_QUESTIONS} 题`, maxItems: MAX_QUESTIONS },
       ),
     }),
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const id = makeQuestionsId();
       const p = params as RawAskUserParams;
       const notice = truncationNotice(countValidQuestions(p.questions ?? []));
@@ -469,6 +474,7 @@ export default function (pi: ExtensionAPI) {
         allowExtra: p.allowExtra,
         allowExtraImages: p.allowExtraImages,
         extraPlaceholder: p.extraPlaceholder,
+        visualReview: p.visualReview,
       });
       if (!data) {
         return {
@@ -476,14 +482,49 @@ export default function (pi: ExtensionAPI) {
           details: undefined,
         };
       }
+      const previewId = data.visualReview?.previewId;
+      const owner = visualReviewOwner(ctx);
+      if (previewId) bindVisualReview(owner, previewId, toolCallId);
+      const reviewResult = (outcome: "approved" | "redo" | "cancelled") => ({
+        previewId: previewId!, requestId: toolCallId, outcome,
+      });
 
       // 阻塞式富卡：整张卡 JSON 作载荷经 ctx.ui.input 传给前端；前端识别哨兵后在消息流末尾
       // 内联渲染富卡（皮肤/步骤/多选），用户作答后回传 `[我的选择] …` 文本 resolve 本次调用——
       // 与 MCP 交互一致，模型拿到真实答案前不会继续。ctx.ui 协议无法承载结构化数据，故走 input.title。
       if (ctx.hasUI) {
         const payload = JSON.stringify({ __askUser: 1, data });
-        const answer = await ctx.ui.input(payload, undefined, { signal });
+        const superseded = new AbortController();
+        const unbind = previewId ? onVisualReviewSuperseded(previewId, () => superseded.abort()) : () => {};
+        let answer: string | undefined;
+        try {
+          answer = await ctx.ui.input(payload, undefined, {
+            signal: previewId ? (signal ? AbortSignal.any([signal, superseded.signal]) : superseded.signal) : signal,
+          });
+        } catch (error) {
+          if (previewId && getVisualReview(previewId)?.outcome === "pending") settleVisualReview(owner, previewId, toolCallId, "cancelled");
+          if (!superseded.signal.aborted) throw error;
+        } finally {
+          unbind();
+        }
+        if (previewId && getVisualReview(previewId)?.outcome === "superseded") return {
+          content: [{ type: "text", text: "VISUAL_REVIEW_STALE: 这版产出已被新版取代，旧答复无效。" }],
+          details: { review: { previewId, requestId: toolCallId, outcome: "superseded" as const } },
+        };
         const decoded = decodeAskUserAnswer(answer);
+        if (previewId) {
+          const outcome = decoded.review?.previewId === previewId ? decoded.review.outcome : "cancelled";
+          const review = settleVisualReview(owner, previewId, toolCallId, outcome);
+          if (outcome === "cancelled") return {
+            content: [{ type: "text", text: "视觉评审未作答或已取消；产出未获批准。" }],
+            details: { review: reviewResult(review.outcome as "cancelled") },
+          };
+          const text = [decoded.text, outcome === "redo" ? "评审打回：请根据意见重做，重新调用 show_visual 和 ask_user 评审新版。" : "评审通过：仅当前 previewId 获得批准。", notice ?? ""].filter(Boolean).join("\n\n");
+          return {
+            content: [{ type: "text" as const, text }, ...decoded.images],
+            details: { review: reviewResult(review.outcome as "approved" | "redo") },
+          };
+        }
         if (decoded.text.trim() || decoded.images.length > 0) {
           const text = [decoded.text.trim() ? decoded.text : "", notice ?? ""].filter(Boolean).join("\n\n");
           return {
@@ -498,6 +539,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       // 非交互模式（print / 无对话框 UI）：退回到对话流卡片（非阻塞），并提示模型停下等待。
+      if (previewId) settleVisualReview(owner, previewId, toolCallId, "cancelled");
       pi.sendMessage(
         { customType: "agent-questions", content: JSON.stringify(data), display: true },
         { triggerTurn: false },
@@ -512,7 +554,7 @@ export default function (pi: ExtensionAPI) {
               (notice ? `\n\n${notice}` : ""),
           },
         ],
-        details: undefined,
+        details: previewId ? { review: reviewResult("cancelled") } : undefined,
       };
     },
   });

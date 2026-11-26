@@ -127,22 +127,22 @@ export function serializeForm(v: McpFormValues): { name: string; config: McpConf
   const name = v.name.trim();
   const rest = withoutEditedKeys(v.extra);
   if (v.type === 'stdio') {
-    const config: Record<string, unknown> = { ...rest, command: (v.command ?? '').trim() };
+    const config: McpStdioConfig = { ...rest, command: (v.command ?? '').trim() };
     const args = (v.args ?? '').trim();
-    if (args) config.args = args.split(/\s+/);
+    if (args) config.args = parseArgs(args);
     const env = kvToObj(v.env);
     if (Object.keys(env).length) config.env = env;
     const cwd = (v.cwd ?? '').trim();
     if (cwd) config.cwd = cwd;
-    return { name, config: config as McpConfig };
+    return { name, config };
   }
   const headers = kvToObj(v.headers);
   if (v.auth === 'bearer' && (v.token ?? '').trim()) {
     headers.Authorization = `Bearer ${(v.token ?? '').trim()}`;
   }
-  const config: Record<string, unknown> = { ...rest, url: (v.url ?? '').trim() };
+  const config: McpRemoteConfig = { ...rest, url: (v.url ?? '').trim() };
   if (Object.keys(headers).length) config.headers = headers;
-  return { name, config: config as McpConfig };
+  return { name, config };
 }
 
 /** {name, config} → 表单值。headers.Authorization=Bearer xxx 反解为 Bearer 选项。未知字段放进 extra。 */
@@ -154,7 +154,7 @@ export function configToForm(name: string, c: McpConfig): McpFormValues {
       type: 'stdio',
       name,
       command: s.command,
-      args: (s.args ?? []).join(' '),
+      args: s.args?.some(a => !a || /\s/.test(a) || a.startsWith('[')) ? JSON.stringify(s.args) : (s.args ?? []).join(' '),
       env: objToKv(s.env),
       cwd: s.cwd,
       extra: unknownFields(raw, ['command', 'args', 'env', 'cwd']),
@@ -180,6 +180,33 @@ export function configToForm(name: string, c: McpConfig): McpFormValues {
   };
 }
 
+function parseArgs(text: string): string[] {
+  if (!text.startsWith('[')) return text.split(/\s+/);
+  const values: unknown = JSON.parse(text);
+  if (!Array.isArray(values) || !values.every(v => typeof v === 'string')) throw new Error('参数不是字符串数组');
+  return values;
+}
+
+export function parseSingleServer(text: string, fallback: string): { name: string; config: McpConfig } {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { throw new Error('JSON 解析失败'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('配置必须是 JSON 对象');
+  const root = parsed as Record<string, unknown>;
+  let name = fallback, raw: unknown = root;
+  if (!('command' in root || 'url' in root)) {
+    const map = root.mcpServers ?? root;
+    if (!map || typeof map !== 'object' || Array.isArray(map) || Object.keys(map).length !== 1) throw new Error('编辑时请只保留一个服务器配置');
+    [name, raw] = Object.entries(map)[0];
+  }
+  if (!raw || typeof raw !== 'object' || transportOf(raw as McpConfig) === '?') throw new Error('配置必须包含 command 或 url');
+  const cfg = raw as Record<string, unknown>;
+  if ('command' in cfg && 'url' in cfg) throw new Error('请选择 command 或 url 其中一种连接方式');
+  if (cfg.args !== undefined && !(Array.isArray(cfg.args) && cfg.args.every(arg => typeof arg === 'string'))) throw new Error('args 必须是字符串数组');
+  for (const key of ['env','headers']) if (cfg[key] !== undefined && (!cfg[key] || typeof cfg[key] !== 'object' || Array.isArray(cfg[key]) || Object.values(cfg[key] as object).some(v => typeof v !== 'string'))) throw new Error(key + ' 必须是字符串键值表');
+  if (cfg.cwd !== undefined && typeof cfg.cwd !== 'string') throw new Error('cwd 必须是字符串');
+  return { name, config: raw as McpConfig };
+}
+
 /** 校验表单，返回错误信息（null 表示通过）。existingNames 用于唯一性（编辑时排除自身）。 */
 export function validateForm(v: McpFormValues, existingNames: Set<string>): string | null {
   const name = v.name.trim();
@@ -188,6 +215,7 @@ export function validateForm(v: McpFormValues, existingNames: Set<string>): stri
   if (existingNames.has(name)) return `名称 "${name}" 已存在`;
   if (v.type === 'stdio') {
     if (!(v.command ?? '').trim()) return '命令不能为空';
+    try { if (v.args?.trim()) parseArgs(v.args.trim()); } catch { return 'args 必须是有效的 JSON 字符串数组'; }
     return null;
   }
   const url = (v.url ?? '').trim();

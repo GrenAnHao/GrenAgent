@@ -1,17 +1,19 @@
+import type { TextContent, ImageContent, ToolResultMessage } from '@earendil-works/pi-ai';
 import {
   findAskUserCallOwner,
   findPendingAskUser,
   isDeadAssistantTurn,
 } from '../../src/features/chat/pendingAskUser';
 import { decodeAskUserAnswer } from '../../../extensions/agent-mode/questions.js';
+import { bindVisualReview, restoreVisualReviews, settleVisualReview } from '../../../extensions/visual-companion/reviewRegistry.js';
 
 const CANCEL_TEXT = '用户取消了 ask_user 选择（未作答）。';
 const RELAY_PREFIX = '（上一轮已中断，这是我在那张提问卡上的选择）\n';
 
 export interface CompleteAskUserSession {
   isStreaming: boolean;
-  messages: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown }>;
-  sessionManager: { appendMessage: (message: unknown) => unknown };
+  messages: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown; toolName?: unknown; details?: unknown }>;
+  sessionManager: { appendMessage: (message: ToolResultMessage) => unknown; getSessionFile?: () => string | undefined; getSessionId?: () => string | undefined };
   agent: {
     state: { messages: unknown[] };
     continue: () => Promise<unknown>;
@@ -19,7 +21,7 @@ export interface CompleteAskUserSession {
   /** 走 pi 自己的用户输入通道：落盘、发事件、起回合，界面上能立刻看到这条用户消息。 */
   prompt: (
     text: string,
-    options?: { images?: unknown[]; expandPromptTemplates?: boolean },
+    options?: { images?: ImageContent[]; expandPromptTemplates?: boolean },
   ) => Promise<unknown>;
 }
 
@@ -29,7 +31,7 @@ export interface CompleteAskUserInput {
   cancelled?: boolean;
 }
 
-type ContentBlock = { type: string; text?: string; mimeType?: string; data?: string };
+type ContentBlock = TextContent | ImageContent;
 
 function answerBlocks(input: CompleteAskUserInput): ContentBlock[] | null {
   if (input.cancelled) return null;
@@ -73,6 +75,9 @@ export async function completeAskUser(
   // 发起这次调用的回合已经中断 / 出错：pi-ai 发请求前会丢掉那条 assistant 消息，这里再补
   // toolResult 就成了孤儿 tool_result，整个会话从此 400。改走用户消息把答案转达给模型。
   if (isDeadAssistantTurn(owner.message)) {
+    if ((owner.call.args.visualReview as { previewId?: unknown } | undefined)?.previewId && !input.cancelled) {
+      throw new Error('VISUAL_REVIEW_INTERRUPTED: 原评审回合已中断，请重新发起 ask_user 评审');
+    }
     return relayAnswerFromDeadTurn(session, input);
   }
 
@@ -81,16 +86,37 @@ export async function completeAskUser(
     throw new Error('ask_user tool call is not pending');
   }
 
+  const previewId = (owner.call.args.visualReview as { previewId?: unknown } | undefined)?.previewId;
+  let review: { previewId: string; requestId: string; outcome: 'approved' | 'redo' | 'cancelled' } | undefined;
+  let reviewOwner = '';
+  if (typeof previewId === 'string') {
+    reviewOwner = session.sessionManager.getSessionFile?.() || session.sessionManager.getSessionId?.() || '';
+    if (!reviewOwner) throw new Error('VISUAL_REVIEW_OWNER: 无法验证原会话');
+    restoreVisualReviews(reviewOwner, session.messages.flatMap((msg) =>
+      msg.role === 'toolResult' && typeof msg.toolName === 'string'
+        ? [{ toolName: msg.toolName, details: msg.details }] : [],
+    ));
+    bindVisualReview(reviewOwner, previewId, input.toolCallId);
+    const decoded = decodeAskUserAnswer(input.value);
+    const outcome = input.cancelled || decoded.review?.previewId !== previewId ? 'cancelled' : decoded.review.outcome;
+    // Partial text or images cannot approve a closed review question.
+    if (!input.cancelled && outcome === 'cancelled') throw new Error('VISUAL_REVIEW_INVALID: 缺少有效的通过或打回选项');
+    // appendMessage is the commit point: a failed disk write must leave this preview retryable.
+    review = { previewId, requestId: input.toolCallId, outcome };
+  }
+
   const message = {
     role: 'toolResult' as const,
     toolCallId: input.toolCallId,
     toolName: 'ask_user',
     content: buildContent(input),
     isError: false,
+    ...(review ? { details: { review } } : {}),
     timestamp: Date.now(),
   };
 
   session.sessionManager.appendMessage(message);
+  if (review) settleVisualReview(reviewOwner, review.previewId, review.requestId, review.outcome);
   session.agent.state.messages.push(message);
   await session.agent.continue();
   return 'ok';
@@ -108,8 +134,8 @@ async function relayAnswerFromDeadTurn(
   if (!blocks) return 'ok';
 
   const text = blocks
-    .filter((block) => block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text as string)
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
     .join('\n');
   const images = blocks.filter((block) => block.type === 'image');
 
@@ -132,7 +158,7 @@ export async function finishCompleteAskUser(
   },
 ): Promise<'ok' | 'duplicate'> {
   try {
-    await deleteDraft();
+    void deleteDraft().catch(logError);
   } catch (err) {
     logError(err);
   }

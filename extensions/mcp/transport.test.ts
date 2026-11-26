@@ -30,7 +30,7 @@ describe("createProviderTokenFetch", () => {
   it("reads the provider token on every request and does not send when it is missing", async () => {
     const tokens = ["tok-1", ""];
     const getToken = vi.fn(async () => tokens.shift());
-    const baseFetch = vi.fn(async () => new Response("ok"));
+    const baseFetch = vi.fn<typeof fetch>(async () => new Response("ok"));
     const authFetch = createProviderTokenFetch(getToken, baseFetch);
 
     await authFetch("https://x/mcp", { method: "POST", headers: { Accept: "application/json" } });
@@ -38,7 +38,7 @@ describe("createProviderTokenFetch", () => {
 
     expect(getToken).toHaveBeenCalledTimes(2);
     expect(baseFetch).toHaveBeenCalledTimes(1);
-    const init = baseFetch.mock.calls[0]?.[1] as RequestInit;
+    const init = baseFetch.mock.calls[0]![1]!;
     const headers = new Headers(init.headers);
     expect(headers.get("Authorization")).toBe("Bearer tok-1");
     expect(headers.get("Accept")).toBe("application/json");

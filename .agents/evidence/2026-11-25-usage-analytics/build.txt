@@ -1,0 +1,14 @@
+> electron-agent@0.3.0 build
+> npm run typecheck && electron-vite build
+> electron-agent@0.3.0 typecheck
+> npm run typecheck:renderer && npm run typecheck:main
+> electron-agent@0.3.0 typecheck:renderer
+> tsc -p tsconfig.renderer.json --noEmit
+> electron-agent@0.3.0 typecheck:main
+> tsc -p tsconfig.node.json --noEmit --tsBuildInfoFile ./tmp/tsc-node/check.tsbuildinfo
+vite v8.3.8 building ssr environment for production...
+✓ built in 5.46s
+vite v8.3.8 building ssr environment for production...
+✓ built in 44ms
+vite v8.3.8 building client environment for production...
+✓ built in 9.63s

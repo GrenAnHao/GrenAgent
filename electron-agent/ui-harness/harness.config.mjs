@@ -12,7 +12,7 @@ export default {
   },
 
   /** 和 electron.vite.config.ts 的 renderer.resolve.dedupe 一致 */
-  dedupe: ['@pierre/diffs'],
+  dedupe: ['@pierre/diffs', '@codemirror/view'],
 
   /**
    * 渲染层源码目录（相对 ui-harness/）。check.mjs --changed 靠它判断「改动的文件有没有场景覆盖」。
@@ -40,6 +40,9 @@ export default {
 
   /** 等页面就绪（window.__uiReady）的超时（毫秒） */
   readyTimeoutMs: 15_000,
+
+  /** 不允许自动保留窗口像素的场景名。结构化首错仍会生成；手动 t.shot 不变。 */
+  failureScreenshotsDisabled: [],
 
   /**
    * 组件库「关掉但还留在 DOM 里」的弹层标记，countVisible 会排除落在它里面的元素。

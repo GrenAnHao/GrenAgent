@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { CodeRetrievalPanel } from '../../src/features/agentData/CodeRetrievalPanel'
 import { styles } from '../../src/features/agentData/agentDataStyles'
+import { useSidebarPrefsStore } from '../../src/stores/sidebarPrefsStore';
 import { useSessionStore } from '../../src/store'
 import { exposeActions, exposeData, installBridge, track } from '../stubs'
 
@@ -12,7 +13,7 @@ import { exposeActions, exposeData, installBridge, track } from '../stubs'
 
 const WORKSPACE = 'D:/demo/sync-app'
 const FILES = 120
-const base = { workspace: WORKSPACE, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.2', nodes: 900, edges: 2100, lastIndexedAt: Date.parse('2026-10-18T00:00:00.000Z'), autoSync: true, consecutiveFailures: 0, pendingChanges: 0 }
+const base = { workspace: WORKSPACE, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.4', nodes: 900, edges: 2100, lastIndexedAt: Date.parse('2026-10-18T00:00:00.000Z'), autoSync: true, consecutiveFailures: 0, pendingChanges: 0 }
 const watching = { active: true, degraded: false }
 
 type Phase = 'syncing' | 'idle' | 'locked' | 'rebuilding' | 'failed' | 'degraded' | 'watch-starting'
@@ -24,7 +25,7 @@ function status(): Record<string, unknown> {
     case 'idle': return { ...base, state: 'indexed', files: FILES + 2, phase: 'idle', servingStale: false, watcher: watching, generation: 5 }
     // 重试时刻跟着读状态的时刻走：页面按自己的时钟算「还有几秒」
     case 'locked': return { ...base, state: 'indexed', files: FILES + 2, phase: 'backoff', servingStale: true, lastError: { message: 'Sync could not acquire the file lock', at: Date.now(), code: 'CODEGRAPH_LOCKED' }, nextRetryAt: Date.now() + 20_000, watcher: watching, generation: 5 }
-    case 'rebuilding': return { ...base, state: 'indexing', files: FILES + 2, phase: 'rebuilding', mode: 'full', trigger: 'manual', servingStale: false, watcher: watching, generation: 5 }
+    case 'rebuilding': return { ...base, progress: {stage:'扫描文件',processed:178}, state: 'indexing', files: FILES + 2, phase: 'rebuilding', mode: 'full', trigger: 'manual', servingStale: false, watcher: watching, generation: 5 }
     case 'failed': return { ...base, state: 'failed', files: FILES + 2, message: 'parse exploded', phase: 'failed', consecutiveFailures: 6, lastError: { message: 'parse exploded', at: 0 }, servingStale: false, watcher: watching, generation: 5 }
     case 'degraded': return { ...base, state: 'indexed', files: FILES + 2, phase: 'idle', servingStale: false, watcher: { active: false, degraded: true, reason: 'EMFILE: too many open files' }, generation: 6 }
     // 首查后 watch 异步挂载的中间态：active:false/degraded:false，几秒内落定。
@@ -44,6 +45,7 @@ installBridge({
       case 'agentData_code_projects': return [{ workspace: WORKSPACE, indexed: true }]
       case 'agentData_code_status': track(`status:${phase}`); return status()
       case 'agentData_code_call':
+        if ((args.args as {languageCounts?:boolean}).languageCounts) return {structuredContent:{schemaVersion:1,rows:[],extra:{languages:{typescript:FILES}}}};
         track(`call:${String(args.tool)}`)
         return { content: [{ type: 'text', text: `${fileRows.length} rows` }], isError: false, structuredContent: { schemaVersion: 1, rows: fileRows, nodes: [], edges: [], extra: { page: { offset: 0, total: fileRows.length } } } }
       case 'read_file': return 'export const x = 1'
@@ -52,6 +54,7 @@ installBridge({
   },
 })
 
+useSidebarPrefsStore.setState({keptProjects:[]});
 useSessionStore.setState({ registeredProjects: [WORKSPACE] })
 
 export default function CodeIndexSyncScenario(): ReactElement {

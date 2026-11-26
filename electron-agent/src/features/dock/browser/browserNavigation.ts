@@ -1,3 +1,4 @@
+import fontStacks from '../../../theme/fontStacks.css?raw';
 import grenAgentIcon from '../../../../brand/source/grenagent-icon.svg?raw';
 
 interface NavigationError extends Error {
@@ -189,6 +190,7 @@ ${detailsLink}
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(view.title)}</title>
   <style>
+    ${fontStacks}
     :root {
       --heading-color: #e8eaed;
       --text-color: #9aa0a6;
@@ -198,20 +200,20 @@ ${detailsLink}
       --button-fill-color-active: rgba(255,255,255,.16);
       --button-text-color: #e8eaed;
     }
-    html, body { margin: 0; min-height: 100%; background: #202124; color: var(--text-color); font-family: system-ui, sans-serif; }
+    html, body { margin: 0; min-height: 100%; background: #202124; color: var(--text-color); font-family: var(--font-sans); }
     .interstitial-wrapper { box-sizing: border-box; font-size: 1em; line-height: 1.6em; margin: 20vh auto 0; max-width: 600px; width: 100%; padding: 0 48px 48px; }
     .icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: 0 0 24px; color: var(--heading-color); }
     .icon svg { width: 28px; height: 28px; }
-    h1 { color: var(--heading-color); font-size: 1.2em; font-weight: 500; line-height: 1.2em; margin: 0 0 12px; }
+    h1 { color: var(--heading-color); font-size: 1.2em; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2em; margin: 0 0 12px; }
     #main-message > p { margin: 0; font-size: 1em; }
     #suggestions-list { margin-top: 18px; }
     #suggestions-list p { margin: 0; }
     #suggestions-list ul { margin: 0; padding-left: 1.25em; }
     #suggestions-list a { color: var(--link-color); text-decoration: none; }
     #suggestions-list a:hover { text-decoration: underline; }
-    .error-code { color: var(--error-code-color); font-size: .8em; margin-top: 24px; text-transform: uppercase; }
+    .error-code { color: var(--error-code-color); font-family: var(--font-mono); font-variant-ligatures: none; font-size: .8em; margin-top: 24px; text-transform: uppercase; }
     .nav-wrapper { display: flex; gap: 8px; justify-content: flex-start; margin-top: 51px; }
-    button { background: var(--button-fill-color); border: 0; border-radius: 8px; box-sizing: border-box; color: var(--button-text-color); cursor: pointer; display: inline-flex; align-items: center; font: 500 13px/18px inherit; min-height: 28px; padding: 0 8px; }
+    button { background: var(--button-fill-color); border: 0; border-radius: 8px; box-sizing: border-box; color: var(--button-text-color); cursor: pointer; display: inline-flex; align-items: center; font: 500 13px/18px var(--font-sans); min-height: 28px; padding: 0 8px; }
     button:hover, button:active { background: var(--button-fill-color-active); }
     #details { display: none; margin: 24px 0 0; }
     #main-frame-error.showing-details #details { display: block; }

@@ -41,6 +41,7 @@ export function ChatListView({ paddingBottom, scrollRef, onGutterChange }: ChatL
   const retrying = useStore((s) => s.retrying);
   const runActive = useStore((s) => s.runActive);
   const compacting = useStore((s) => s.compacting);
+  const compactionPhase = useStore((s) => s.compactionUnconfirmed ? 'unconfirmed' : s.compaction?.phase ?? 'running');
   const waitingLabel = waitingUiPromptLabel(useStore((s) => s.waitingUiPrompt));
   const sessionLive = isStreaming || Boolean(awaitingResponse) || Boolean(retrying) || Boolean(runActive) || Boolean(compacting);
 
@@ -61,7 +62,7 @@ export function ChatListView({ paddingBottom, scrollRef, onGutterChange }: ChatL
   const sessionBusy = isStreaming || Boolean(awaitingResponse) || Boolean(runActive);
 
   const footer = compacting ? (
-    <CompactionDivider label="正在压缩" live testId="compaction-indicator" />
+    <CompactionDivider phase={compactionPhase} />
   ) : waitingLabel ? (
     <PreparingIndicator label={waitingLabel} />
   ) : overlayPending ? (

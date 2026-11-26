@@ -43,7 +43,8 @@ import { currentChild, outsideChild, runAsChild } from "../_shared/leak-owner.js
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
-import { disposeActivation, getActivation } from "./activation.js";
+import { disposeActivation, getActivation, reapWaitingBash } from "./activation.js";
+import { readSubagentBashState } from "./background-bash.js";
 import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
 import { emitCatalogChanged } from "./catalog-events.js";
 import { completedPrefix } from "./fork-seed.js";
@@ -381,6 +382,9 @@ function listEntry(row: SubAgentRow): string {
 
 function statusText(row: SubAgentRow): string {
   const parts = [`agent ${row.id}: ${row.status}`];
+  const bash = readSubagentBashState(row.bashState);
+  if (bash && "reason" in bash) parts.push("Reply completed; background command timed out.");
+  if (bash && "phase" in bash) parts.push("Reply completed; waiting for background commands.");
   if (row.output) parts.push("", row.output);
   if (row.error) parts.push("", `Error: ${row.error}`);
   return parts.join("\n");
@@ -390,6 +394,7 @@ function statusText(row: SubAgentRow): string {
 function reapStuck(reg: SubAgentRegistry): void {
   const thresholdMs = Number(getConfig("SUBAGENT_STUCK_MS") ?? "300000") || 300000;
   for (const row of reg.findStuck(thresholdMs)) {
+    if (reapWaitingBash(row.id, thresholdMs)) continue;
     cancelSubAgent(row.id, reg, inflight);
     reg.finish(row.id, { status: "error", error: `stuck: no activity for >${Math.round(thresholdMs / 1000)}s`, exitCode: -1 });
   }
@@ -644,6 +649,7 @@ export default function (pi: ExtensionAPI) {
                 model: x.model,
                 output: x.output,
                 error: x.error,
+                ...(x.bashState ? { bashState: readSubagentBashState(x.bashState) } : {}),
               })),
             },
           };
@@ -675,6 +681,7 @@ export default function (pi: ExtensionAPI) {
             status: out.status,
             exitCode: out.exitCode,
             task: out.task,
+            ...(out.bashState ? { bashState: readSubagentBashState(out.bashState) } : {}),
             ...(out.error ? { error: out.error } : {}),
           },
         };
@@ -1048,6 +1055,7 @@ export default function (pi: ExtensionAPI) {
             signal: controller.signal,
             onUpdate: (u) => {
               registry.progress(id, u.transcript);
+              if (u.responseStarted) registry.markResponseStarted(id);
               const slot = slots[i];
               if (!slot || slot.status === "done" || slot.status === "error" || slot.status === "cancelled") return;
               if (!u.sessionPath || slot.sessionPath === u.sessionPath) return;
@@ -1137,6 +1145,7 @@ export default function (pi: ExtensionAPI) {
             onUpdate: (u) => {
               if (u.sessionPath) registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
               registry.progress(id, u.transcript);
+              if (u.responseStarted) registry.markResponseStarted(id);
             },
             onSettled: (r) => {
               // 记账失败也要归还名额（释放边界，teardown.ts）。
@@ -1194,7 +1203,9 @@ export default function (pi: ExtensionAPI) {
               onUpdate: (u) => {
                 if (u.sessionPath) registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
                 registry.progress(id, u.transcript);
+                if (u.responseStarted) registry.markResponseStarted(id);
               },
+              onBashPhase: (state, reply) => registry.setBashPhase(id, state, reply),
               onSettled: (info) => {
                 const status =
                   info.stopReason === "aborted" ? "cancelled" : info.stopReason === "error" ? "error" : "done";
@@ -1204,6 +1215,7 @@ export default function (pi: ExtensionAPI) {
                   output: info.output,
                   exitCode: status === "done" ? 0 : -1,
                   ...(info.diagnostic ? { error: info.diagnostic } : {}),
+                  ...(info.bashTimeout ? { bashState: info.bashTimeout } : {}),
                 });
                 inflight.delete(id);
                 releaseReserved(sessionKey, 1);
@@ -1301,6 +1313,7 @@ export default function (pi: ExtensionAPI) {
               // 写 transcript（registry 内部截断；progress 也 bump updatedAt → 保留 stuck detection 心跳）：
               // 让从 Bot 菜单点开「运行中的前台单任务」也能像主对话内联一样实时回放（兜底视图读 registry）。
               registry.progress(id, u.transcript);
+              if (u.responseStarted) registry.markResponseStarted(id);
               if (u.thinkingLevel && u.thinkingLevel !== seenThinkingLevel) {
                 seenThinkingLevel = u.thinkingLevel;
                 registry.setThinkingLevel(id, u.thinkingLevel);
@@ -1507,6 +1520,7 @@ export default function (pi: ExtensionAPI) {
             signal: controller.signal,
             onUpdate: (u) => {
               registry.progress(subId, u.transcript);
+              if (u.responseStarted) registry.markResponseStarted(subId);
               if (!u.sessionPath || slots[i]?.sessionPath === u.sessionPath) return;
               registry.setSessionPath(subId, u.sessionPath, u.thinkingLevel);
               slots[i] = { ...slots[i], task: t.task, agentId: subId, sessionPath: u.sessionPath };

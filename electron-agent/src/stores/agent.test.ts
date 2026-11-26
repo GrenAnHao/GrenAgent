@@ -19,7 +19,8 @@ const { eventHandlers, exitHandlers, piMock } = vi.hoisted(() => ({
     getMessages: vi.fn(
       (_ws: string): Promise<{ messages: unknown[] }> => Promise.resolve({ messages: [] }),
     ),
-    writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string) => Promise.resolve()),
+    getUserMessageEntries: vi.fn((_ws: string, _path: string): Promise<{ messages: unknown[] }> => Promise.resolve({ messages: [] })),
+    writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string, _checkpoint?: boolean) => Promise.resolve()),
     deleteUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve()),
     readAskUserDraft: vi.fn((_ws: string, _toolCallId: string) => Promise.resolve(null)),
     readUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve('')),
@@ -65,6 +66,7 @@ describe('createAgentStore', () => {
     piMock.rewindTo.mockReset().mockResolvedValue(undefined);
     piMock.truncateTo.mockReset().mockResolvedValue({ ok: true, lines: [] });
     piMock.getMessages.mockReset().mockResolvedValue({ messages: [] });
+    piMock.getUserMessageEntries.mockReset().mockResolvedValue({ messages: [] });
     piMock.writeUiHistory.mockReset().mockResolvedValue(undefined);
     piMock.deleteUiHistory.mockReset().mockResolvedValue(undefined);
     piMock.readAskUserDraft.mockReset().mockResolvedValue(null);
@@ -634,7 +636,7 @@ describe('createAgentStore', () => {
       sessionPath: '/sessions/foo.jsonl',
     });
     await vi.waitFor(() => expect(piMock.writeUiHistory).toHaveBeenCalled());
-    expect(piMock.writeUiHistory).toHaveBeenCalledWith('.', 'foo', expect.any(String));
+    expect(piMock.writeUiHistory).toHaveBeenCalledWith('.', 'foo', expect.any(String), true);
   });
 
   it('agent_end flush 写入 UI 完整历史', async () => {
@@ -644,7 +646,7 @@ describe('createAgentStore', () => {
     emit({ type: 'agent_end', messages: [] });
     flushRAF();
     await vi.waitFor(() => expect(piMock.writeUiHistory).toHaveBeenCalled());
-    expect(piMock.writeUiHistory).toHaveBeenCalledWith('.', 'test', expect.any(String));
+    expect(piMock.writeUiHistory).toHaveBeenCalledWith('.', 'test', expect.any(String), true);
   });
 
   it('实时流式中（live + 未带 sessionPath）loadMessages 不被跳过仅在 force 时覆盖', () => {
@@ -837,7 +839,7 @@ describe('createAgentStore', () => {
       if (writes.length > 0) {
         expect(writes.some((body) => body.includes('gone'))).toBe(false);
         expect(writes.some((body) => body.includes('keep'))).toBe(true);
-        expect(piMock.writeUiHistory).toHaveBeenCalledWith('.', 'foo', expect.any(String));
+        expect(piMock.writeUiHistory).toHaveBeenCalledWith('.', 'foo', expect.any(String), true);
       } else {
         expect(piMock.deleteUiHistory).toHaveBeenCalledWith('.', 'foo');
       }
@@ -894,16 +896,8 @@ describe('createAgentStore', () => {
     expect(store.useStore.getState().messages[0]).toMatchObject({ kind: 'user', text: 'hello' });
     expect((store.useStore.getState().messages[0] as { entryId?: string }).entryId).toBeUndefined();
 
-    piMock.getMessages.mockResolvedValueOnce({
-      messages: [
-        { role: 'user', content: 'hello', entryId: 'entry-hello', timestamp: 42 },
-        {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'world' }],
-          entryId: 'entry-asst',
-          timestamp: 43,
-        },
-      ],
+    piMock.getUserMessageEntries.mockResolvedValueOnce({
+      messages: [{ role: 'user', entryId: 'entry-hello', timestamp: 42 }],
     });
 
     emit({ type: 'agent_start' });
@@ -935,8 +929,8 @@ describe('createAgentStore', () => {
     store.loadMessages([], { force: true, sessionPath: '/ws/mid.jsonl' });
     store.pushUserMessage('hello');
     store.useStore.setState({ awaitingResponse: true, isStreaming: true });
-    piMock.getMessages.mockResolvedValueOnce({
-      messages: [{ role: 'user', content: 'hello', entryId: 'entry-mid', timestamp: 99 }],
+    piMock.getUserMessageEntries.mockResolvedValueOnce({
+      messages: [{ role: 'user', entryId: 'entry-mid', timestamp: 99 }],
     });
     piMock.writeUiHistory.mockClear();
 
@@ -945,7 +939,10 @@ describe('createAgentStore', () => {
     const user = store.useStore.getState().messages.find((m) => m.kind === 'user');
     expect(user).toMatchObject({ text: 'hello', entryId: 'entry-mid', timestamp: 99 });
     expect(store.useStore.getState().isStreaming).toBe(true);
-    expect(piMock.getMessages).toHaveBeenCalled();
+    expect(piMock.getUserMessageEntries).toHaveBeenCalledWith('.', '/ws/mid.jsonl');
+    expect(piMock.getMessages).not.toHaveBeenCalled();
+    await store.syncEntryIdsAfterAccept();
+    expect(piMock.getUserMessageEntries).toHaveBeenCalledTimes(1);
     // 不得整表重置：消息 id 保持，只补字段
     expect(user!.id).toBe(store.useStore.getState().messages[0]!.id);
   });

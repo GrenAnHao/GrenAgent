@@ -86,9 +86,9 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
   const pendingDiskRef = useRef<string | null>(null);
   /** 编辑器当前正文。按键先亮脏标记，整篇字符串稍后才送上来；保存前从这里取。 */
   const editorTextRef = useRef<(() => string) | null>(null);
-  const pullEditor = useCallback((current: OpenFileState): OpenFileState => {
+  const pullEditor = useCallback((current: TextFile): TextFile => {
     const latest = editorTextRef.current?.();
-    if (current.status !== 'text' || typeof latest !== 'string') return current;
+    if (typeof latest !== 'string') return current;
     if (current.content === latest && !current.pendingEdit) return current;
     return { ...current, content: latest, pendingEdit: false };
   }, []);
@@ -140,6 +140,7 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
   );
 
   const save = useCallback(async (): Promise<boolean> => {
+    if (fileRef.current.status !== 'text') return false;
     const pulled = pullEditor(fileRef.current);
     if (pulled !== fileRef.current) fileRef.current = pulled;
     const cur = fileRef.current;

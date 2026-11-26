@@ -3,7 +3,7 @@ export interface PendingAskUser {
   args: Record<string, unknown>;
 }
 
-type LooseMessage = { role?: unknown; content?: unknown; toolCallId?: unknown };
+type LooseMessage = { role?: unknown; content?: unknown; toolCallId?: unknown; stopReason?: unknown };
 
 function askUserCallsOf(msg: LooseMessage): PendingAskUser[] {
   if (!Array.isArray(msg.content)) return [];
@@ -66,6 +66,6 @@ export function findAskUserCallOwner(
  * 它带的工具调用跟着消失。再往后补 toolResult 就是孤儿 tool_result，整个会话之后发不出去。
  */
 export function isDeadAssistantTurn(msg: LooseMessage): boolean {
-  const stopReason = (msg as { stopReason?: unknown }).stopReason;
+  const stopReason = msg.stopReason;
   return stopReason === 'aborted' || stopReason === 'error';
 }

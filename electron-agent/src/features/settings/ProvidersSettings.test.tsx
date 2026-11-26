@@ -7,14 +7,14 @@ const {
   getProviderCredentials, getProviderOAuthCapabilities, logoutProvider, listBuiltinModels,
 } = vi.hoisted(() => ({
   getProviderConfig: vi.fn(() => Promise.resolve({ modelsJson: '{}', authJson: '{}', agentDir: '/a' })),
-  setProviderConfig: vi.fn(() => Promise.resolve({ refreshed: ['/ws'], failed: [] })),
+  setProviderConfig: vi.fn<typeof import('../../lib/pi').pi.setProviderConfig>(() => Promise.resolve({ refreshed: ['/ws'], failed: [] })),
   setProviderApiKey: vi.fn(() => Promise.resolve()),
   getSettings: vi.fn(() => Promise.resolve({} as Record<string, string>)),
   setSettings: vi.fn(() => Promise.resolve()),
   listModelsGlobal: vi.fn(() => Promise.resolve({ ok: true, models: [{ provider: 'openai', id: 'gpt-5', reasoning: true }] })),
   listBuiltinModels: vi.fn(() => Promise.resolve([] as Record<string, unknown>[])),
-  getProviderCredentials: vi.fn(() => Promise.resolve([])),
-  getProviderOAuthCapabilities: vi.fn(() => Promise.resolve([])),
+  getProviderCredentials: vi.fn<typeof import('../../lib/pi').pi.getProviderCredentials>(() => Promise.resolve([])),
+  getProviderOAuthCapabilities: vi.fn<typeof import('../../lib/pi').pi.getProviderOAuthCapabilities>(() => Promise.resolve([])),
   logoutProvider: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('../../lib/pi', () => ({

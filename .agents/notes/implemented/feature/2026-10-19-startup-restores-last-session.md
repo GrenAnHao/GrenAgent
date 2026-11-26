@@ -13,10 +13,10 @@ React 迁移（8e56271a）时的写法就是「首屏默认空的新对话：不
 启动回到上次停的地方。
 
 - `electron-agent/src/lib/lastOpen.ts`：localStorage `gren.lastOpen` 存 `{ workspace, sessionPath | null }`。`App` 启动 effect 订阅 `useSessionStore`，`lastOpenFromState` 算出的值变了就写一次：草稿时 `sessionPath` 为 null；`activeWorkspace` 为空（启动过程中的空态）不写，免得还没恢复就把记忆清掉。
-- 启动 effect 先 `getWorksDir` + `listAllSessions`（后者原来 `acquireDraftScratch` 里就要扫一遍，现在扫一次传进去），再 `pickStartupTarget`：
-  - 记住的会话还在列表里且没归档 → `clearDraftConversation` + `setActiveSession` + `setWorkspaceSessionPath` + `setActiveWorkspace`（工作区以列表里的 cwd 为准），Workspace effect 走 `knownTarget` 路径 `openWorkspace` → `switchSession` → `getMessages`。
+- 启动按记住的会话路径定点查询；不等侧栏列出所有项目：
+  - 会话仍可见且没归档 → 以这份会话当前的 cwd 恢复工作区，Workspace 走 `knownTarget` 路径 `openWorkspace` → 必要时 `switchSession` → `getMessages`。
   - 记住的是项目里的空草稿（不在 works 下、没有会话）→ 回到那个项目的草稿。
-  - 其余（没记忆、会话已删 / 已归档、works 下的空白对话）→ 原来的 `acquireDraftScratch`。
+  - works 下有稳定 draftId、仍未使用的空白对话 → 恢复原草稿；没记忆、原会话已删除或已归档 → 复用未使用的 scratch 或新建。
 - `pruneOrphanConversations` 的 keep：进了草稿就是草稿 cwd；回到会话时保留记住的 scratch 目录（`readRememberedScratch`），不然「新建对话」下次会复用一个已经被删掉的目录。
 
 ## Alternatives considered
@@ -29,14 +29,14 @@ React 迁移（8e56271a）时的写法就是「首屏默认空的新对话：不
 
 - 首屏是上次的会话，输入框草稿（见 [输入框草稿整份保留](2026-10-19-composer-draft-full-restore.md)）按会话 key 一起回来。上次停在项目的新建草稿就回到那个项目的空草稿；停在 works 下的空白对话仍复用同一个目录。
 - 上次的会话被删了或归档了：退回空白对话，不报错。所在项目目录整个没了的话，列表扫不到它，同样退回。
-- 启动没有多等：`listAllSessions` 原来就在 `acquireDraftScratch` 里等过，现在提前到分支之前、只扫一次。
+- 首屏恢复与[后台刷新会话摘要](../architecture/2026-11-25-startup-session-summary-cache.md)分别推进；列表刷新不决定何时展示聊天。
 - 这是对「首屏默认空白对话」的翻转，`App.tsx` 里那段注释随本笔记一起改。
 - 记忆只在渲染层 localStorage，和草稿、侧栏偏好一样，清浏览器数据就没了。
 
 ## 验证
 
-结果：单测通过；真实启动回看那一步没有由我跑。证据在 `.agents/evidence/2026-10-19-startup-restores-last-session/`。
+10 月 19 日的单测通过，证据在 `.agents/evidence/2026-10-19-startup-restores-last-session/`。11 月 25 日的[首屏与磁盘摘要验证](../architecture/2026-11-25-startup-session-summary-cache.md)另用独立 Electron 进程检查了恢复正文和实际输入。
 
 - `cd electron-agent && npx vitest run src/lib src/stores ...`（同 composer-draft-full-restore 那次，`vitest.log`）：含新增的 `src/lib/lastOpen.test.ts`：读写往返、坏数据和空工作区读成 null、`lastOpenFromState` 会话 / 草稿 / 别的工作区的草稿标记 / 未进工作区四种、`pickStartupTarget` 会话还在（分隔符无关、工作区取列表 cwd）/ 已删 / 已归档 / 项目草稿 / works 草稿 / worksDir 未知 / 无记忆。
 - `App.tsx`、`lastOpen.ts` 单独 `tsc` 检查无报错。`electron-vite build` 渲染层 3611 个模块转换通过，主进程阶段被正在运行的 app 占着的 `pi-job-guard.exe` 挡住（EBUSY），和本次改动无关。
-- 真实 app：在会话里留草稿、关掉再开、首屏是那个会话且草稿在——这一步要用户起 app 看，没有可驱动真实主进程的 harness。
+- 10 月 19 日未实测关闭真实应用再打开时，输入框里未发送的草稿是否保留。

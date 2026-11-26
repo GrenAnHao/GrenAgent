@@ -8,17 +8,26 @@ import { describeProviderLoginError, ProviderService, type ProviderLoginUiEvent 
 const directories: string[] = [];
 
 function stubRuntime(overrides: Record<string, unknown> = {}): ModelRuntime {
-  const login = vi.fn(async () => ({ type: 'oauth', refresh: 'r', access: 'a', expires: 0 }));
+  const login = vi.fn(async (_provider: string, _type: string, _input: unknown) => ({ type: 'oauth', refresh: 'r', access: 'a', expires: 0 }));
+  // 凭据落盘必须经过官方 CredentialStore；测试里用内存实现捕获写入，断言不碰 auth.json 之外的路径。
+  const stored = new Map<string, Record<string, unknown>>();
   return {
-    setRuntimeApiKey: vi.fn(async () => {}),
-    removeRuntimeApiKey: vi.fn(async () => {}),
-    listCredentials: vi.fn(async () => []),
+    listCredentials: vi.fn(async () => [...stored].map(([providerId, c]) => ({ providerId, type: c.type }))),
     getProviderAuthStatus: vi.fn(() => ({ configured: false })),
     getProviders: vi.fn(() => []),
     login,
     // 1.4.0 的适配走同一实例内的 Models 集合；这里转发到 login，现有用例无需改动。
-    models: { login: vi.fn((p: string, t: string, i: unknown) => login(p, t, i)) },
-    logout: vi.fn(async () => {}),
+    models: {
+      login: vi.fn((p: string, t: string, i: unknown) => login(p, t, i)),
+      credentials: {
+        modify: vi.fn(async (providerId: string, fn: (current: unknown) => Promise<Record<string, unknown> | undefined>) => {
+          const next = await fn(stored.get(providerId));
+          if (next) stored.set(providerId, next);
+          return next;
+        }),
+      },
+    },
+    logout: vi.fn(async (providerId: string) => { stored.delete(providerId); }),
     ...overrides,
   } as unknown as ModelRuntime;
 }
@@ -71,12 +80,50 @@ describe('ProviderService', () => {
     await expect(service.getConfig()).resolves.toEqual({ modelsJson: null, authJson: null, agentDir });
   });
 
-  it('writes a built-in API key through the official runtime', async () => {
+  it('persists a built-in API key into the official credential store, not the in-process overlay', async () => {
+    const runtime = stubRuntime();
+    const refresh = vi.fn(async () => ({ refreshed: [], failed: [] }));
+    const service = new ProviderService({ agentDir: 'C:/agent', runtime: async () => runtime, refresh });
+
+    await service.setApiKey('openai', 'sk-new');
+    const credentials = (runtime as unknown as { models: { credentials: { modify: ReturnType<typeof vi.fn> } } }).models.credentials;
+    expect(credentials.modify).toHaveBeenCalledTimes(1);
+    expect(credentials.modify.mock.calls[0][0]).toBe('openai');
+    // 内存 overlay 不再被使用：它就是「保存后重开设置页空白」的根因。
+    expect((runtime as unknown as { setRuntimeApiKey?: unknown }).setRuntimeApiKey).toBeUndefined();
+    // 写入后两份 runtime 都要重读。
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it('keeps an existing provider env when overwriting the key', async () => {
     const runtime = stubRuntime();
     const service = new ProviderService({ agentDir: 'C:/agent', runtime: async () => runtime });
 
-    await service.setApiKey('openai', 'sk-new');
-    expect(runtime.setRuntimeApiKey).toHaveBeenCalledWith('openai', 'sk-new');
+    await service.setApiKey('cloudflare-workers-ai', 'new');
+    const credentials = (runtime as unknown as { models: { credentials: { modify: ReturnType<typeof vi.fn> } } }).models.credentials;
+    // 模拟官方登录流程写入的 provider env（account id 等），再用设置页只改 key。
+    const updater = credentials.modify.mock.calls.at(-1)![1] as (current: unknown) => Promise<Record<string, unknown>>;
+    await expect(updater({ type: 'api_key', key: 'old', env: { CLOUDFLARE_ACCOUNT_ID: 'acct' } }))
+      .resolves.toEqual({ type: 'api_key', key: 'new', env: { CLOUDFLARE_ACCOUNT_ID: 'acct' } });
+  });
+
+  it('falls back to the public api-key login when the internal store is unavailable', async () => {
+    const runtime = stubRuntime({ models: undefined });
+    const service = new ProviderService({ agentDir: 'C:/agent', runtime: async () => runtime });
+
+    await service.setApiKey('openai', 'sk-fallback');
+    expect(runtime.login).toHaveBeenCalledWith('openai', 'api_key', expect.anything());
+  });
+
+  it('refuses to store an API key for an OAuth-only provider', async () => {
+    const runtime = stubRuntime({
+      getProviders: vi.fn(() => [{ id: 'openai-codex', name: 'OpenAI Codex (legacy)', auth: { oauth: {} } }]),
+    });
+    const service = new ProviderService({ agentDir: 'C:/agent', runtime: async () => runtime });
+
+    await expect(service.setApiKey('openai-codex', 'sk-codex')).rejects.toThrow('不支持 API Key 登录');
+    const credentials = (runtime as unknown as { models: { credentials: { modify: ReturnType<typeof vi.fn> } } }).models.credentials;
+    expect(credentials.modify).not.toHaveBeenCalled();
   });
 
   it('does not remove an OAuth credential when the API key input is cleared', async () => {
@@ -86,7 +133,7 @@ describe('ProviderService', () => {
     const service = new ProviderService({ agentDir: 'C:/agent', runtime: async () => runtime });
 
     await service.setApiKey('anthropic', null);
-    expect(runtime.removeRuntimeApiKey).not.toHaveBeenCalled();
+    expect(runtime.logout).not.toHaveBeenCalled();
   });
 
   it('removes an api_key credential when the key is cleared', async () => {
@@ -96,7 +143,7 @@ describe('ProviderService', () => {
     const service = new ProviderService({ agentDir: 'C:/agent', runtime: async () => runtime });
 
     await service.setApiKey('openai', null);
-    expect(runtime.removeRuntimeApiKey).toHaveBeenCalledWith('openai');
+    expect(runtime.logout).toHaveBeenCalledWith('openai');
   });
 
   it('returns credential status without exposing token values', async () => {
@@ -251,7 +298,7 @@ describe('ProviderService', () => {
     await login;
     expect(events.some((e) => e.type === 'error' && e.message === '登录已取消')).toBe(true);
     expect(events.some((e) => e.type === 'done')).toBe(false);
-    expect(runtime.setRuntimeApiKey).not.toHaveBeenCalled();
+    expect(runtime.logout).not.toHaveBeenCalled();
   });
 
   it('drops a manual-code prompt when its own signal aborts', async () => {
@@ -471,9 +518,8 @@ describe('ProviderService', () => {
       });
 
       const result = await service.diagnose({ ...base, stream: true }, () => {});
-      expect(result.error).toContain('重新登录');
       expect(runtime.logout).not.toHaveBeenCalled();
-      expect(runtime.removeRuntimeApiKey).not.toHaveBeenCalled();
+      expect(result.error).toContain('重新登录');
     });
 
     it('abortDiagnose 立即返回 cancelled，不等卡住的请求收尾，也不再推分片', async () => {

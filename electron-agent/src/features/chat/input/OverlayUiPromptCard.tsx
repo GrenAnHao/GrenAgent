@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useState } from 'react';
-import { Button, Icon } from '@lobehub/ui';
+import { Icon } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../../components/WorkbenchButton';
 import { MessageCircleQuestion, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { QuestionSelector } from '../../../components/QuestionSelector';

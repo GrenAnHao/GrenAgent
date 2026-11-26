@@ -1,5 +1,6 @@
 import type { AgentMessage } from '../lib/pi';
 import type { ChatMessage } from './agentReducer';
+import { RULE_INJECTION_ENTRY } from '@extensions/context-rules/injectionNotice';
 
 /**
  * 按 entryId 裁掉截断点之后的界面消息。
@@ -28,6 +29,26 @@ function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
     return a.timestamp != null && b.timestamp != null ? a.timestamp === b.timestamp : a.text === b.text;
   }
   return false;
+}
+
+/** Rule receipts are branch records, even when the renderer keeps a longer UI-only history. */
+export function reconcileRuleInjectionNotices(base: ChatMessage[], backend: ChatMessage[], currentBranch: boolean): ChatMessage[] {
+  const isReceipt = (m: ChatMessage) => m.kind === 'notice' && m.customType === RULE_INJECTION_ENTRY;
+  const ids = new Set(backend.filter(isReceipt).map((m) => m.id));
+  const out = currentBranch ? base.filter((m) => !isReceipt(m) || ids.has(m.id)) : [...base];
+  const shown = new Set(out.filter(isReceipt).map((m) => m.id));
+  let changed = out.length !== base.length;
+  for (const [i, m] of backend.entries()) {
+    if (!ids.has(m.id) || shown.has(m.id)) continue;
+    let at = -1;
+    for (let next = i + 1; next < backend.length && at === -1; next++) {
+      at = out.findIndex((item) => item.id === backend[next].id || sameMessage(item, backend[next]));
+    }
+    out.splice(at < 0 ? out.length : at, 0, m);
+    shown.add(m.id);
+    changed = true;
+  }
+  return changed ? out : base;
 }
 
 /** todo 的成功结果不能被较长 UI 历史遮住；按调用身份更新，缺失时按后端相邻消息插回原位置。 */
@@ -145,7 +166,8 @@ export function mergeLiveTail(base: ChatMessage[], tail: ChatMessage[]): ChatMes
         }
         continue;
       }
-      const seen = out.some((x) => x.kind === 'notice' && x.customType === m.customType && x.content === m.content);
+      const seen = out.some((x) => x.kind === 'notice' && x.customType === m.customType
+        && (m.customType === RULE_INJECTION_ENTRY ? x.id === m.id : x.content === m.content));
       if (!seen) out.push(m);
       continue;
     }
@@ -180,7 +202,7 @@ export function keepSettledLiveTools(base: ChatMessage[], live: ChatMessage[]): 
  * 回合结束后按顺序把后端用户消息的 entryId（及缺失的 timestamp）补到本地列表。
  * 不重排、不增删消息；已有字段保留。
  */
-export function backfillEntryIds(local: ChatMessage[], backend: AgentMessage[]): ChatMessage[] {
+export function backfillEntryIds<T extends Pick<AgentMessage, 'role'> & { entryId?: unknown; timestamp?: unknown }>(local: ChatMessage[], backend: T[]): ChatMessage[] {
   const backendUsers: Array<{ entryId: string; timestamp?: number }> = [];
   for (const msg of backend) {
     if (msg.role !== 'user') continue;

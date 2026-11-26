@@ -12,7 +12,7 @@ Status: implemented
 
 空态聊天根作为 inline-size 容器，列宽用 min(calc(100% - clamp(16px, 4cqw, 40px)), 928px)，保留输入列 padding 与编辑器 margin，所以卡片最大 880px。标题、上下间距、输入卡初始高度按聊天区/输入卡的真实宽度缩放，不按窗口宽度；宽窗口侧栏挤窄和小窗口产生相同聊天列宽时，比例必须相同。
 
-标题字号 clamp(20px, 3.8cqw, 30px)，空态正文最小高度 clamp(40px, 8cqw, 72px)。聊天列不超过 620px 时，只收紧空态卡片 padding、间距和圆角；正文用户字号、按钮目标与消息态排版不变。沿用现有 520px 编辑器紧凑阈值，不新增自动折叠侧栏行为。
+标题现在采用[桌面标题字号](../architecture/2026-11-25-semantic-workbench-skin.md) 18px；空态正文最小高度 clamp(40px, 8cqw, 72px)。聊天列不超过 620px 时，只收紧空态卡片 padding、间距和圆角；正文用户字号、按钮目标与消息态排版不变。沿用现有 520px 编辑器紧凑阈值，不新增自动折叠侧栏行为。
 
 ## Related notes
 

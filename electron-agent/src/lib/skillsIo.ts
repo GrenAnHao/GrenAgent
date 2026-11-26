@@ -7,17 +7,18 @@ export interface SkillInfo {
   /** 技能目录绝对路径，删除时回传。 */
   path: string;
   scope: string;
+  disableModelInvocation?: boolean;
 }
-export function listSkills(): Promise<SkillInfo[]> {
-  return invoke<SkillInfo[]>('list_skills');
+export function listSkills(workspace?: string): Promise<SkillInfo[]> {
+  return invoke<SkillInfo[]>('list_skills', { workspace });
 }
 
 export function createSkill(name: string, description: string, body: string): Promise<SkillInfo> {
   return invoke<SkillInfo>('create_skill', { name, description, body });
 }
 
-export function deleteSkill(path: string): Promise<void> {
-  return invoke<void>('delete_skill', { path });
+export function deleteSkill(path: string, workspace?: string): Promise<void> {
+  return invoke<void>('delete_skill', { path, workspace });
 }
 
 /** 把一个技能目录（含 SKILL.md）整体导入到全局技能目录。 */
@@ -39,3 +40,13 @@ export function installSkillFromZip(src: string): Promise<SkillInfo> {
 export function openSkillsDir(): Promise<string> {
   return invoke<string>('open_skills_dir');
 }
+
+export interface SkillDetail { content: string; files: string[] }
+export const readSkill = (path: string, workspace: string) => invoke<SkillDetail>('read_skill', { path, workspace });
+export const saveSkill = (path: string, workspace: string, original: string, content: string) =>
+  invoke<void>('save_skill', { path, workspace, original, content });
+export const archiveSkill = (path: string, workspace: string) => invoke<string>('archive_skill', { path, workspace });
+export const openSkillFolder = (path: string, workspace: string) => invoke<void>('open_skill_folder', { path, workspace });
+
+export const listSkillFiles = (path: string, workspace: string, folder: string) =>
+  invoke<string[]>('list_skill_files', { path, workspace, folder });

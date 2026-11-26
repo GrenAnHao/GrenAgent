@@ -1,0 +1,45 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs attention-toast
+
+构建产物和源码一致，跳过构建（--rebuild 强制重建）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+
+▸ attention-toast
+  PASS 场景渲染出来
+  PASS Goal 续跑：没有发完成提醒
+  PASS Goal 续跑：没有提示
+  PASS 完成：2.5 秒内出现提示
+  PASS 完成：主进程被问了一次
+  PASS 完成：标题写会话名和状态
+  PASS 完成：不计入任务栏数字
+  PASS 完成：有「前往」按钮
+  PASS 完成：深色主题下提示是深色浮层
+  INFO 截图 done  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\attention-toast-done.png
+  PASS 完成：7,999ms 真实帧处理后提示仍可见
+  PASS 完成：7,999ms 尚未开始退出
+  PASS 完成：8,000ms 开始退出
+  PASS 完成：真实退出动画后移除提示
+  PASS 失败：出现提示
+  PASS 失败：正文是报错
+  PASS 失败：任务栏计数变成 1
+  PASS 失败：「前往」打开了 B
+  PASS 失败：提示收起
+  PASS 失败：打开后未读清掉，任务栏计数回到 0
+  PASS 审批：出现提示
+  PASS 审批：正文是审批标题
+  PASS 审批：标题写「等待批准」
+  PASS 审批：任务栏计数变成 1
+  PASS 审批：9 秒后仍在
+  PASS 审批：答复前仍可操作
+  PASS 审批：答复后收起
+  PASS 审批：任务栏计数回到 0
+  PASS 当前会话：没有问主进程
+  PASS 当前会话：没有提示
+  PASS 浅色：出现失败提示
+  PASS 浅色：提示背景是浅色主题的浮层色
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\attention-toast-light.png
+  ── 31 passed, 0 failed
+
+通过：attention-toast（10.4s）。只跑了 1/63 个场景，其余 62 个没指定，未运行

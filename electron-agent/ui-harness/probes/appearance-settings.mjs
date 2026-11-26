@@ -1,13 +1,8 @@
-import { copyFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 const stage = '[data-testid="appearance-stage"]'
 const popup = '[data-testid="appearance-popup"]'
 const trigger = '[data-testid="appearance-popup-trigger"]'
-const evidence = fileURLToPath(new URL('../../../.agents/evidence/2026-10-30-single-workbench-theme/', import.meta.url))
 const colors = {
-  light: { content: 'rgb(255, 254, 250)', elevated: 'rgb(255, 255, 255)', primary: 'rgb(86, 104, 71)' },
+  light: { content: 'rgb(248, 249, 248)', elevated: 'rgb(255, 255, 255)', primary: 'rgb(74, 107, 78)' },
   dark: { content: 'rgb(25, 26, 28)', elevated: 'rgb(43, 44, 46)', primary: 'rgb(173, 195, 153)' },
 }
 
@@ -21,7 +16,7 @@ async function surface(t, mode, label) {
   }
 }
 
-async function overlay(t, mode) {
+async function overlay(t, mode, darkShape) {
   await t.click(trigger, 20)
   t.check(`${mode}：弹层打开`, await t.countVisible(popup), 1)
   const background = await t.js(`(() => {
@@ -34,10 +29,12 @@ async function overlay(t, mode) {
     return null
   })()`)
   t.checkColor(`${mode}：弹层使用同套浮层色`, background, colors[mode].elevated)
-  mkdirSync(evidence, { recursive: true })
-  copyFileSync(await t.shot(mode), join(evidence, `appearance-settings-${mode}.png`))
+  const shape = await t.style('.ant-popover-container', ['border-top-width', 'border-radius', 'padding', 'font-size', 'line-height'])
+  if (darkShape) t.check('浅色弹层沿用深色弹层的边框、圆角、内距和文字尺度', shape, darkShape)
+  await t.shot(mode)
   await t.click(trigger, 20)
   t.check(`${mode}：弹层关闭`, await t.countVisible(popup), 0)
+  return shape
 }
 
 export default async function (t) {
@@ -56,11 +53,11 @@ export default async function (t) {
   t.check('点击减小字号后恢复14', (await t.text('[data-testid="font-size-stepper"]')).trim(), '14')
 
   await surface(t, 'dark', '初始深色')
-  await overlay(t, 'dark')
+  const popupShape = await overlay(t, 'dark')
   await t.click('[data-testid="appearance-light"]', 20)
   t.check('点击浅色后保存浅色偏好', await t.text('[data-testid="appearance-state"]'), 'light')
   await surface(t, 'light', '切换浅色')
-  await overlay(t, 'light')
+  await overlay(t, 'light', popupShape)
   await t.click('[data-testid="appearance-dark"]', 20)
   t.check('点击深色后保存深色偏好', await t.text('[data-testid="appearance-state"]'), 'dark')
   await surface(t, 'dark', '切回深色')

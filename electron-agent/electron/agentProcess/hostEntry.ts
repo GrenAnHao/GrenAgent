@@ -14,8 +14,9 @@ import {
   reportLeakedError,
   trackUnhandledRejection,
 } from '../../../extensions/_shared/leak-owner.js';
-import { BROADCAST_CHANNEL, DIAG_CHANNEL, type BroadcastPayload } from './contract';
+import { DIAG_CHANNEL } from './contract';
 import { hostApiOverRequest } from './hostApi';
+import { createAgentBroadcaster } from './mainBindings';
 import { RpcPeer, toWireError, type WireMessage } from './rpcPeer';
 import type { RuntimeGraph } from './runtimeGraph';
 
@@ -90,7 +91,9 @@ async function main(): Promise<void> {
   const { createRuntimeGraph } = await import('./runtimeGraph');
   graph = createRuntimeGraph({
     host: hostApiOverRequest((method, params) => peer.request(method, params)),
-    broadcast: (channel, payload) => peer.emit(BROADCAST_CHANNEL, { channel, payload } satisfies BroadcastPayload),
+    // 内部通道（Goal 占用证据）和 DIAG 一样按自己的 channel 直发，主进程消费后不进窗口；
+    // 其余事件套 BROADCAST_CHANNEL 信封。
+    broadcast: createAgentBroadcaster((channel, payload) => peer.emit(channel, payload)),
     agentDir,
     runtimeConfigPath,
   });

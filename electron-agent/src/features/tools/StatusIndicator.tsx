@@ -1,4 +1,5 @@
-import { Block, Icon, NeuralNetworkLoading } from '@lobehub/ui';
+import { Block, Icon } from '@lobehub/ui';
+import { Spin } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { Atom, Check, TriangleAlert, X } from 'lucide-react';
 
@@ -8,9 +9,9 @@ interface StatusIndicatorProps {
   status: StatusKind;
 }
 
-/** 工具/思考状态块：对齐 lobe-chat —— 24×24 outlined Block + 真 NeuralNetworkLoading（运行中）。 */
+/** 工具/思考状态块：24×24 描边外框；运行中使用 LobeHub 的网络动画。 */
 export function StatusIndicator({ status }: StatusIndicatorProps) {
-  let icon = <NeuralNetworkLoading size={16} />;
+  let icon;
 
   switch (status) {
     case 'done':
@@ -27,7 +28,7 @@ export function StatusIndicator({ status }: StatusIndicatorProps) {
       break;
     case 'running':
     default:
-      icon = <NeuralNetworkLoading size={16} />;
+      icon = <Spin variant="network" size={16} />;
       break;
   }
 

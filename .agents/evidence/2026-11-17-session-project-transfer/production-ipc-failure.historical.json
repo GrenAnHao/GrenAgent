@@ -1,0 +1,70 @@
+{
+  "hostEntry": "source",
+  "passed": [
+    "production host opens the fixture main session with stable identity",
+    "source listing includes the fixture main session",
+    "preview of the same real path is a no-op without a journal or write",
+    "preview binds identity, confirmed leaf, revision, family and target policy",
+    "preview writes no session bytes and makes zero model requests",
+    "an active production turn blocks the transfer without cancelling it",
+    "post-commit open failure reports committed-needs-open with the durable operation id",
+    "moving itself makes zero model requests",
+    "canonical path, session id and every original entry survive the move",
+    "one versioned transfer marker plus target working directory are appended",
+    "children moved with the family and keep their identities",
+    "registry rows move record-by-record; unrelated source rows stay in the source project",
+    "committed-needs-open family is hidden from both project lists instead of half-migrated",
+    "durable commit already moves usage grouping to the target project",
+    "status reports the same unfinished durable fact without re-running the move",
+    "a repeated commit receipt returns the same operation fact without a second marker or rewritten history",
+    "retry-open completes the committed transaction and opens the same canonical session",
+    "retry-open invalidates the exact family paths on the main side",
+    "a second retry-open is idempotent and keeps the single logical identity",
+    "after open the family is listed only in the target project",
+    "target runtime owns the moved canonical path and narrowed permissions",
+    "old source workspace refuses to reopen the moved session",
+    "commit, repeated commit, status and both retry-opens made no model request",
+    "explicit post-move request persists a terminal entry and settles before reporting done",
+    "a real tool in the moved main session reads the target project file, not the source one",
+    "the next model context carries target project instructions and rules, not the source ones",
+    "the next model context states the migration fact without a fake user turn",
+    "a continuable child cold-resumes in the target: real tool read hits target file, not source",
+    "a one-shot child stays read-only after the move",
+    "null-root preview exposes the confirmed empty root instead of the physical leaf",
+    "null-root commit opens in the target",
+    "reopened null-root session still has an empty confirmed leaf",
+    "null-root file retains its original messages and gains only the migration metadata",
+    "deleting the source project keeps the moved main, children and null-root history readable",
+    "the explicit post-move main and child calls were each recorded once, so the later equality is meaningful",
+    "second move preview uses the durable target as source",
+    "second move opens the same identity in the third project with a new directory segment",
+    "third move back to the target keeps a single identity and history",
+    "no later move, retry-open, null-root or repeated receipt made another model request",
+    "repeated moves and reconciliation never re-count historical tokens or cost",
+    "every model request in this probe went to the local loopback server"
+  ],
+  "requestCount": 7,
+  "invalidated": [
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-054Z_01a1e807-0ead-70cb-9adc-c7603f92af70.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-055Z_sa-continuable.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-061Z_sa-oneshot.jsonl"
+    ],
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-nullroot--\\2026-11-17T05-42-19-106Z_01a1e807-0ee2-70cb-9adc-c76505b07bf7.jsonl"
+    ],
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-054Z_01a1e807-0ead-70cb-9adc-c7603f92af70.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-055Z_sa-continuable.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-061Z_sa-oneshot.jsonl"
+    ],
+    [
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-054Z_01a1e807-0ead-70cb-9adc-c7603f92af70.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-055Z_sa-continuable.jsonl",
+      "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\session-project-transfer-ipc-Sq6UTm\\agent\\sessions\\--fixture-main--\\2026-11-17T05-42-19-061Z_sa-oneshot.jsonl"
+    ]
+  ],
+  "error": "Error: CHECK FAILED: every model request is attributable to an explicit user action, its tool continuation or that child settlement ([{\"index\":0,\"trigger\":\"unclassified\"},{\"index\":1,\"trigger\":\"unclassified\"},{\"index\":2,\"trigger\":\"tool-continuation\"},{\"index\":3,\"trigger\":\"explicit-child\"},{\"index\":4,\"trigger\":\"tool-continuation\"},{\"index\":5,\"trigger\":\"child-settlement\"},{\"index\":6,\"trigger\":\"tool-continuation\"}])\n    at check (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/scripts/session-project-transfer-ipc-check.mjs:268:25)\n    at file:///D:/OneDrive/Project%20Files/Pi/electron-agent/scripts/session-project-transfer-ipc-check.mjs:656:3\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)",
+  "stderr": "(node:65860) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n[loop-guard] extension loaded\n[rulebook] extension loaded\n[agent-mode] extension loaded\n[diagram-hint] extension loaded\n[fable-behavior] extension loaded\n[github] extension loaded\n",
+  "note": "HISTORICAL failure from an earlier probe revision (probe-run8/9 era); see production-ipc-results.json for the current accepted run."
+}

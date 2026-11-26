@@ -67,29 +67,28 @@ export function lastOpenFromState(state: {
 }
 
 export type StartupTarget =
-  | { kind: 'session'; workspace: string; sessionPath: string }
+  | { kind: 'session'; workspace: string; session: SessionInfo }
   | { kind: 'projectDraft'; workspace: string; draftId?: string }
   | null;
 
-/**
- * 启动时回到哪：
- * - 记住的会话仍在磁盘列表里且没归档 → 打开它（工作区以列表里的 cwd 为准）。
- * - 记住的是项目里的草稿（不在 works 目录下、没有会话）→ 回到那个项目的空草稿。
- * - 其余（没记忆、会话已删 / 已归档、works 下的空白对话）→ null，走原来的空白对话逻辑。
- */
-export function pickStartupTarget(
+/** 只核对记住的那份会话或草稿，不需要先构造全局侧栏目录。 */
+export async function pickStartupTarget(
   remembered: LastOpen | null,
-  sessions: readonly SessionInfo[],
-  worksDir: string,
-): StartupTarget {
+  disk: {
+    lookupStartupSession: (path: string) => Promise<SessionInfo | null>;
+    getWorksDir: () => Promise<string>;
+    startupScratchHasSessions: (workspace: string) => Promise<boolean>;
+  },
+): Promise<StartupTarget> {
   if (!remembered) return null;
   if (remembered.sessionPath) {
-    const hit = sessions.find((s) => pathsEquivalent(s.path, remembered.sessionPath!));
+    const hit = await disk.lookupStartupSession(remembered.sessionPath);
     if (!hit || hit.archived) return null;
-    return { kind: 'session', workspace: hit.cwd || remembered.workspace, sessionPath: hit.path };
+    return { kind: 'session', workspace: hit.cwd || remembered.workspace, session: hit };
   }
+  const worksDir = await disk.getWorksDir().catch(() => '');
   if (worksDir && isUnder(remembered.workspace, worksDir)) {
-    if (!remembered.draftId || sessions.some((session) => session.cwd && pathsEquivalent(session.cwd, remembered.workspace))) return null;
+    if (!remembered.draftId || await disk.startupScratchHasSessions(remembered.workspace)) return null;
   }
   return { kind: 'projectDraft', workspace: remembered.workspace, ...(remembered.draftId ? { draftId: remembered.draftId } : {}) };
 }

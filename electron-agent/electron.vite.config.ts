@@ -3,9 +3,10 @@ import { resolve } from "node:path";
 import { defineConfig } from "electron-vite";
 import { copyPiAdjacentAssets } from "./electron/agent/copyPiAdjacentAssets";
 import { CODEMODE_WORKER_ENTRY, CODEMODE_WORKER_SOURCE, codemodeWorkerMismatch } from "./electron/agent/codemodeWorkerBuild";
-import { ignoreNonFrontendWatch, isFrontendHmrPath } from "./electron/dev/frontendWatch";
+import { frontendOnlyHmr, ignoreNonFrontendWatch } from "./electron/dev/frontendWatch";
 import { removeMainCjsPackageJson, writeMainCjsPackageJson } from "./electron/agent/writeMainCjsPackageJson";
 import { installDevElectronHeapArg } from "./electron/mainHeap";
+import { rendererAssetAliases } from "./scripts/rendererAssetAliases.ts";
 
 installDevElectronHeapArg();
 
@@ -122,32 +123,27 @@ export default defineConfig(({ command, mode }) => {
     },
     renderer: {
       root: resolve(__dirname),
-      plugins: [
-        {
-          name: "frontend-only-hmr",
-          hotUpdate(ctx) {
-            if (!isFrontendHmrPath(ctx.file, resolve(__dirname))) return [];
-          },
-        },
-      ],
+      plugins: [frontendOnlyHmr(resolve(__dirname))],
       server: {
         // 避开 Vite 默认 5173，减少和其他前端项目抢端口。
         port: 31415,
         // 服务一启动就顺着入口把源码转译好，和 Electron 主进程加载并行；不预热时窗口要等几百个模块逐个转译。
         warmup: { clientFiles: ["./src/main.tsx"] },
-        // 只侦测前端源码。主进程、扩展、测试和 out/ 的写入不再把窗口打进整页刷新。
+        // 只侦测前端源码与用量页共享契约，不因扩展实现或构建产物写入而刷新窗口。
         watch: {
           ignored: (path) => ignoreNonFrontendWatch(path, resolve(__dirname)),
         },
       },
       resolve: {
         alias: {
+          ...rendererAssetAliases,
           "@extensions": resolve(__dirname, "../extensions"),
         },
         // @pierre/diffs 同时被 @lobehub/ui（CodeDiff）和我们自己的流式高亮视图引用。
         // 两份副本就是两个 getSharedHighlighter 单例和两份自定义主题注册表，
         // lobe 注册的 lobe-theme 在另一份里解析不到，流式视图会直接退回纯文本。
-        dedupe: ["@pierre/diffs"],
+        // CodeMirror language plugins and the editor must use the same ViewPlugin identity.
+        dedupe: ["@pierre/diffs", "@codemirror/view"],
       },
       build: {
         outDir: production ? resolve(outRoot, "renderer") : resolve(__dirname, "dist"),

@@ -1,0 +1,11 @@
+{
+  "previewId": "goal-editor-review-v1",
+  "preview": "goal-editor-review-v1.png",
+  "source": "goal-editor-review-v1.html",
+  "channel": "native-ask_user",
+  "choiceId": "approve",
+  "outcome": "approved",
+  "supplement": "",
+  "scope": "Goal editing local styles using existing ActionIcon and workbench tokens; no global theme changes",
+  "note": "Static image preview was used to avoid collecting feedback through the currently loaded legacy iframe helper. This records the actual native question answer, not a fabricated runtime visualReview registry receipt."
+}

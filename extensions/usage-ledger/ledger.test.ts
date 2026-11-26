@@ -83,8 +83,8 @@ describe("UsageLedger", () => {
       ["anthropic", "claude", 100, 1], ["openai", "gpt-5", 40, 2], ["openai", "gpt-5-mini", 7, 1],
     ]);
     expect(report.byProject).toEqual([
-      { cwd: "C:/other", name: null, tokens: 100, cost: 2, sessions: 1 },
-      { cwd: "C:/work", name: "Alpha", tokens: 47, cost: expect.closeTo(0.6), sessions: 2 },
+      { projectId: "cwd:c:/other", cwd: "C:/other", name: "other", tokens: 100, cost: 2, recordedCost: 2, sessions: 1 },
+      { projectId: "cwd:c:/work", cwd: "C:/work", name: "work", tokens: 47, cost: expect.closeTo(0.6), recordedCost: expect.closeTo(0.6), sessions: 2 },
     ]);
     expect(report.recentSessions.map((s) => s.id)).toEqual(["s2", "s3", "s1"]);
     expect(report.calls.map((c) => c.timestamp)).toEqual(["2026-08-31T12:00:00Z", "2026-08-31T10:00:00Z", "2026-08-30T11:00:00Z", "2026-08-30T10:00:00Z"]);

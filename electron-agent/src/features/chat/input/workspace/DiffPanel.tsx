@@ -34,7 +34,6 @@ const d = createStaticStyles(({ css }) => ({
     height: ${PANE_H};
   `,
   files: css`
-    scrollbar-width: thin;
     overflow-y: auto;
     padding: 4px;
     border-right: 1px solid ${cssVar.colorBorderSecondary};

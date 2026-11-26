@@ -25,6 +25,7 @@ import { readComposerDraft, writeComposerDraft } from './input/editor/composerDr
 import { makePastedText } from './input/editor/pastedText';
 import { bindBrowserElementChatSink } from '../dock/browser/browserElementPicker';
 import { pi } from '../../lib/pi';
+import { pathsEquivalent } from '../../lib/pathUtils';
 import { useEnhancePromptStore } from '../../stores/enhancePromptStore';
 import {
   composerFileTagValue,
@@ -36,6 +37,11 @@ import {
   type ComposerFileRef,
 } from './input/composerBridge';
 import { INSERT_CHAT_TAG_COMMAND } from './input/editor/ChatTag/command';
+import {
+  applyQueuedDraftHandoff,
+  handoffLiveDraft,
+  subscribeDraftHandoff,
+} from '../sessions/sessionProjectTransferDraft';
 
 interface ChatInputProps {
   onSend: (
@@ -71,9 +77,10 @@ export function ChatInput({
   const isGenerating = useStore((s) => s.messages.some((m) => m.kind === 'assistant' && m.streaming));
   const hasRunningTool = useStore((s) => s.messages.some((m) => m.kind === 'tool' && m.status === 'running'));
   const retrying = useStore((s) => s.retrying);
+  const compacting = useStore((s) => Boolean(s.compacting));
   const awaitingResponse = useStore((s) => s.awaitingResponse);
   const runActive = useStore((s) => Boolean(s.runActive));
-  const inFlight = isStreaming || Boolean(retrying) || Boolean(awaitingResponse);
+  const inFlight = isStreaming || Boolean(retrying) || Boolean(awaitingResponse) || compacting;
   const busy = inFlight || hasRunningTool || runActive;
   const steering = useStore((s) => s.steering);
   const followUp = useStore((s) => s.followUp);
@@ -345,7 +352,8 @@ export function ChatInput({
       useChatDraftStore.getState().setDraft(prev, readStoredDraft());
     }
     prevKeyRef.current = draftKey;
-    const draft = useChatDraftStore.getState().getDraft(draftKey);
+    // 会话刚被移动到别的项目：这份草稿里的相对文件标签要指向原项目，不能被目标同名文件顶替。
+    const draft = applyQueuedDraftHandoff(draftKey, useChatDraftStore.getState().getDraft(draftKey));
     writeComposerDraft(editor, draft);
     setEmpty(!draft.text);
     requestAnimationFrame(() => editor.focus());
@@ -359,6 +367,22 @@ export function ChatInput({
       if (key) useChatDraftStore.getState().setDraft(key, readStoredDraft());
     };
   }, [readStoredDraft]);
+
+  // 会话在原地被移动（输入框没卸载）：把编辑器里的现行草稿就地换成原项目的绝对文件引用。
+  // 只处理当前 draftKey 这一份；胶囊 / 图片 / 其它草稿都不动。
+  useEffect(() => {
+    return subscribeDraftHandoff((sessionPath, sourceWorkspace) => {
+      if (prevKeyRef.current !== draftKey || !draftKey || pathsEquivalent(draftKey, sourceWorkspace)) return;
+      if (draftKey !== sessionPath && !pathsEquivalent(draftKey, sessionPath)) return;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      const stored = readStoredDraft();
+      const next = handoffLiveDraft(stored, sourceWorkspace);
+      if (JSON.stringify(next) === JSON.stringify(stored)) return;
+      writeComposerDraft(editor, next);
+      setEmpty(!next.text);
+      useChatDraftStore.getState().setDraft(draftKey, next);
+    });
+  }, [draftKey, editor, readStoredDraft]);
 
   const ctx: ChatInputContextValue = useMemo(
     () => ({
@@ -401,6 +425,7 @@ export function ChatInput({
       hasRunningTool,
       inFlight,
       retrying,
+      compacting,
       steering,
       followUp,
       steerQueued,

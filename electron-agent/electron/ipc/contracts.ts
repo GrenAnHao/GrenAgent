@@ -46,3 +46,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export type { SessionWorkflowRequest, SessionWorkflowAck, SessionTreeDto, SessionWorkflowTarget } from '../app/sessionWorkflowContracts';
+export type {
+  SessionProjectTransferAction,
+  SessionProjectTransferRequest,
+  SessionProjectTransferAck,
+  SessionProjectTransferAckStatus,
+  SessionProjectTransferPreviewRequest,
+  SessionProjectTransferPreviewAck,
+  SessionProjectTransferCommitRequest,
+  SessionProjectTransferStatusRequest,
+  SessionProjectTransferRetryOpenRequest,
+  SessionProjectTransferBusyAck,
+  SessionProjectTransferStaleAck,
+  SessionProjectTransferNoOpAck,
+  SessionProjectTransferOpenedAck,
+  SessionProjectTransferCommittedNeedsOpenAck,
+  SessionProjectTransferRecoveryRequiredAck,
+} from '../app/sessionProjectTransferContracts';

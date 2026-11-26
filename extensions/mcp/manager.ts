@@ -1,5 +1,7 @@
 // 进程级 MCP 连接管理器：跨会话存活，绝不引用 pi/ctx。
 // 按 workspace 分 Map，同一 workspace 共享一套 manager。
+import { randomUUID } from "node:crypto";
+import { duringAttempt } from "./attempt.js";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getAllConfig, getConfig, refreshConfig, watchConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { outsideChild } from "../_shared/leak-owner.js";
-import { expandServerVars, injectDefaultServers, type McpLayerEntry, type McpServerConfig, parseMcpLayerEntries, parseMcpServers, sanitize } from "./config.js";
+import { expandServerVars, injectDefaultServers, type McpLayerEntry, type McpServerConfig, parseMcpLayerEntries, parseMcpServers } from "./config.js";
 import { mergeMcpLayers, type McpMergeServer } from "./merge.js";
 import { authProviderName } from "./oauthRules.js";
 import { establishMcpConnection, loginUrlOf, type OAuthConnectHooks } from "./transport.js";
@@ -16,6 +18,8 @@ import { serverNamesConflict } from "./naming.js";
 import type { ProbeResult } from "./probe.js";
 import { appendCappedLog } from "./logRotate.js";
 import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
+import { allToolPages, catalogTools } from "./catalog.js";
+import { connectionError, stderrTail, type ConnectionDiagnostics } from "./diagnostics.js";
 import { summary, type ServerSummary } from "./summary.js";
 import { mcpConfigPaths, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
 
@@ -41,9 +45,10 @@ export interface McpToolDef {
   description?: string;
   inputSchema?: unknown;
 }
-export type McpStatus = "connecting" | "connected" | "failed";
+export type McpStatus = "connecting" | "connected" | "failed" | "stopped";
 export type McpAuthKind = "none" | "oauth" | "provider";
 export interface ServerEntry {
+  diagnostics?: ConnectionDiagnostics;
   status: McpStatus;
   error?: string;
   tools: McpToolDef[];
@@ -98,6 +103,7 @@ export interface ManagerDeps {
 
 export interface McpManager {
   init(): void;
+  cancelAttempt(name: string, attemptId: string): boolean;
   reloadServer(name: string): Promise<void>;
   snapshot(): McpSnapshot;
   callTool(server: string, tool: string, args: Record<string, unknown>): Promise<{
@@ -149,10 +155,10 @@ function callTimeoutMs(timeoutSeconds: number | undefined): number {
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_resolve, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)),
-  ]);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+    p.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
 }
 
 function callWithProgressTimeout<T>(run: (onProgress: () => void) => Promise<T>, timeoutMs: number): Promise<T> {
@@ -196,13 +202,17 @@ async function connectClient(s: McpServerConfig, hooks?: OAuthConnectHooks): Pro
   return establishMcpConnection(s, hooks, async (transport) => {
     const client = new Client({ name: "grenagent", version: "0.1.0" });
     try {
-      await withTimeout(client.connect(transport), MCP_TIMEOUT_MS);
+      hooks?.signal?.throwIfAborted();
+      await withTimeout(duringAttempt(client.connect(transport, {signal: hooks?.signal}), hooks?.signal), MCP_TIMEOUT_MS);
     } catch (e) {
       await client.close().catch(() => {});
       throw e;
     }
+    // OAuth can close a rejected handshake and retry with another transport.
+    // Only the successfully established client owns the live disconnect event.
+    client.onclose = () => hooks?.onDisconnected?.();
     return {
-      listTools: () => client.listTools(),
+      listTools: () => allToolPages(cursor => client.listTools(cursor ? { cursor } : undefined)),
       callTool: async (args) => {
         const timeoutMs = callTimeoutMs(s.timeout);
         const result = await client.callTool(
@@ -460,6 +470,8 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
 
   const clients = new Map<string, McpClient>();
   const catalog = new Map<string, ServerEntry>();
+  const traces = new Map<string, { attemptId: string; attemptedAt: string; handshake: string[]; tail: ReturnType<typeof stderrTail>; exit?: string }>();
+  const attempts = new Map<string, AbortController>();
   const inflight = new Map<string, Promise<void>>();
   const generation = new Map<string, number>();
   const listeners = new Set<(snap: McpSnapshot) => void>();
@@ -471,11 +483,17 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   let started = false;
   let unwatch: (() => void) | undefined;
 
+  const diagnosticsOf = (name: string, status: McpStatus): ConnectionDiagnostics | undefined => {
+    const trace = traces.get(name);
+    return trace && { attemptId: trace.attemptId, attemptedAt: trace.attemptedAt, handshake: [...trace.handshake], stderr: trace.tail.read(status === "failed" || status === "stopped"), exit: trace.exit };
+  };
+
   const snapshot = (): McpSnapshot => ({
     autoEnableCodemode,
     errors: [...extensionErrors],
     servers: new Map(
       [...catalog.entries()].map(([k, v]) => [k, {
+        diagnostics: diagnosticsOf(k, v.status),
         status: v.status,
         error: v.error,
         tools: [...v.tools],
@@ -503,6 +521,13 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   const connectServer = async (s: McpServerConfig): Promise<void> => {
     const gen = (generation.get(s.name) ?? 0) + 1;
     generation.set(s.name, gen);
+    const controller = new AbortController();
+    attempts.set(s.name, controller);
+    const signal = controller.signal;
+    const trace = { attemptId: randomUUID(), handshake: [] as string[], attemptedAt: new Date().toISOString(), tail: stderrTail(s), exit: undefined as string | undefined };
+    const stage = (text: string) => trace.handshake.push(`${new Date().toISOString()}  ${text}`);
+    stage(`开始 ${s.transport.toUpperCase()} 连接`);
+    traces.set(s.name, trace);
     const meta = serverSnapshotMeta(s);
     catalog.set(s.name, { status: "connecting", tools: [], ...meta });
     emit();
@@ -510,7 +535,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     try {
       const provider = usesProviderAuth(s);
       if (provider) {
-        const token = await readProviderToken(providerToken, provider);
+        const token = await duringAttempt(readProviderToken(providerToken, provider), signal);
         if (generation.get(s.name) !== gen) return;
         if (!token) {
           catalog.set(s.name, { status: "failed", error: MISSING_PROVIDER_TOKEN, tools: [], ...meta });
@@ -524,24 +549,43 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
           return;
         }
       }
-      const client = await connect(s, {
+      let disconnected = false;
+      stage("等待服务器响应初始化握手");
+      const connecting = connect(s, {
+        signal,
+        onStderr: (chunk) => trace.tail.append(chunk),
+        onExit: (exit) => { trace.exit = exit; },
+        onDisconnected() {
+          disconnected = true;
+          if (generation.get(s.name) !== gen || catalog.get(s.name)?.status !== "connected") return;
+          clients.delete(s.name);
+          catalog.set(s.name, { status: "failed", error: "连接已关闭", tools: [], ...meta });
+          emit();
+        },
         getProviderToken: (name) => providerToken?.(name),
         onLoginUrl(url) {
           if (generation.get(s.name) !== gen) return;
           const current = catalog.get(s.name);
           if (!current || current.status === "connected") return;
+          stage("等待浏览器授权");
           catalog.set(s.name, { ...current, loginUrl: url });
           logMcp(s.name, "login", url);
           emit();
         },
+      }).then(async client => {
+        if (signal.aborted) { await client.close().catch(() => {}); throw signal.reason; }
+        return client;
       });
+      const client = await duringAttempt(connecting, signal);
       if (generation.get(s.name) !== gen) {
         await client.close().catch(() => {});
         return;
       }
       clients.set(s.name, client);
-      const { tools } = await withTimeout(client.listTools(), MCP_TIMEOUT_MS);
-      const hasResources = await probeResources(client);
+      stage("握手完成，读取工具目录");
+      const { tools } = await withTimeout(duringAttempt(client.listTools(), signal), MCP_TIMEOUT_MS);
+      stage("工具目录已返回，检查资源");
+      const hasResources = await duringAttempt(probeResources(client), signal);
       if (generation.get(s.name) !== gen) {
         if (clients.get(s.name) === client) {
           clients.delete(s.name);
@@ -549,26 +593,34 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
         }
         return;
       }
+      if (disconnected) throw new Error("连接已关闭");
       catalog.set(s.name, { status: "connected", tools, hasResources, ...meta });
+      stage("连接就绪");
       logMcp(s.name, "connect", "connected");
       try {
         // 写「全名」mcp__server__tool（与 probe.ts、运行时工具注册、mcp-policy 查询一致）。
         // 原先写裸名 t.name 导致 UI/策略 key 与扩展查的全名对不上 → 权限设置不生效。
-        writeCache(s.name, { ok: true, toolNames: tools.map((t) => `mcp__${sanitize(s.name)}__${sanitize(t.name)}`) });
+        const catalog = catalogTools(s.name, tools);
+        writeCache(s.name, { ok: true, toolNames: catalog.map(t => t.fullName), catalog });
       } catch {
         // best-effort 缓存
       }
     } catch (e) {
       if (generation.get(s.name) !== gen) return;
-      const msg = e instanceof Error ? e.message : String(e);
+      const failedClient = clients.get(s.name);
+      if (failedClient) { clients.delete(s.name); await failedClient.close().catch(() => {}); }
+      if (generation.get(s.name) !== gen) return;
+      const msg = connectionError(s, e);
       const loginUrl = loginUrlOf(e) ?? catalog.get(s.name)?.loginUrl;
       catalog.set(s.name, { status: "failed", error: msg, tools: [], ...meta, ...(loginUrl ? { loginUrl } : {}) });
       logMcp(s.name, "failed", msg);
       try {
-        writeCache(s.name, { ok: false, toolNames: [], error: msg });
+        writeCache(s.name, { ok: false, toolNames: [], error: msg, stderr: trace.tail.read(true), exit: trace.exit });
       } catch {
         // best-effort 缓存
       }
+    } finally {
+      if (attempts.get(s.name) === controller) attempts.delete(s.name);
     }
     if (generation.get(s.name) === gen) emit();
   };
@@ -583,13 +635,12 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
 
   const forceReconnect = async (s: McpServerConfig): Promise<void> => {
     generation.set(s.name, (generation.get(s.name) ?? 0) + 1);
+    attempts.get(s.name)?.abort();
     const existing = clients.get(s.name);
     if (existing) {
       await existing.close().catch(() => {});
       clients.delete(s.name);
     }
-    catalog.set(s.name, { status: "connecting", tools: [], ...serverSnapshotMeta(s) });
-    emit();
     await runConnect(s);
   };
 
@@ -600,6 +651,9 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   };
 
   const disconnectServer = async (name: string): Promise<void> => {
+    generation.set(name, (generation.get(name) ?? 0) + 1);
+    attempts.get(name)?.abort();
+    traces.delete(name);
     const c = clients.get(name);
     if (c) await c.close().catch(() => {});
     clients.delete(name);
@@ -717,6 +771,19 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       providerToken = value;
     },
     init: start,
+    cancelAttempt(name, attemptId) {
+      const entry = catalog.get(name), trace = traces.get(name), pending = attempts.get(name);
+      if (entry?.status !== "connecting" || !pending || !trace || trace.attemptId !== attemptId) return false;
+      generation.set(name, (generation.get(name) ?? 0) + 1);
+      trace.handshake.push(`${new Date().toISOString()}  用户终止本次连接`);
+      catalog.set(name, { ...entry, status: "stopped", loginUrl: undefined });
+      const client = clients.get(name);
+      clients.delete(name);
+      pending.abort();
+      if (client) void client.close().catch(() => {});
+      emit();
+      return true;
+    },
     async reloadServer(name) {
       if (!started) {
         start();
@@ -797,6 +864,9 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       started = false;
       unwatch?.();
       unwatch = undefined;
+      for (const name of generation.keys()) generation.set(name, generation.get(name)! + 1);
+      for (const pending of attempts.values()) pending.abort();
+      attempts.clear(); traces.clear(); catalog.clear();
       const closing = [...clients.values()].map((c) => withTimeout(c.close(), MCP_CLOSE_TIMEOUT_MS).catch(() => {}));
       clients.clear();
       inflight.clear();
@@ -804,6 +874,8 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     },
   };
 }
+
+export function findMcpManager(workspace: string) { return managers.get(workspace); }
 
 export function getMcpManagerFor(workspace: string): McpManager {
   let mgr = managers.get(workspace);

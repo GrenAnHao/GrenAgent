@@ -39,7 +39,7 @@ function themeExtension(isDark: boolean): Extension {
       {
         '&': { height: '100%', fontSize: '12px', color: cssVar.colorText, backgroundColor: 'transparent' },
         '&.cm-focused': { outline: 'none' },
-        '.cm-scroller': { fontFamily: cssVar.fontFamilyCode, lineHeight: '1.7' },
+        '.cm-scroller': { fontFamily: cssVar.fontFamilyCode, fontVariantLigatures: 'none', lineHeight: '1.7' },
         // 行号栏必须不透明：横向滚动时代码从栏下穿过，透明底会让行号叠在代码上。
         '.cm-gutters': { backgroundColor: cssVar.colorBgContainer, color: cssVar.colorTextQuaternary, border: 'none' },
         '.cm-target-line': { backgroundColor: cssVar.colorPrimaryBg, boxShadow: `inset 2px 0 ${cssVar.colorPrimary}` },

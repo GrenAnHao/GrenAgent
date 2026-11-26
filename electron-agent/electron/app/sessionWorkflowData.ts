@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { SessionManager, sessionEntryToContextMessages } from '../../../cli/src/pi-sdk.js';
 import { readSessionPreferences, SESSION_PREFERENCES_ENTRY } from '../../../extensions/_shared/session-preferences.js';
+import { historyTransferSources, referenceSourceRoot } from '../../../extensions/_shared/session-project-transfer.js';
+import { ruleInjectionMessage } from '../../../extensions/context-rules/injectionNotice.js';
 
 type Entry = ReturnType<SessionManager['getEntries']>[number];
 type Header = NonNullable<ReturnType<SessionManager['getHeader']>>;
@@ -176,19 +178,33 @@ export function editableContent(sm: SessionManager, entryId: string, text?: stri
 
 
 
+/** Same user order as the display snapshot, without projecting or cloning any body. */
+export function workflowUserMessageEntries(branch: readonly Entry[]) {
+  return branch.flatMap(entry => entry.type === 'message' && entry.message.role === 'user'
+    ? [{ role: 'user' as const, entryId: entry.id, timestamp: entry.message.timestamp }]
+    : []);
+}
+
 export function workflowHistoryMessages(sm:SessionManager):Array<Record<string,unknown>&{entryId:string}>{
   const all=sm.getEntries();let marker=-1;
+  const sources=historyTransferSources(all,sm.getHeader()?.cwd ?? sm.getCwd());
   for(let i=all.length-1;i>=0;i--){const e=all[i];if(e.type==='custom'&&e.customType==='usage_origin_required'&&(e.data as {version?:unknown})?.version===1){marker=i;break;}}
   const inherited=new Set(marker<0?[]:all.slice(0,marker).map(e=>e.id));
   const latest=new Map(sm.getBranch().filter(e=>e.type==='context_edit').map(e=>[e.targetId,e.replacement]));
   const excluded=legacyExclusions(sm.getEntries());
   const projected=new Map(sm.buildSessionProjection().entries.map(entry=>[entry.sourceEntry.id,entry.messages]));
-  return sm.getBranch().flatMap(raw=>sessionEntryToContextMessages(raw).map(message=>{
-    const original=rawContent(raw),replacement=latest.get(raw.id),effective=projected.get(raw.id);
-    const contextReplaced=latest.has(raw.id)&&JSON.stringify(replacement?.content)!==JSON.stringify(original);
-    const effectiveMessage=effective?.[0];
-    return {...message,entryId:raw.id,...(inherited.has(raw.id)?{historyOnly:true}:{}),inContext:Boolean(effective?.length),...(original!==undefined?{content:structuredClone(original)}:{}),...(contextReplaced?{contextReplaced:true,effectiveContent:effectiveMessage&&'content' in effectiveMessage?structuredClone(effectiveMessage.content):undefined}:{}),...(latest.has(raw.id)&&replacement===null?{contextOmitted:true}:{}),...(raw.type==='message'?{legacyExcluded:excluded.has(raw.message.timestamp)}:{})};
-  }));
+  return sm.getBranch().flatMap<Record<string,unknown>&{entryId:string}>(raw=>{
+    const notice=ruleInjectionMessage(raw);
+    if(notice)return [{...notice,inContext:false,...(inherited.has(raw.id)?{historyOnly:true}:{})}];
+    return sessionEntryToContextMessages(raw).map(message=>{
+      const original=rawContent(raw),replacement=latest.get(raw.id),effective=projected.get(raw.id);
+      const contextReplaced=latest.has(raw.id)&&JSON.stringify(replacement?.content)!==JSON.stringify(original);
+      const effectiveMessage=effective?.[0];
+      const sourceCwd=sources ? referenceSourceRoot(sources,raw.id,message.role==='toolResult'?'path':undefined) : undefined;
+      const sourceRefs=sources?.[raw.id]?.refs;
+      return {...message,entryId:raw.id,...(sourceCwd?{sourceCwd}:{}),...(sourceRefs?{sourceRefs}:{}),...(inherited.has(raw.id)?{historyOnly:true}:{}),inContext:Boolean(effective?.length),...(original!==undefined?{content:structuredClone(original)}:{}),...(contextReplaced?{contextReplaced:true,effectiveContent:effectiveMessage&&'content' in effectiveMessage?structuredClone(effectiveMessage.content):undefined}:{}),...(latest.has(raw.id)&&replacement===null?{contextOmitted:true}:{}),...(raw.type==='message'?{legacyExcluded:excluded.has(raw.message.timestamp)}:{})};
+    });
+  });
 }
 
 export function derivedSelection(sm:SessionManager,operation:'fork'|'clone',entryId?:string,position:'before'|'at'='before'):{leafId:string|null;editorText?:string;entries:Entry[]}{

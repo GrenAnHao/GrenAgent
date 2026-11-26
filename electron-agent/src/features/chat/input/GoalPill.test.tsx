@@ -3,16 +3,18 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 
-const { getGoal, prompt } = vi.hoisted(() => ({
+const { getGoal, goalControl } = vi.hoisted(() => ({
   getGoal: vi.fn(),
-  prompt: vi.fn(),
+  goalControl: vi.fn(),
 }));
 let activeSessionPath: string | null = '/sessions/a.jsonl';
 
-vi.mock('../../../lib/pi', () => ({ pi: { getGoal, prompt } }));
+vi.mock('../../../lib/pi', () => ({ pi: { getGoal, goalControl } }));
 vi.mock('../../../store/session', () => ({
-  useSessionStore: (selector: (state: { activeSessionPath: string | null }) => unknown) =>
-    selector({ activeSessionPath }),
+  useSessionStore: Object.assign(
+    (selector: (state: { activeSessionPath: string | null }) => unknown) => selector({ activeSessionPath }),
+    { getState: () => ({ activeSessionPath }) },
+  ),
 }));
 // 二次确认改成了 antd 弹窗；测试里交给 window.confirm，便于按确认 / 取消断言。
 vi.mock('../../../components/askConfirm', () => ({
@@ -68,16 +70,21 @@ function lampStyle(): string {
 }
 
 beforeEach(() => {
-  useGoalStore.setState({ bySession: {}, sessionIdByPath: {}, goal: undefined });
+  useGoalStore.setState({ bySession: {}, watermarks: {}, mutationFences: {}, sessionIdByPath: {}, goal: undefined });
   activeSessionPath = '/sessions/a.jsonl';
   getGoal.mockResolvedValue(null);
-  prompt.mockResolvedValue(undefined);
+  goalControl.mockImplementation(async (_workspace, _path, request) => ({
+    ...request, sessionId: 'session-a', ownerEpoch: 'epoch-a', outcome: 'committed',
+    committedRevision: request.expectedRevision + 1,
+    snapshot: { ...makeSnapshot(), condition: request.condition ?? '写完测试', revision: request.expectedRevision + 1,
+      conditionRevision: request.expectedConditionRevision + (request.action === 'edit' ? 1 : 0) },
+  }));
 });
 
 afterEach(() => {
   cleanup();
   getGoal.mockReset();
-  prompt.mockReset();
+  goalControl.mockReset();
 });
 
 describe('GoalPill', () => {
@@ -185,38 +192,38 @@ describe('GoalPill', () => {
     expect((input as HTMLInputElement).value).toBe('写完测试');
 
     fireEvent.change(input, { target: { value: '   ' } });
-    expect(screen.getByRole('button', { name: '保存目标' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保存目标' }).getAttribute('tabindex')).toBe('-1');
 
     fireEvent.change(input, { target: { value: '新条件' } });
     fireEvent.keyDown(input, { key: 'Escape' });
-    expect(prompt).not.toHaveBeenCalled();
+    expect(goalControl).not.toHaveBeenCalled();
     expect(screen.queryByRole('textbox', { name: '目标条件' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '编辑目标' }));
     fireEvent.change(screen.getByRole('textbox', { name: '目标条件' }), { target: { value: '新条件' } });
     fireEvent.keyDown(screen.getByRole('textbox', { name: '目标条件' }), { key: 'Enter' });
 
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件', undefined, undefined, '/repo/s.jsonl'));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledWith('/repo', '/sessions/a.jsonl', expect.objectContaining({ action: 'edit', condition: '新条件', expectedConditionRevision: 1 })));
   });
 
   it('clears only after confirm and ignores a second click while busy', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    let resolvePrompt: () => void = () => undefined;
-    prompt.mockImplementation(() => new Promise<void>((resolve) => {
-      resolvePrompt = resolve;
+    let resolveControl: (value: unknown) => void = () => undefined;
+    goalControl.mockImplementation(() => new Promise((resolve) => {
+      resolveControl = (value) => resolve(value);
     }));
     await renderGoal();
 
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
-    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledTimes(1));
     // 确认弹窗开着时遮罩挡住点击；这里测的是清除进行中再点一次。
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
 
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledWith('清除当前目标？');
-    expect(prompt).toHaveBeenCalledTimes(1);
-    expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear', undefined, undefined, '/repo/s.jsonl');
-    resolvePrompt();
+    expect(goalControl).toHaveBeenCalledTimes(1);
+    expect(goalControl).toHaveBeenCalledWith('/repo', '/sessions/a.jsonl', expect.objectContaining({ action: 'clear' }));
+    resolveControl({});
     confirm.mockRestore();
   });
 
@@ -227,27 +234,99 @@ describe('GoalPill', () => {
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
 
     expect(confirm).toHaveBeenCalledWith('清除当前目标？');
-    expect(prompt).not.toHaveBeenCalled();
+    expect(goalControl).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
 
   it('pauses an armed goal and resumes a paused goal', async () => {
     await renderGoal();
     fireEvent.click(screen.getByRole('button', { name: '暂停目标' }));
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal pause', undefined, undefined, '/repo/s.jsonl'));
-    // 命令返回后按那份会话的路径再补拉一次。
-    await waitFor(() => expect(getGoal).toHaveBeenCalledWith('/repo', '/repo/s.jsonl'));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledWith('/repo', '/sessions/a.jsonl', expect.objectContaining({ action: 'pause' })));
+    await waitFor(() => expect(getGoal).toHaveBeenCalledWith('/repo', '/sessions/a.jsonl'));
 
     cleanup();
-    prompt.mockClear();
+    goalControl.mockClear();
     await renderGoal({ status: 'paused', activation: 'disarmed', revision: 3 });
     fireEvent.click(screen.getByRole('button', { name: '恢复目标' }));
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal resume', undefined, undefined, '/repo/s.jsonl'));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledWith('/repo', '/sessions/a.jsonl', expect.objectContaining({ action: 'resume' })));
   });
 
   it('never shows the round budget on the bar', async () => {
     await renderGoal({ roundsStarted: 12, maxRounds: 256 });
     expect(screen.queryByText(/\/256/)).toBeNull();
+  });
+
+  it('waits for the matching committed receipt despite same-text external updates and stale pulls', async () => {
+    let resolveReceipt: (receipt: unknown) => void = () => undefined;
+    goalControl.mockImplementation(() => new Promise((resolve) => { resolveReceipt = resolve; }));
+    await renderGoal({ runStartedAt: undefined, conditionRevision: 1 });
+    fireEvent.click(screen.getByRole('button', { name: '编辑目标' }));
+    const input = screen.getByRole('textbox', { name: '目标条件' });
+    fireEvent.change(input, { target: { value: '新条件' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledTimes(1));
+    act(() => useGoalStore.getState().setSnapshot('session-a', makeSnapshot({ condition: '新条件', revision: 3, conditionRevision: 2 })));
+    expect(screen.getByRole('textbox', { name: '目标条件' })).toBe(input);
+    const request = goalControl.mock.calls[0][2];
+    await act(async () => resolveReceipt({ ...request, sessionId: 'session-a', goalId: 'goal-a', ownerEpoch: 'epoch-a',
+      action: 'edit', outcome: 'committed', committedRevision: 3, snapshot: { ...makeSnapshot({ condition: '新条件', revision: 3, conditionRevision: 2 }) },
+      operationId: 'foreign-operation' }));
+    expect(screen.getByRole('textbox', { name: '目标条件' })).toBe(input);
+    expect(screen.getByRole('alert').textContent).toContain('不匹配');
+  });
+
+  it('retries a lost edit acknowledgement with the original operationId and preserves draft', async () => {
+    goalControl.mockRejectedValueOnce(new Error('transport closed'));
+    await renderGoal({ runStartedAt: undefined });
+    fireEvent.click(screen.getByRole('button', { name: '编辑目标' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '目标条件' }), { target: { value: '离线草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('同一操作标识'));
+    const originalId = goalControl.mock.calls[0][2].operationId;
+    expect((screen.getByRole('textbox', { name: '目标条件' }) as HTMLInputElement).value).toBe('离线草稿');
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '目标条件' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledTimes(2));
+    expect(goalControl.mock.calls[1][2].operationId).toBe(originalId);
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: '目标条件' })).toBeNull());
+  });
+
+  it('keeps an in-flight edit bound to its original session when the foreground changes', async () => {
+    let resolveReceipt: (value: unknown) => void = () => undefined;
+    goalControl.mockImplementation(() => new Promise((resolve) => { resolveReceipt = resolve; }));
+    useGoalStore.getState().bindSessionPath('/sessions/a.jsonl', 'session-a');
+    useGoalStore.getState().setSnapshot('session-a', makeSnapshot({ runStartedAt: undefined }));
+    useGoalStore.getState().bindSessionPath('/sessions/b.jsonl', 'session-b');
+    useGoalStore.getState().setSnapshot('session-b', { ...makeSnapshot({ runStartedAt: undefined }), goalId: 'goal-b', sessionId: 'session-b', condition: '乙会话条件' });
+    const view = render(<GoalPill />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑目标' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '目标条件' }), { target: { value: '甲会话草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledTimes(1));
+    const request = goalControl.mock.calls[0][2];
+    expect(goalControl.mock.calls[0][1]).toBe('/sessions/a.jsonl');
+    activeSessionPath = '/sessions/b.jsonl';
+    view.rerender(<GoalPill onOpenDetails={vi.fn()} />);
+    expect(await screen.findByText('· 乙会话条件')).toBeTruthy();
+    await act(async () => resolveReceipt({ ...request, ownerEpoch: 'epoch-a', sessionId: 'session-a', action: 'edit',
+      outcome: 'committed', committedRevision: 3,
+      snapshot: { ...makeSnapshot({ condition: '甲会话草稿', revision: 3, conditionRevision: 2 }) } }));
+    expect(screen.getByText('· 乙会话条件')).toBeTruthy();
+    expect(screen.queryByText('· 甲会话草稿')).toBeNull();
+  });
+
+  it('requires an explicit decision after a real condition conflict', async () => {
+    await renderGoal({ runStartedAt: undefined, conditionRevision: 1 });
+    fireEvent.click(screen.getByRole('button', { name: '编辑目标' }));
+    const input = screen.getByRole('textbox', { name: '目标条件' });
+    fireEvent.change(input, { target: { value: '我的草稿' } });
+    act(() => useGoalStore.getState().setSnapshot('session-a', makeSnapshot({ condition: '远端条件', conditionRevision: 2, revision: 3 })));
+    expect(screen.getByRole('alert').textContent).toContain('其他操作修改');
+    expect((input as HTMLInputElement).value).toBe('我的草稿');
+    fireEvent.click(screen.getByRole('button', { name: '基于最新版提交' }));
+    expect((input as HTMLInputElement).value).toBe('我的草稿');
+    fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
+    await waitFor(() => expect(goalControl).toHaveBeenCalledWith('/repo', '/sessions/a.jsonl', expect.objectContaining({ condition: '我的草稿', expectedRevision: 3, expectedConditionRevision: 2 })));
   });
 
   it('keeps the elapsed label after pause instead of resetting to 1s', async () => {

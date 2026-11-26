@@ -30,6 +30,9 @@ asar: true
 extraResources:
   - from: build/licenses
     to: licenses
+  - from: src/assets/fonts
+    to: licenses/fonts
+    filter: ['*-OFL.txt']
 beforePack: ./scripts/collect-third-party-licenses.cjs
 # @homebridge/node-pty-prebuilt-multiarch 是 Node-API 预编译包。
 # 发布的 npm 包没有 src/ 与 deps/winpty，electron-rebuild 看到 binding.gyp

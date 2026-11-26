@@ -32,6 +32,8 @@ import type {
 export const DEFAULT_MAX_WORKERS = 2;
 const STDERR_TAIL_BYTES = 8 * 1024;
 const DISPOSE_GRACE_MS = 3000;
+/** 迁移 drain 等「worker 已不再写日志」的上限；到点按 busy 上报，不替用户杀进程。 */
+const DISPOSE_ACK_TIMEOUT_MS = 5000;
 
 // ---- 名额：同时活着的 worker 进程数，超过就排队 ----
 
@@ -166,7 +168,10 @@ function serveApprovals(peer: RpcPeer, child: ChildProcess): void {
   });
 }
 
-function serializePrepared(prepared: PreparedEmbedded): SerializedPrepared {
+// Older host payloads predate routingMode; the worker derives it from childConfig when omitted.
+type WorkerPrepared = Omit<PreparedEmbedded, "routingMode"> & { routingMode?: PreparedEmbedded["routingMode"] };
+
+function serializePrepared(prepared: WorkerPrepared): SerializedPrepared {
   const parentSessionId = prepared.ctx.sessionId?.();
   return {
     childConfig: prepared.childConfig,
@@ -201,6 +206,8 @@ class WorkerSessionProxy {
   entries: unknown[] = [];
   exitedWith: string | undefined;
   private disposing = false;
+  private disposeAck: Promise<boolean> | undefined;
+  private disposeAcked: boolean | undefined;
   private forwardUi = true;
   private readonly listeners = new Set<Listener>();
   private readonly preflights = new Map<number, (disposition: unknown) => void>();
@@ -331,16 +338,78 @@ class WorkerSessionProxy {
   }
 
   dispose(): void {
-    if (this.disposing) return;
-    this.disposing = true;
-    budgetWorkers.delete(this.conn.child);
-    this.forwardUi = false;
+    this.beginDispose();
+  }
+
+  /**
+   * 迁移 drain 专用：等这个 worker 真的不再写会话（`dispose` 的 RPC 回执，或进程退出），
+   * 超时则明确报告「无法证明已收口」。普通 dispose 是 fire-and-forget（删会话 / 换走路径
+   * 不需要等）；迁移在这个 await 之后要改同一份 JSONL，不能靠后台计时器赌它已经停了。
+   *
+   * `{ confirmed }`：true 表示 worker 已确认收口；false 时调用方必须按 busy 处理。
+   * 不主动杀仍在写日志的用户任务：走与普通 dispose 相同的 graceful 收口（RPC → 进程退出），
+   * grace 计时器只兜底真正卡死的 worker（和原行为一致）。
+   */
+  async disposeAndWait(timeoutMs = DISPOSE_ACK_TIMEOUT_MS): Promise<{ confirmed: boolean }> {
+    if (this.exited) return { confirmed: true };
     const { child } = this.conn;
-    if (!this.exitedWith) void this.call("dispose").catch(() => {});
-    const timer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) killProcessTree(child);
-    }, DISPOSE_GRACE_MS);
-    timer.unref?.();
+    const exited = new Promise<void>((resolve) => {
+      child.once("exit", () => resolve());
+    });
+    const acknowledged = this.beginDispose();
+    const timeout = new Promise<"timeout">((resolve) => {
+      const timer = setTimeout(() => resolve("timeout"), Math.max(1, timeoutMs));
+      timer.unref?.();
+    });
+    const result = await Promise.race([
+      exited.then(() => "exited" as const),
+      acknowledged.then((ok) => (ok ? "acknowledged" as const : "failed" as const)),
+      timeout,
+    ]);
+    return { confirmed: result === "exited" || result === "acknowledged" };
+  }
+
+  /**
+   * 发一次 dispose RPC 并记下回执；重复调用复用同一个 promise。
+   * 普通 dispose 只等 grace 计时器兜底，迁移 drain 用 disposeAndWait 等这个回执。
+   */
+  private beginDispose(): Promise<boolean> {
+    if (this.disposeAck) return this.disposeAck;
+    const first = !this.disposing;
+    this.disposing = true;
+    this.forwardUi = false;
+    budgetWorkers.delete(this.conn.child);
+    this.disposeAck = this.exitedWith
+      ? Promise.resolve(true)
+      : this.call("dispose").then(
+          () => {
+            this.disposeAcked = true;
+            return true;
+          },
+          () => false,
+        );
+    if (first) {
+      const { child } = this.conn;
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) killProcessTree(child);
+      }, DISPOSE_GRACE_MS);
+      timer.unref?.();
+    }
+    return this.disposeAck;
+  }
+
+  /**
+   * 收口事实的只读快照：dispose 回执已成功，或进程已经退出。迁移 quarantine 依它清表。
+   * 从未开始 dispose 时为 false（此时进程可能还在写）。
+   */
+  get disposalConfirmed(): boolean {
+    if (this.exited) return true;
+    return this.disposeAcked === true;
+  }
+
+  /** 这个代理背后的 worker 进程是否已经退出（不会再写会话）。 */
+  get exited(): boolean {
+    return this.exitedWith !== undefined || this.conn.child.exitCode !== null || this.conn.child.signalCode !== null;
   }
 
   stopUiForwarding(): void {
@@ -382,6 +451,12 @@ class WorkerSessionProxy {
       abort: () => self.abort(),
       waitForIdle: () => self.waitForIdle(),
       dispose: () => self.dispose(),
+      // 迁移 drain 用：等 worker 停止写会话（dispose 回执或进程退出），超时返回 false。
+      disposeAndWait: (timeoutMs?: number) => self.disposeAndWait(timeoutMs),
+      // 隔离区清表依此判断「旧写者确实已经收口」。
+      get disposalConfirmed() {
+        return self.disposalConfirmed;
+      },
       // 等 worker 确认写进了会话：worker 已经退出时报错，不让调用方以为已经投递。
       sendCustomMessage: (message: unknown, options: unknown) =>
         self.call<null>("sendCustomMessage", { message, options }).then(() => undefined),
@@ -406,7 +481,7 @@ class WorkerSessionProxy {
 }
 
 /** worker 后端的开会话方式：起一个 worker 进程，在里面建子会话，返回代理。 */
-export const openWorkerChildSession: ChildSessionOpener = async (opts, prepared) => {
+export const openWorkerChildSession = async (opts: EmbeddedSubagentOpts, prepared: WorkerPrepared): ReturnType<ChildSessionOpener> => {
   const release = await acquireWorkerSlot(opts.signal);
   let conn: WorkerConnection;
   try {

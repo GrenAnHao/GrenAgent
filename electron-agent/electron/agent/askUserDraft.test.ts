@@ -30,6 +30,21 @@ describe('askUserDraft', () => {
     expect(await readAskUserDraft(sessionFile, 'q1')).toBeNull();
   });
 
+  it('serializes draft writes and late cleanup without clearing a newer question', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'ask-draft-'));
+    dirs.push(dir);
+    const sessionFile = path.join(dir, 's.jsonl');
+    const draft = { toolCallId: 'first', selected: {}, customTexts: {}, extraText: '', extraImages: [] };
+    await Promise.all([
+      writeAskUserDraft(sessionFile, draft),
+      writeAskUserDraft(sessionFile, { ...draft, toolCallId: 'next' }),
+      deleteAskUserDraft(sessionFile, 'first'),
+    ]);
+    expect(await readAskUserDraft(sessionFile, 'next')).toMatchObject({ toolCallId: 'next' });
+    await deleteAskUserDraft(sessionFile, 'next');
+    expect(await readAskUserDraft(sessionFile, 'next')).toBeNull();
+  });
+
   it('returns null when selected is an array', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ask-draft-'));
     dirs.push(dir);

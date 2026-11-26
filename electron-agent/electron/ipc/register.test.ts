@@ -13,6 +13,7 @@ vi.mock('electron', () => electron);
 
 import { getRegisteredCommands, registerIpcHandlers } from './register';
 import { IPC_CHANNELS } from './contracts';
+import { createAgentPorts, type AgentRequest } from '../agentProcess/mainBindings';
 
 function handler(channel: string): (...args: any[]) => any {
   const entry = electron.ipcMain.handle.mock.calls.find(([registered]) => registered === channel);
@@ -21,6 +22,34 @@ function handler(channel: string): (...args: any[]) => any {
 }
 
 describe('registerIpcHandlers', () => {
+  it('passes usage_report filters intact through the real desktop ports and rejects invalid range', async () => {
+    const filters = { range: '7d', projectId: 'global' };
+    const request = vi.fn().mockResolvedValue({ fixture: true });
+    registerIpcHandlers({ usage: createAgentPorts(request as AgentRequest).usage });
+    const invoke = handler(IPC_CHANNELS.invoke);
+    await expect(invoke({}, { command: 'usage_report', args: { filters } })).resolves.toEqual({ fixture: true });
+    await expect(invoke({}, { command: 'usage_report', args: {} })).resolves.toEqual({ fixture: true });
+    await expect(invoke({}, { command: 'usage_report', args: { filters: { range: '1d' } } })).rejects.toThrow('Invalid usage range');
+    expect(request.mock.calls).toEqual([['usage.report', { filters }], ['usage.report', { filters: {} }]]);
+    const query = {...filters,page:2,provider:'p',model:'m'};
+    await invoke({}, {command:'usage_calls',args:{query}});
+    expect(request).toHaveBeenLastCalledWith('usage.calls',{query});
+    await expect(invoke({}, {command:'usage_calls',args:{query:{page:0}}})).rejects.toThrow('Invalid usage call query');
+  });
+
+  it('dispatches subagent_lookup through the production Agent Host port', async () => {
+    const args = { workspace: 'D:/p', agentId: 'sa-child', parentSessionPath: 'D:/s/2026-11-18T09-00-00-000Z_parent.jsonl' };
+    const running = { kind: 'found', item: { id: 'sa-child', status: 'running' } };
+    const done = { kind: 'found', item: { id: 'sa-child', status: 'done' } };
+    const request = vi.fn().mockResolvedValueOnce(running).mockResolvedValueOnce(done);
+    const agent = createAgentPorts(request as AgentRequest);
+    registerIpcHandlers({ subagent: agent.subagent });
+    const invoke = handler(IPC_CHANNELS.invoke);
+    await expect(invoke({}, { command: 'subagent_lookup', args })).resolves.toEqual(running);
+    await expect(invoke({}, { command: 'subagent_lookup', args })).resolves.toEqual(done);
+    expect(request.mock.calls).toEqual([['subagent.lookup', args], ['subagent.lookup', args]]);
+  });
+
   it('opens a single filtered file without changing the directory picker contract', async () => {
     electron.dialog.showOpenDialog.mockReset().mockResolvedValue({ canceled: false, filePaths: ['C:/skills/example.zip'] });
     registerIpcHandlers();
@@ -113,7 +142,9 @@ describe('registerIpcHandlers', () => {
   it('routes UI history commands and permits empty content', async () => {
     const uiHistory = {
       read: vi.fn().mockResolvedValue('saved'),
+      readSnapshot: vi.fn().mockResolvedValue({ content: 'saved', revision: 'r1' }),
       write: vi.fn().mockResolvedValue(undefined),
+      patch: vi.fn().mockResolvedValue('r2'),
       delete: vi.fn().mockResolvedValue(undefined),
     };
     registerIpcHandlers({ uiHistory });
@@ -121,10 +152,13 @@ describe('registerIpcHandlers', () => {
     const event = {};
 
     await expect(invoke(event, { command: 'ui_history_read', args: { workspace: 'C:/project', sessionKey: 's' } })).resolves.toBe('saved');
+    await expect(invoke(event, { command: 'ui_history_read', args: { workspace: 'C:/project', sessionKey: 's', checkpoint: true } })).resolves.toEqual({ content: 'saved', revision: 'r1' });
     await expect(invoke(event, { command: 'ui_history_write', args: { workspace: 'C:/project', sessionKey: 's', content: '' } })).resolves.toBeUndefined();
+    await expect(invoke(event, { command: 'ui_history_patch', args: { workspace: 'C:/project', sessionKey: 's', revision: 'r1', offset: 0, content: '' } })).resolves.toBe('r2');
     await expect(invoke(event, { command: 'ui_history_delete', args: { workspace: 'C:/project', sessionKey: 's' } })).resolves.toBeUndefined();
     expect(uiHistory.read).toHaveBeenCalledWith('C:/project', 's');
-    expect(uiHistory.write).toHaveBeenCalledWith('C:/project', 's', '');
+    expect(uiHistory.write).toHaveBeenCalledWith('C:/project', 's', '', false);
+    expect(uiHistory.patch).toHaveBeenCalledWith('C:/project', 's', 'r1', 0, '');
     expect(uiHistory.delete).toHaveBeenCalledWith('C:/project', 's');
   });
 
@@ -317,8 +351,12 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'agentData_code_status', args: { workspace: '/w' } })).resolves.toEqual({
       method: 'codeRetrieval.admin.status', params: { workspace: '/w' },
     });
+    expect(agentData.requestAdmin).toHaveBeenCalledWith('codeRetrieval.admin.status', { workspace:'/w' });
     await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'codegraph.sync', workspace: '/w' } })).resolves.toEqual({
       method: 'admin.jobs.create', params: { kind: 'codegraph.sync', workspace: '/w' },
+    });
+    await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'codegraph.sync', workspace: '/w', rebuild: true } })).resolves.toEqual({
+      method: 'admin.jobs.create', params: { kind: 'codegraph.sync', workspace: '/w', rebuild: true },
     });
     await expect(invoke({}, { command: 'agentData_code_projects', args: {} })).resolves.toEqual({
       method: 'codeRetrieval.admin.projects', params: {},
@@ -519,5 +557,48 @@ describe('session workflow file authority',()=>{
   await expect(invoke(event,{command:'agent_session_workflow',args:{workspace:'D:/repo',...target,action:'export-preview',format:'html'}})).resolves.toEqual({status:'cancelled'});
   electron.dialog.showOpenDialog.mockResolvedValueOnce({canceled:true,filePaths:[]});
   await expect(invoke(event,{command:'agent_session_workflow',args:{workspace:'D:/repo',...target,action:'import-preview'}})).resolves.toEqual({status:'cancelled'});expect(sessionWorkflow).not.toHaveBeenCalled();
+ });
+});
+
+describe('session project transfer ipc',()=>{
+ const base={sourceWorkspace:'D:/repo',sessionPath:'D:/agent/sessions/--repo--/2026-01-01T00-00-00_a.jsonl',operationId:'op-1'};
+ const call=(args:Record<string,unknown>)=>handler(IPC_CHANNELS.invoke)({sender:{}},{command:'agent_session_project_transfer',args});
+ it('routes preview, commit, status and retry-open through the explicit source workspace',async()=>{
+  const sessionProjectTransfer=vi.fn(async(_workspace:string,_request:Record<string,unknown>)=>({status:'preview'}));
+  registerIpcHandlers({pi:{send:vi.fn(),sessionProjectTransfer} as never});
+  await call({workspace:'D:/repo',action:'preview',sourceWorkspace:'D:/repo',sessionPath:base.sessionPath,targetWorkspace:'D:/dst'});
+  expect(sessionProjectTransfer).toHaveBeenLastCalledWith('D:/repo',expect.objectContaining({action:'preview',targetWorkspace:'D:/dst'}));
+  await call({workspace:'D:/repo',action:'commit',...base,ticket:'ticket-1',expectedSessionId:'A',expectedLeafId:null,expectedRevision:'host:1'});
+  expect(sessionProjectTransfer).toHaveBeenLastCalledWith('D:/repo',expect.objectContaining({action:'commit',ticket:'ticket-1',expectedSessionId:'A',expectedLeafId:null,expectedRevision:'host:1'}));
+  for(const action of ['status','retry-open'])await call({workspace:'D:/repo',action,...base});
+  expect(sessionProjectTransfer).toHaveBeenCalledTimes(4);
+  expect(sessionProjectTransfer.mock.calls.map(([,request])=>request.action)).toEqual(['preview','commit','status','retry-open']);
+ });
+ it('rejects a source workspace that differs from the routing workspace before reaching the owner',async()=>{
+  const sessionProjectTransfer=vi.fn();registerIpcHandlers({pi:{send:vi.fn(),sessionProjectTransfer} as never});
+  await expect(call({workspace:'D:/repo',action:'preview',sourceWorkspace:'D:/other',sessionPath:base.sessionPath,targetWorkspace:'D:/dst'})).rejects.toThrow(/SOURCE_MISMATCH/);
+  await expect(call({workspace:'D:/repo',action:'preview',sessionPath:base.sessionPath,targetWorkspace:'D:/dst'})).rejects.toThrow();
+  expect(sessionProjectTransfer).not.toHaveBeenCalled();
+ });
+ it('treats separator, trailing slash and case differences as the same source and forwards the routing workspace',async()=>{
+  const sessionProjectTransfer=vi.fn(async()=>({status:'preview'}));registerIpcHandlers({pi:{send:vi.fn(),sessionProjectTransfer} as never});
+  await call({workspace:'D:/repo',action:'preview',sourceWorkspace:'d:\\REPO\\',sessionPath:base.sessionPath,targetWorkspace:'D:/dst'});
+  expect(sessionProjectTransfer).toHaveBeenLastCalledWith('D:/repo',expect.objectContaining({sourceWorkspace:'D:/repo'}));
+ });
+ it('never forwards renderer after-image, backup or journal paths',async()=>{
+  const sessionProjectTransfer=vi.fn();registerIpcHandlers({pi:{send:vi.fn(),sessionProjectTransfer} as never});
+  for(const extra of [{afterImage:'D:/tmp/a'},{backupPath:'D:/tmp/b'},{journal:'D:/tmp/j'},{manifestPath:'D:/tmp/m'}])
+   await expect(call({workspace:'D:/repo',action:'preview',sourceWorkspace:'D:/repo',sessionPath:base.sessionPath,targetWorkspace:'D:/dst',...extra})).rejects.toThrow(/rejects renderer-supplied/i);
+  expect(sessionProjectTransfer).not.toHaveBeenCalled();
+ });
+ it('never exposes the internal transfer recovery as a renderer command',()=>{
+  registerIpcHandlers({pi:{send:vi.fn()} as never});
+  expect(getRegisteredCommands()).toContain('agent_session_project_transfer');
+  expect(getRegisteredCommands().filter(name=>/recover/i.test(name))).toEqual([]);
+ });
+ it('falls back to the agent host send when no in-process port is wired',async()=>{
+  const send=vi.fn(async()=>({status:'preview'}));registerIpcHandlers({pi:{send} as never});
+  await call({workspace:'D:/repo',action:'preview',sourceWorkspace:'D:/repo',sessionPath:base.sessionPath,targetWorkspace:'D:/dst'});
+  expect(send).toHaveBeenLastCalledWith('D:/repo','agent_session_project_transfer',expect.objectContaining({action:'preview',targetWorkspace:'D:/dst'}));
  });
 });

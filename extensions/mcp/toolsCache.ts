@@ -7,7 +7,7 @@ import type { ProbeResult } from "./probe.js";
 const DIR = join(homedir(), ".pi");
 const CACHE_PATH = join(DIR, "mcp-tools-cache.json");
 
-export interface ToolsCacheEntry {
+export interface ToolsCacheEntry extends ProbeResult {
   toolNames: string[];
   probedAt: string;
   ok: boolean;
@@ -33,7 +33,8 @@ export function readToolsCache(): Record<string, string[]> {
 function sameEntry(cached: unknown, result: ProbeResult): boolean {
   if (!cached || typeof cached !== "object") return false;
   const entry = cached as Partial<ToolsCacheEntry>;
-  return entry.ok === result.ok
+  return result.ok && JSON.stringify(entry.catalog) === JSON.stringify(result.catalog)
+    && entry.ok === result.ok
     && entry.error === result.error
     && Array.isArray(entry.toolNames)
     && entry.toolNames.length === result.toolNames.length
@@ -56,10 +57,15 @@ export function writeToolsCacheEntry(name: string, result: ProbeResult): void {
   }
   if (sameEntry(raw[name], result)) return;
   const entry: ToolsCacheEntry = {
+    ...result,
     toolNames: result.toolNames,
     probedAt: new Date().toISOString(),
     ok: result.ok,
   };
+  // A failed handshake has no live names. Keep the last browsable metadata
+  // separately; readToolsCache() must still return only the latest toolNames.
+  const previous = raw[name] as Partial<ToolsCacheEntry> | undefined;
+  if (!result.ok && Array.isArray(previous?.catalog)) entry.catalog = previous.catalog;
   if (result.error) entry.error = result.error;
   raw[name] = entry;
   mkdirSync(DIR, { recursive: true });

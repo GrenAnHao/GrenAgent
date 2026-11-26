@@ -1,8 +1,9 @@
 import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readAutoContinueOnOpen } from "./config.js";
+import { revokeGoalRound } from "./auth.js";
 import { foldGoal } from "./fold.js";
-import { buildGoalStatus, getActivation, setActivation } from "./status.js";
+import { beginGoalOwner, buildGoalStatus, getActivation, setActivation } from "./status.js";
 import type { GoalActivation, GoalEvent, GoalSnapshot } from "./types.js";
 
 export { getActivation, setActivation };
@@ -59,23 +60,32 @@ function eventAt(): string {
   return new Date().toISOString();
 }
 
+export interface GoalControlMetadata {
+  operationId: string;
+  controlAction: string;
+  expectedConditionRevision: number;
+  controlRequest?: string;
+  expectedRevision?: number;
+}
+
 function writeKind(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   kind: GoalEvent["kind"],
   snapshot: GoalSnapshot,
   payload: Record<string, unknown> = {},
+  control?: GoalControlMetadata,
 ): GoalSnapshot | undefined {
   return writeEvent(pi, ctx, {
     kind,
     goalId: snapshot.goalId,
     revision: nextRevision(snapshot),
     at: eventAt(),
-    payload,
+    payload: control ? { ...payload, ...control } : payload,
   });
 }
 
-export function createGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: string, maxRounds?: number): GoalSnapshot {
+export function createGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: string, maxRounds?: number, control?: GoalControlMetadata): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (current && current.status !== "complete") {
     throw new Error("GOAL_ALREADY_ACTIVE");
@@ -85,7 +95,7 @@ export function createGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: s
     goalId: newGoalId(),
     revision: 1,
     at: eventAt(),
-    payload: maxRounds === undefined ? { condition } : { condition, maxRounds },
+    payload: { ...(maxRounds === undefined ? { condition } : { condition, maxRounds }), ...control },
   });
   setActivation(sessionIdOf(ctx), "armed");
   const snapshot = readSnapshot(ctx);
@@ -94,21 +104,23 @@ export function createGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: s
   return snapshot;
 }
 
-export function editGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: string): GoalSnapshot {
+export function editGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: string, control?: GoalControlMetadata): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (!current) throw new Error("GOAL_MISSING");
-  writeKind(pi, ctx, "edit", current, { condition });
+  if (current.condition !== condition.trim()) revokeGoalRound(sessionIdOf(ctx));
+  writeKind(pi, ctx, "edit", current, { condition }, control);
   const snapshot = readSnapshot(ctx);
   if (!snapshot) throw new Error("GOAL_WRITE_FAILED");
   pushStatus(ctx);
   return snapshot;
 }
 
-export function pauseGoal(pi: ExtensionAPI, ctx: ExtensionContext): GoalSnapshot {
+export function pauseGoal(pi: ExtensionAPI, ctx: ExtensionContext, control?: GoalControlMetadata): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (!current) throw new Error("GOAL_MISSING");
-  if (current.status === "active") {
-    writeKind(pi, ctx, "pause", current);
+  if (current.status === "active" || (control && current.status === "paused")) {
+    revokeGoalRound(sessionIdOf(ctx));
+    writeKind(pi, ctx, "pause", current, { pauseReason: { code: "user" } }, control);
   }
   setActivation(sessionIdOf(ctx), "disarmed");
   const snapshot = readSnapshot(ctx);
@@ -117,11 +129,12 @@ export function pauseGoal(pi: ExtensionAPI, ctx: ExtensionContext): GoalSnapshot
   return snapshot;
 }
 
-export function resumeGoal(pi: ExtensionAPI, ctx: ExtensionContext): GoalSnapshot {
+export function resumeGoal(pi: ExtensionAPI, ctx: ExtensionContext, control?: GoalControlMetadata): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (!current) throw new Error("GOAL_MISSING");
-  if (current.status === "paused" || current.status === "blocked") {
-    writeKind(pi, ctx, "resume", current);
+  if (current.runRoundsStarted >= current.maxRounds) throw new Error("GOAL_RESTART_REQUIRES_CONTROL");
+  if (current.status === "paused" || current.status === "blocked" || (control && current.status === "active")) {
+    writeKind(pi, ctx, "resume", current, {}, control);
   }
   setActivation(sessionIdOf(ctx), "armed");
   const snapshot = readSnapshot(ctx);
@@ -130,17 +143,33 @@ export function resumeGoal(pi: ExtensionAPI, ctx: ExtensionContext): GoalSnapsho
   return snapshot;
 }
 
-export function clearGoal(pi: ExtensionAPI, ctx: ExtensionContext): void {
+export function restartGoalForControl(pi: ExtensionAPI, ctx: ExtensionContext, control?: GoalControlMetadata): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (!current) throw new Error("GOAL_MISSING");
-  writeKind(pi, ctx, "clear", current);
+  if (current.runRoundsStarted < current.maxRounds || current.status === "complete") throw new Error("GOAL_RESTART_NOT_EXHAUSTED");
+  revokeGoalRound(sessionIdOf(ctx));
+  const written = writeKind(pi, ctx, "restart", current, { runNumber: current.runNumber + 1 }, control);
+  if (!written || written.runNumber !== current.runNumber + 1) throw new Error("GOAL_WRITE_FAILED");
+  setActivation(sessionIdOf(ctx), "armed");
+  pushStatus(ctx);
+  return written;
+}
+
+export function clearGoal(pi: ExtensionAPI, ctx: ExtensionContext, control?: GoalControlMetadata): void {
+  const current = readSnapshot(ctx);
+  if (!current) throw new Error("GOAL_MISSING");
+  revokeGoalRound(sessionIdOf(ctx));
+  writeKind(pi, ctx, "clear", current, {}, control);
+  setActivation(sessionIdOf(ctx), "disarmed");
   pushStatus(ctx);
 }
 
 export function completeGoal(pi: ExtensionAPI, ctx: ExtensionContext, summary?: string): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (!current) throw new Error("GOAL_MISSING");
+  revokeGoalRound(sessionIdOf(ctx));
   writeKind(pi, ctx, "complete", current, summary === undefined ? {} : { summary });
+  setActivation(sessionIdOf(ctx), "disarmed");
   const snapshot = readSnapshot(ctx);
   if (!snapshot) throw new Error("GOAL_WRITE_FAILED");
   pushStatus(ctx);
@@ -150,16 +179,19 @@ export function completeGoal(pi: ExtensionAPI, ctx: ExtensionContext, summary?: 
 export function blockGoal(pi: ExtensionAPI, ctx: ExtensionContext, message: string): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (!current) throw new Error("GOAL_MISSING");
+  revokeGoalRound(sessionIdOf(ctx));
   writeKind(pi, ctx, "blocked", current, { message });
+  setActivation(sessionIdOf(ctx), "disarmed");
   const snapshot = readSnapshot(ctx);
   if (!snapshot) throw new Error("GOAL_WRITE_FAILED");
   pushStatus(ctx);
   return snapshot;
 }
 
-export function onSessionStart(ctx: ExtensionContext): void {
+export function onSessionStart(ctx: ExtensionContext, options: { forceDisarmed?: boolean; deferStatus?: boolean } = {}): void {
+  beginGoalOwner(sessionIdOf(ctx));
   const snapshot = readSnapshot(ctx);
-  const armed = readAutoContinueOnOpen() && snapshot?.status === "active";
+  const armed = !options.forceDisarmed && readAutoContinueOnOpen() && snapshot?.status === "active" && snapshot.runRoundsStarted < snapshot.maxRounds;
   setActivation(sessionIdOf(ctx), armed ? "armed" : "disarmed");
-  pushStatus(ctx);
+  if (!options.deferStatus) pushStatus(ctx);
 }

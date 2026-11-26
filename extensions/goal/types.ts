@@ -1,4 +1,4 @@
-export const GOAL_EVENT_KINDS = ["create", "edit", "pause", "resume", "complete", "blocked", "clear", "round"] as const;
+export const GOAL_EVENT_KINDS = ["create", "edit", "pause", "resume", "restart", "complete", "blocked", "clear", "round"] as const;
 export type GoalEventKind = (typeof GOAL_EVENT_KINDS)[number];
 export type GoalStatus = "active" | "paused" | "blocked" | "complete";
 export type GoalActivation = "armed" | "disarmed";
@@ -16,12 +16,22 @@ export interface GoalBlockedReason {
   message: string;
 }
 
+export interface GoalPauseReason {
+  code: "request-error" | "runtime-error" | "user" | "max-rounds";
+  /** Safe explanation only: never persist raw provider responses or credentials. */
+  message?: string;
+}
+
 export interface GoalSnapshot {
   goalId: string;
   revision: number;
   condition: string;
   status: GoalStatus;
+  /** Lifetime count; restarting a budget never resets this. */
   roundsStarted: number;
+  runNumber: number;
+  runRoundsStarted: number;
+  conditionRevision: number;
   maxRounds: number;
   createdAt: string;
   updatedAt: string;
@@ -31,6 +41,7 @@ export interface GoalSnapshot {
   runStartedAt?: string;
   activation?: GoalActivation;
   blockedReason?: GoalBlockedReason;
+  pauseReason?: GoalPauseReason;
 }
 
 export const DEFAULT_MAX_ROUNDS = 256;

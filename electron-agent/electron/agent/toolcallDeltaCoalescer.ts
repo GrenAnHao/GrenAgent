@@ -32,7 +32,11 @@ export function createDeltaCoalescer(
   const push = (event: Rec) => {
     const ame = deltaOf(event, types);
     if (!ame) { flush(); emit(event); return; }
-    if (pending && pending.ame.type === ame.type && pending.ame.contentIndex === ame.contentIndex) {
+    const previousAttempt = pending?.event.responseAttempt as { runId?: number; attempt?: number } | undefined;
+    const nextAttempt = event.responseAttempt as { runId?: number; attempt?: number } | undefined;
+    if (pending && pending.ame.type === ame.type && pending.ame.contentIndex === ame.contentIndex
+      && previousAttempt?.runId === nextAttempt?.runId
+      && previousAttempt?.attempt === nextAttempt?.attempt) {
       pending.ame = {
         ...pending.ame,
         delta: `${pending.ame.delta as string}${ame.delta as string}`,

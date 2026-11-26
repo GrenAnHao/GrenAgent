@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,6 +22,21 @@ describe('index task store', () => {
     expect(running.stage).toBe('扫描文件');
     expect(store.complete('t1')!.state).toBe('completed');
     expect(store.get('t1')!.progress).toBe(100);
+  });
+
+  it('uses the same manual task for Windows path aliases, but keeps different projects separate', () => {
+    store.create({ id: 'win', workspace: 'D:\\Team\\Pi' });
+    store.stage('win','解析代码',{ processed:2,total:5 });
+    expect(store.activeFor('d:/team/Pi/')?.id).toBe('win');
+    expect(store.latestManual('d:/team/Pi/')?.processed).toBe(2);
+    store.stage('win','扫描文件',{processed:178});
+    expect(store.get('win')?.processed).toBe(178);
+    expect(store.get('win')?.total).toBeUndefined();
+    store.stage('win','解析引用');
+    expect(store.latestManual('d:/team/pi')?.total).toBeUndefined();
+    expect(store.latestManual('D:/other/Pi')).toBeUndefined();
+    store.create({ id:'posix', workspace:'/home/Code' });
+    expect(store.latestManual('/home/code')).toBeUndefined();
   });
 
   it('rejects contradictory stage counts and empty stages', () => {
@@ -100,7 +116,8 @@ describe('index task store', () => {
   });
 
   it('maps an unknown persisted state to failed rather than inventing one', () => {
-    store.db.prepare("INSERT INTO index_tasks(id,workspace,kind,state,progress,created_at,updated_at) VALUES('x','D:/r','codegraph.sync','nonsense',0,1,2)").run();
+    const sql = new DatabaseSync(join(dir, 'index-tasks.sqlite'));
+    try { sql.prepare("INSERT INTO index_tasks(id,workspace,kind,state,progress,created_at,updated_at) VALUES('x','D:/r','codegraph.sync','nonsense',0,1,2)").run(); } finally { sql.close(); }
     expect(store.get('x')!.state).toBe('failed');
   });
 });

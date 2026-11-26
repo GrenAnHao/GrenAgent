@@ -113,9 +113,47 @@ describe('SubagentService', () => {
     const service = new SubagentService();
 
     expect(service.list(workspace)).toEqual([
-      { id: 'newer', task: 'latest task', profile: '{"fs":"readonly"}', model: null, sessionPath: null, status: 'running', output: null, error: null, exitCode: null, transcript: null, createdAt: 5, updatedAt: 6 },
-      { id: 'older', task: 'first task', profile: null, model: 'm1', sessionPath: null, status: 'done', output: 'result', error: null, exitCode: 0, transcript: null, createdAt: 1, updatedAt: 2 },
+      { id: 'newer', task: 'latest task', profile: '{"fs":"readonly"}', model: null, thinkingLevel: null, sessionPath: null, status: 'running', output: null, error: null, exitCode: null, transcript: null, responseStarted: 0, createdAt: 5, updatedAt: 6 },
+      { id: 'older', task: 'first task', profile: null, model: 'm1', thinkingLevel: null, sessionPath: null, status: 'done', output: 'result', error: null, exitCode: 0, transcript: null, responseStarted: 0, createdAt: 1, updatedAt: 2 },
     ]);
+  });
+
+  it('projects the first-response flag so a running child with no final output still reads as responded', async () => {
+    const { workspace, db } = await createRegistry();
+    db.exec('ALTER TABLE subagents ADD COLUMN responseStarted INTEGER NOT NULL DEFAULT 0');
+    const insert = db.prepare('INSERT INTO subagents(id, task, status, output, responseStarted, createdAt, updatedAt) VALUES(?,?,?,?,?,1,2)');
+    insert.run('working', 'scan', 'running', null, 1);
+    insert.run('silent', 'scan', 'running', null, 0);
+    db.close();
+    const rows = new Map(new SubagentService().list(workspace).map((row) => [row.id, row]));
+    expect(rows.get('working')).toMatchObject({ status: 'running', output: null, responseStarted: 1 });
+    expect(rows.get('silent')).toMatchObject({ status: 'running', output: null, responseStarted: 0 });
+  });
+
+  it('reads a legacy registry without the column as not-yet-responded instead of failing', async () => {
+    const { workspace, db } = await createRegistry();
+    db.prepare(`INSERT INTO subagents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run('legacy', 'task', null, null, 'running', 'final reply', null, null, null, 1, 1);
+    db.close();
+    const service = new SubagentService();
+    expect(service.list(workspace)).toEqual([
+      expect.objectContaining({ id: 'legacy', status: 'running', output: 'final reply', responseStarted: 0 }),
+    ]);
+  });
+
+  it('projects optional Bash state without guessing from old rows or invalid metadata', async () => {
+    const { workspace, db } = await createRegistry();
+    db.exec('ALTER TABLE subagents ADD COLUMN bashState TEXT');
+    const insert = db.prepare('INSERT INTO subagents(id, task, status, output, bashState, createdAt, updatedAt) VALUES(?,?,?,?,?,1,2)');
+    insert.run('waiting', 'scan', 'running', 'final reply', JSON.stringify({ phase: 'waiting-for-bash' }));
+    const bashState = { reason: 'background-bash-timeout', replyCompleted: true, jobs: [{ id: 'bash-1', label: 'scan', stopConfirmed: false }] };
+    insert.run('timeout', 'scan', 'error', 'final reply', JSON.stringify(bashState));
+    insert.run('invalid', 'scan', 'error', 'final reply', '{');
+    db.close();
+    const rows = new Map(new SubagentService().list(workspace).map((row) => [row.id, row]));
+    expect(rows.get('waiting')).toMatchObject({ status: 'running', output: 'final reply', bashState: { phase: 'waiting-for-bash' } });
+    expect(rows.get('timeout')).toMatchObject({ status: 'error', output: 'final reply', bashState });
+    expect(rows.get('invalid')).not.toHaveProperty('bashState');
   });
 
   it('scopes the list to one session and its descendants when an owner session path is given', async () => {
@@ -143,12 +181,34 @@ describe('SubagentService', () => {
     expect(service.list(workspace).map((row) => row.id)).toEqual(['sa-old', 'sa-b1', 'sa-a2', 'sa-a1']);
   });
 
+  it('looks up an owned child beyond the list limit without borrowing another parent or a task twin', async () => {
+    const { workspace, db } = await createRegistry();
+    db.exec('ALTER TABLE subagents ADD COLUMN parentId TEXT');
+    db.exec('ALTER TABLE subagents ADD COLUMN sessionPath TEXT');
+    const insert = db.prepare('INSERT INTO subagents (id, task, status, parentId, sessionPath, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    insert.run('target', 'same task', 'running', 'sid-a', '/s/target.jsonl', 1, 1);
+    insert.run('twin', 'same task', 'done', 'sid-b', '/s/twin.jsonl', 2, 2);
+    for (let i = 0; i < 60; i++) insert.run(`newer-${i}`, 'other', 'done', 'sid-b', null, i + 3, i + 3);
+    db.close();
+    const service = new SubagentService();
+    const parentA = 'C:/sessions/2026-10-04T00-00-00-000Z_sid-a.jsonl';
+    const parentB = 'C:/sessions/2026-10-04T00-00-00-000Z_sid-b.jsonl';
+    expect(service.list(workspace).some((row) => row.id === 'target')).toBe(false);
+    expect(service.lookup(workspace, 'target', parentA)).toMatchObject({ kind: 'found', item: { id: 'target', status: 'running', sessionPath: '/s/target.jsonl' } });
+    expect(service.lookup(workspace, 'target', parentB)).toEqual({ kind: 'not-found' });
+    expect(service.lookup(workspace, 'twin', parentA)).toEqual({ kind: 'not-found' });
+    expect(service.lookup(workspace, 'missing', parentA)).toEqual({ kind: 'not-found' });
+  });
+
   it('returns nothing for an owner session when the registry predates parentId', async () => {
     const { workspace, db } = await createRegistry();
     db.prepare(`INSERT INTO subagents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run('older', 'first task', null, 'm1', 'done', 'result', null, 0, null, 1, 2);
     db.close();
-    expect(new SubagentService().list(workspace, 'C:/s/2026-10-04T00-00-00-000Z_sid-a.jsonl')).toEqual([]);
+    const service = new SubagentService();
+    const parent = 'C:/s/2026-10-04T00-00-00-000Z_sid-a.jsonl';
+    expect(service.list(workspace, parent)).toEqual([]);
+    expect(service.lookup(workspace, 'older', parent)).toEqual({ kind: 'not-found' });
   });
 
   it('returns an individual transcript and remains compatible with registries lacking that column', async () => {
@@ -267,21 +327,22 @@ describe('SubagentService catalog IPC', () => {
     expect(deliverToChild).not.toHaveBeenCalled();
   });
 
-  it('rejects interrupt when sessionPath is not in the parent catalog', () => {
-    expect(() => service.interruptChild(workspace, parentPath, '/stranger.jsonl'))
-      .toThrow('sessionPath is not in the parent catalog');
+  // 唤醒 / 打断现在与迁移事务共用会话族 lease，因此是异步的（同族迁移期间会被拒或等待）。
+  it('rejects interrupt when sessionPath is not in the parent catalog', async () => {
+    await expect(service.interruptChild(workspace, parentPath, '/stranger.jsonl'))
+      .rejects.toThrow('sessionPath is not in the parent catalog');
     expect(interruptResidentChild).not.toHaveBeenCalled();
   });
 
-  it('interrupts a resident child and no-ops when none is resident', () => {
+  it('interrupts a resident child and no-ops when none is resident', async () => {
     stubActivation(sa1Path, 'sa-1');
-    service.interruptChild(workspace, parentPath, sa1Path);
+    await service.interruptChild(workspace, parentPath, sa1Path);
     expect(authorizeParent).toHaveBeenCalled();
     expect(interruptResidentChild).toHaveBeenCalledWith('sa-1');
 
     vi.mocked(getActivationBySessionPath).mockReturnValue(undefined);
     vi.mocked(interruptResidentChild).mockClear();
-    expect(() => service.interruptChild(workspace, parentPath, sa1Path)).not.toThrow();
+    await expect(service.interruptChild(workspace, parentPath, sa1Path)).resolves.toBeUndefined();
     expect(interruptResidentChild).not.toHaveBeenCalled();
   });
 });

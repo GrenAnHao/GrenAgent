@@ -19,20 +19,20 @@ import { exposeActions, exposeData, installBridge } from '../stubs'
 installBridge({})
 
 const CONDITION = '按用户给的 M1→M4 流程推进客服模块：每期切分支 feat/kefu-m<N>、写计划、实现、单测、笔记、验收证据，然后进入下一期。'
-const round = (n: number, timestamp = n): AgentMessage =>
+const round = (n: number, timestamp = n, withBatch = false): AgentMessage =>
   ({
     role: 'custom',
     customType: 'goal-round',
     content: buildGoalRoundPrompt({ condition: CONDITION, round: n, maxRounds: 256 }),
     display: false,
-    details: { goalId: 'g1', revision: n + 1, round: n },
+    details: { goalId: 'g1', revision: n + 1, round: n, ...(withBatch ? { runNumber: 2, runRound: n - 3 } : {}) },
     timestamp,
   }) as unknown as AgentMessage
 
 const history: AgentMessage[] = [
   round(4),
   { role: 'custom', customType: 'hidden-context', content: '# 不该显示\n- 别的 display:false 消息', display: false } as unknown as AgentMessage,
-  round(5),
+  round(5, 5, true),
 ]
 
 const context = {
@@ -50,7 +50,7 @@ exposeData({ condition: CONDITION })
 function Timeline(): ReactElement {
   const [state, setState] = useState(() => ({ ...initialAgentState(), messages: messagesFromAgent(history) }))
   pushLive = (n) => {
-    const message = round(n, 1000 + n)
+    const message = round(n, 1000 + n, true)
     setState((prev) =>
       applyEvent(applyEvent(prev, { type: 'message_start', message } as unknown as AgentEvent), {
         type: 'message_end',

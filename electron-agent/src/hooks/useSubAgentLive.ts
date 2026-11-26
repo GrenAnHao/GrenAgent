@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useSubAgentLiveStore, selectSubAgentById } from '../stores/subagentLiveStore';
+import { useSubAgentLiveStore, selectSubAgentById, observationKey } from '../stores/subagentLiveStore';
 
 export interface SubAgentLive {
   model: string | null;
@@ -27,15 +27,20 @@ export function useSubAgentLive(
   workspace: string,
   agentId: string | null,
   running: boolean,
+  parentSessionPath?: string | null,
 ): SubAgentLive {
   const startPolling = useSubAgentLiveStore((s) => s.startPolling);
+  const watch = useSubAgentLiveStore((s) => s.watch);
 
   useEffect(() => {
     if (!workspace || !running) return;
+    if (agentId && parentSessionPath) return watch(workspace, parentSessionPath, agentId);
     return startPolling(workspace);
-  }, [workspace, running, startPolling]);
+  }, [workspace, running, agentId, parentSessionPath, startPolling, watch]);
 
-  const item = useSubAgentLiveStore(selectSubAgentById(workspace, agentId));
+  const item = useSubAgentLiveStore(parentSessionPath && agentId
+    ? (s) => s.observations.get(observationKey(workspace, parentSessionPath, agentId))?.item
+    : selectSubAgentById(workspace, agentId));
 
   const createdAt = item?.createdAt;
   return {

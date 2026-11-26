@@ -8,6 +8,7 @@ import {
   createAgentSessionServices,
   getAgentDir,
   SessionManager,
+  type AgentSessionEvent,
   type ExtensionUIContext,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
@@ -20,6 +21,9 @@ import {
   type InboxSession,
 } from "./inbox.js";
 import { jobs } from "../jobs/service.js";
+import type { JobSnapshot } from "../jobs/types.js";
+import type { BackgroundBashTimeout, SubagentBashState } from "./background-bash.js";
+import type { SubAgentRegistry } from "./registry.js";
 import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { attachSessionCwd } from "../_shared/session-cwd.js";
@@ -37,6 +41,7 @@ import { __resetLeakOwnerForTest, leakedErrorText, onLeakedError, runAsChild } f
 import { abortQuietly, errorText, Teardown } from "./teardown.js";
 import { formatSettlementNotice, type SettlementNotice } from "./settlement-notice.js";
 import { isResumableMeta, lastSubagentMeta } from "./subagent-meta.js";
+import { effectiveProjectRoot, transferredLeafToRestore } from "../_shared/session-project-transfer.js";
 import {
   __resetChildRunsForTest,
   hasRunningChildren,
@@ -51,6 +56,7 @@ export interface AgentSessionLike extends InboxSession {
   abort: () => Promise<unknown> | unknown;
   dispose: () => void;
   waitForIdle: () => Promise<void>;
+  subscribe?: (listener: (event: AgentSessionEvent) => void) => () => void;
   sendCustomMessage?: (
     msg: { customType: string; content: string; display: boolean; details: Record<string, unknown> },
     opts: { triggerTurn: boolean; deliverAs?: "steer" | "followUp" },
@@ -67,6 +73,8 @@ export interface Activation {
   workspace: string;
   mode: "continuable";
   session: AgentSessionLike;
+  /** In-process continuable child: its Bash runner can attest process-tree exit. */
+  tracksBashExit: boolean;
   inbox: SubagentInbox;
   announced: boolean;
   ownedChildren: Set<string>;
@@ -87,7 +95,11 @@ export type ActivationSettledInfo = {
   sessionPath: string;
   /** 按 error 结算时的原因（漏网错误、消息没送到、结算监视出错）。 */
   diagnostic?: string;
+  bashTimeout?: BackgroundBashTimeout;
 };
+
+type BashTimeout = { job: JobSnapshot; confirmed?: boolean };
+type ResumeLink = { senderActivationId?: string; registry?: SubAgentRegistry };
 
 type ActivationRecord = Activation & {
   poked: boolean;
@@ -99,12 +111,17 @@ type ActivationRecord = Activation & {
   unregisterApproval?: () => void;
   wakers: Array<() => void>;
   onSettled?: (info: ActivationSettledInfo) => void;
+  onBashPhase?: (state: SubagentBashState | null, reply?: string) => void;
   deliverFallback?: (notice: SettlementNotice) => void;
   /** 结算后会话留着（驻留池），续聊时不必冷恢复。只给进程内会话开，worker 结算即退出。 */
   keepResident: boolean;
   /** 这一次激活里出过漏网错误或消息没送到：结算时按 error，诊断写这一句（leak-owner.ts）。 */
   failure?: string;
   offLeak?: () => void;
+  offRound?: () => void;
+  round?: { finalReply: boolean; completed: boolean };
+  waitingForBashSince?: number;
+  bashTimeouts?: Map<string, BashTimeout>;
 };
 
 // ---- 驻留：结算后的进程内子会话先不销毁，最多 SUBAGENT_MAX_RESIDENT 个（默认 8），超出按最久未用销毁（重新设计第 6 节）。
@@ -174,13 +191,196 @@ export function disposeResident(childId: string): void {
   disposeQuietly(r.session);
 }
 
+// ---- retiring（迁移 drain 的隔离区） ----
+//
+// 迁移 drain 先从驻留池摘下会话，但如果 dispose 确认失败（worker 超时 / 报错），旧写者可能仍在写
+// 同一份 JSONL。此时**不能**把「不在驻留池」当成「已经停」：下一次 preview / drain 会误判空闲。
+// retiring 表保留这些未证明收口的会话，直到 dispose ack 或进程退出可证明关闭才清；
+// `residentChildIds` / 活动检查 / drain 都会看见它们（fail-closed）。
+
+interface RetiringResident {
+  childId: string;
+  sessionPath: string;
+  session: AgentSessionLike;
+  /** 进行中 / 已完成的收口确认；true 之后才允许从 retiring 清掉。 */
+  ack: Promise<boolean>;
+  /** ack 的最终结果（迟到回执也会在这里落下）。 */
+  confirmed?: boolean;
+  diagnostic?: string;
+}
+
+const retiring = new Map<string, RetiringResident>();
+
+function watchRetiring(entry: RetiringResident): void {
+  void entry.ack.then(
+    (confirmed) => {
+      entry.confirmed = confirmed;
+    },
+    () => {
+      entry.confirmed = false;
+    },
+  );
+}
+
+function retiringConfirmed(entry: RetiringResident): boolean {
+  // worker 代理的只读事实（ack 或进程退出）优先；否则看 ack 结果是否已经落下。
+  const session = entry.session as AgentSessionLike & { disposalConfirmed?: boolean };
+  if (typeof session.disposalConfirmed === "boolean" && session.disposalConfirmed) return true;
+  return entry.confirmed === true;
+}
+
+/** 该 id 是否在迁移隔离区（旧写者尚未证明停止）。 */
+export function isResidentRetiring(childId: string): boolean {
+  return retiring.has(childId);
+}
+
+export function retiringResidentIds(): string[] {
+  return [...retiring.keys()];
+}
+
+/** 已经被确认、可以安全移出隔离区的 id（清表用；不影响调用方的 busy 判断顺序）。 */
+function settleRetiring(): void {
+  for (const [id, entry] of [...retiring]) {
+    if (retiringConfirmed(entry)) retiring.delete(id);
+  }
+}
+
+/** 测试 / 诊断：隔离区里的会话是否仍有未完成的写者（true 表示不能迁移）。 */
+export function hasUnsettledRetiringResident(childId: string): boolean {
+  settleRetiring();
+  return retiring.has(childId);
+}
+
+export interface ResidentDisposeResult {
+  /** true 表示已证明这个子会话不再写 JSONL（进程内 dispose 完成 / worker 回执或退出）。 */
+  confirmed: boolean;
+  /** confirmed=false 时的诊断（超时、worker 报错等）。 */
+  diagnostic?: string;
+  /** 仍在隔离区、下一次迁移仍会拒绝的 id。 */
+  retiring?: boolean;
+}
+
+/**
+ * 迁移 drain 专用：把驻留子会话收口，并**等它真的不再写会话**。
+ *
+ * 与 `disposeResident` 的差别：
+ * - 等待：进程内会话的 dispose 同步关闭文件句柄；worker 后端是代理对象（`dispose()` 只发 RPC），
+ *   迁移随后要改同一份 JSONL，必须等 `disposeAndWait` 的确认；
+ * - 隔离：确认失败时把会话留在 retiring 表（不从「不知道」直接变成「空闲」），
+ *   后续 preview / drain / 活动检查都会继续判忙，直到迟到的 ack / 进程退出。
+ *
+ * 不写 `subagent_meta.tornDown`、不发结算通知、不改终态，也不会碰其他 resident。
+ */
+export async function disposeResidentForTransfer(
+  childId: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<ResidentDisposeResult> {
+  // 已在隔离区：只有确认事实成立才放行；否则继续拒绝（第二次 drain 不能因为「找不到 resident」就默认成功）。
+  const quarantined = retiring.get(childId);
+  if (quarantined) {
+    settleRetiring();
+    if (!retiring.has(childId)) return { confirmed: true };
+    // 进程内会话没有异步回执：可以再试一次同步 dispose，成功即证明句柄已关。
+    if (typeof (quarantined.session as { disposeAndWait?: unknown }).disposeAndWait !== "function") {
+      try {
+        quarantined.session.dispose();
+        retiring.delete(childId);
+        return { confirmed: true };
+      } catch (error) {
+        quarantined.diagnostic = `in-process dispose failed: ${errorText(error)}`;
+      }
+    }
+    return {
+      confirmed: false,
+      diagnostic: quarantined.diagnostic ?? "previous dispose is still unconfirmed",
+      retiring: true,
+    };
+  }
+
+  const resident = residents.get(childId);
+  if (!resident) return { confirmed: true };
+  // 先从驻留池摘掉：即使随后确认失败，也不会有人再复用这个旧会话去写。
+  residents.delete(childId);
+  const session = resident.session as AgentSessionLike & {
+    disposeAndWait?: (timeoutMs?: number) => Promise<{ confirmed: boolean }>;
+    disposalConfirmed?: boolean;
+  };
+
+  if (typeof session.disposeAndWait === "function") {
+    let ack: Promise<boolean>;
+    try {
+      ack = Promise.resolve(session.disposeAndWait(opts.timeoutMs)).then(
+        (result) => result?.confirmed === true,
+        () => false,
+      );
+    } catch (error) {
+      ack = Promise.resolve(false);
+      retiring.set(childId, {
+        childId,
+        sessionPath: resident.sessionPath,
+        session,
+        ack,
+        confirmed: false,
+        diagnostic: `worker dispose threw: ${errorText(error)}`,
+      });
+      return { confirmed: false, diagnostic: `worker dispose threw: ${errorText(error)}`, retiring: true };
+    }
+    const entry: RetiringResident = { childId, sessionPath: resident.sessionPath, session, ack };
+    watchRetiring(entry);
+    // 先登记再 await：即使这里超时返回 false，迟到的 ack 仍能把隔离区收敛掉。
+    retiring.set(childId, entry);
+    const confirmed = await ack;
+    if (confirmed) {
+      retiring.delete(childId);
+      return { confirmed: true };
+    }
+    entry.diagnostic = "worker did not acknowledge dispose before timeout";
+    return { confirmed: false, diagnostic: entry.diagnostic, retiring: true };
+  }
+
+  // 进程内会话：dispose 同步关句柄，但抛错同样不能假装成功。
+  try {
+    session.dispose();
+    return { confirmed: true };
+  } catch (error) {
+    const diagnostic = `in-process dispose failed: ${errorText(error)}`;
+    retiring.set(childId, {
+      childId,
+      sessionPath: resident.sessionPath,
+      session,
+      ack: Promise.resolve(false),
+      confirmed: false,
+      diagnostic,
+    });
+    return { confirmed: false, diagnostic, retiring: true };
+  }
+}
+
+/**
+ * 驻留会话此刻看起来是否已结算空闲（迁移 drain 前的最后一道检查）。
+ * 已登记但尚未证明收口的旧写者（隔离区）返回 false，不让它被当成 idle。
+ */
+export function residentIsIdle(childId: string): boolean | undefined {
+  if (hasUnsettledRetiringResident(childId)) return false;
+  const resident = residents.get(childId);
+  if (!resident) return undefined;
+  const session = resident.session as AgentSessionLike & { isIdle?: unknown };
+  if (typeof session.isIdle === "boolean") return session.isIdle && session.isStreaming !== true;
+  return session.isStreaming !== true;
+}
+
 /** 父会话要换走 / 关掉，或整个工作区要释放：把它们的驻留会话销毁。 */
 export function disposeResidentsWhere(match: (r: { parentSessionPath: string; workspace: string }) => boolean): void {
   for (const r of [...residents.values()]) if (match(r)) disposeResident(r.childId);
 }
 
+/**
+ * 驻留池里的 id + 迁移隔离区里尚未证明停止的 id。
+ * 隔离中的会话已经不可被续聊复用，但对「能不能安全迁移」仍是活写者，必须被看见。
+ */
 export function residentChildIds(): string[] {
-  return [...residents.keys()];
+  settleRetiring();
+  return [...new Set([...residents.keys(), ...retiring.keys()])];
 }
 
 type IdleAwareSession = AgentSessionLike & { isIdle?: unknown };
@@ -269,6 +469,7 @@ function isSessionIdle(session: AgentSessionLike): boolean {
 function poke(act: ActivationRecord): void {
   act.poked = true;
   if (isSessionIdle(act.session)) act.mustWaitForBusy = true;
+  wake(act);
 }
 
 function wake(act: ActivationRecord): void {
@@ -328,7 +529,66 @@ onChildRunEvent((event) => {
 });
 
 function hasLiveWork(act: ActivationRecord): boolean {
-  return act.ownedChildren.size > 0 || jobs.hasLive(act.childId) || hasRunningChildren(act.childId);
+  return act.ownedChildren.size > 0 || hasBlockingBash(act) || hasRunningChildren(act.childId);
+}
+
+function hasBlockingBash(act: ActivationRecord): boolean {
+  if (!act.bashTimeouts?.size) return jobs.hasLive(act.childId);
+  if ([...act.bashTimeouts.values()].some((timeout) => timeout.confirmed === undefined)) return true;
+  return jobs.liveWithActivity(act.childId).some((job) => act.bashTimeouts?.get(job.id)?.job.startedAt !== job.startedAt);
+}
+
+function updateBashPhase(act: ActivationRecord, waiting: boolean): void {
+  if (waiting === (act.waitingForBashSince !== undefined)) return;
+  act.waitingForBashSince = waiting ? Date.now() : undefined;
+  try {
+    const reply = waiting ? extractAssistantOutput(act.session.messages as Parameters<typeof extractAssistantOutput>[0], {
+      skipPrefix: inheritedSkipPrefix(act),
+    }).output : undefined;
+    act.onBashPhase?.(waiting ? { phase: "waiting-for-bash" } : null, reply);
+  } catch (error) {
+    console.error(`[multi-agent] sub-agent ${act.childId}: recording Bash wait phase failed`, error);
+  }
+}
+
+const BASH_STOP_CONFIRM_MS = 10_000;
+
+/** 只有本轮真的正常结束并进入等待，才用 job 进展而不是会话心跳。 */
+export function activationIsWaitingForBash(childId: string): boolean {
+  const act = activations.get(childId);
+  return act !== undefined && act.waitingForBashSince !== undefined &&
+    !act.failure && !act.inbox.closing && !act.poked && !act.inbox.hasPending && isSessionIdle(act.session);
+}
+
+/** The generic session reaper must not race the owner-scoped Bash drain policy. */
+export function reapWaitingBash(childId: string, thresholdMs: number): boolean {
+  const act = activations.get(childId);
+  if (!act || act.waitingForBashSince === undefined) return false;
+  void childLock.run(childId, async () => {
+    const waitingSince = act.waitingForBashSince;
+    if (waitingSince === undefined || activations.get(childId) !== act || !activationIsWaitingForBash(childId)) return;
+    const now = Date.now();
+    for (const job of jobs.liveWithActivity(childId)) {
+      if (job.status !== "running" || now - Math.max(waitingSince, job.lastActivityAt) < thresholdMs) continue;
+      if (act.bashTimeouts?.get(job.id)?.job.startedAt === job.startedAt) continue;
+      const stop = jobs.stopForSubagentTimeout(job.id, childId, job.startedAt);
+      if (!stop) continue;
+      const timeout: BashTimeout = { job };
+      (act.bashTimeouts ??= new Map()).set(job.id, timeout);
+      const finish = (confirmed: boolean) => {
+        if (timeout.confirmed !== undefined) return;
+        clearTimeout(timer);
+        timeout.confirmed = confirmed;
+        wake(act);
+      };
+      const timer = setTimeout(() => finish(false), BASH_STOP_CONFIRM_MS);
+      timer.unref?.();
+      void stop.confirmed.then(finish, () => finish(false));
+    }
+  }).catch((error: unknown) => {
+    console.error(`[multi-agent] sub-agent ${childId}: checking background command timeout failed`, error);
+  });
+  return true;
 }
 
 /**
@@ -352,6 +612,7 @@ function notifyParent(act: ActivationRecord, notice: SettlementNotice): void {
 
 /** 激活结束时撤掉它登记的东西。每一步单独收，失败记进 teardown，后面照做。 */
 function unlinkFromParent(act: ActivationRecord, teardown: Teardown): void {
+  teardown.step("stop round tracking", () => act.offRound?.());
   teardown.step("stop leak attribution", () => act.offLeak?.());
   act.offLeak = undefined;
   teardown.step("unregister session host", () => act.unregisterHost?.());
@@ -387,7 +648,7 @@ async function waitUntilBusyOrClosing(act: ActivationRecord, epoch: number): Pro
 function startWatch(act: ActivationRecord): void {
   if (act.watching) return;
   act.watching = true;
-  if (act.poked) act.mustWaitForBusy = true;
+  if (act.poked && !act.round) act.mustWaitForBusy = true;
   abortIfFailed(act);
   const epoch = watchEpoch;
   // 监视本身出错（等空闲被拒、收尾抛错）：不能让这个子代理一直挂在「运行中」，按 error 强制结算。
@@ -423,7 +684,7 @@ async function forceSettle(act: ActivationRecord, diagnostic: string): Promise<v
  */
 async function settleNow(
   act: ActivationRecord,
-  outcome: { stopReason: SubagentStopReason; output: string; diagnostic?: string },
+  outcome: Omit<ActivationSettledInfo, "childId" | "sessionPath">,
 ): Promise<void> {
   const teardown = new Teardown(act.childId);
   await teardown.stepAsync("release session", () =>
@@ -433,34 +694,29 @@ async function settleNow(
   );
   activations.delete(act.childId);
   unlinkFromParent(act, teardown);
+  teardown.step("record result", () =>
+    act.onSettled?.({ childId: act.childId, sessionPath: act.sessionPath, ...outcome }),
+  );
   if (act.announced) {
     teardown.step("notify parent", () =>
       notifyParent(
         act,
         formatSettlementNotice({
           childId: act.childId,
-          stopReason: outcome.stopReason,
-          output: outcome.output,
+          ...outcome,
           sessionPath: act.sessionPath,
-          ...(outcome.diagnostic ? { diagnostic: outcome.diagnostic } : {}),
         }),
       ),
     );
     teardown.step("mark settled", () =>
-      markChildSettled({ childId: act.childId, parentSessionId: act.parentSessionId, stopReason: outcome.stopReason }),
+      markChildSettled({
+        childId: act.childId, parentSessionId: act.parentSessionId, stopReason: outcome.stopReason,
+        ...(outcome.bashTimeout ? { reason: outcome.bashTimeout.reason } : {}),
+      }),
     );
   } else {
     teardown.step("mark gone", () => markChildGone(act.childId));
   }
-  teardown.step("record result", () =>
-    act.onSettled?.({
-      childId: act.childId,
-      stopReason: outcome.stopReason,
-      output: outcome.output,
-      sessionPath: act.sessionPath,
-      ...(outcome.diagnostic ? { diagnostic: outcome.diagnostic } : {}),
-    }),
-  );
   teardown.report();
 }
 
@@ -484,18 +740,30 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
       }
       // 出过错的：中断后排着的消息不会再被处理（SDK 的 abort 不清队列），不再等它们，直接结算。
       if (act.inbox.hasPending && !act.failure) return false;
-      if (hasLiveWork(act)) return "wait" as const;
       if (act.poked && !act.failure) {
         act.poked = false;
         return false;
       }
+      const waiting = !act.failure && act.round?.completed === true && hasBlockingBash(act);
+      updateBashPhase(act, waiting);
+      if (hasLiveWork(act)) return "wait" as const;
       const { output, stopReason } = extractAssistantOutput(
         act.session.messages as Parameters<typeof extractAssistantOutput>[0],
         { skipPrefix: inheritedSkipPrefix(act) },
       );
+      const bashTimeout: BackgroundBashTimeout | undefined =
+        stopReason === "completed" && act.round?.completed && act.bashTimeouts?.size
+          ? {
+              reason: "background-bash-timeout", replyCompleted: true,
+              jobs: [...act.bashTimeouts.values()].map(({ job, confirmed }) => ({
+                id: job.id, label: job.label, stopConfirmed: confirmed === true,
+              })),
+            }
+          : undefined;
       await settleNow(
         act,
-        act.failure ? { stopReason: "error", output, diagnostic: failureDiagnostic(act, act.failure) } : { stopReason, output },
+        act.failure ? { stopReason: "error", output, diagnostic: failureDiagnostic(act, act.failure) }
+          : bashTimeout ? { stopReason: "error", output, bashTimeout } : { stopReason, output },
       );
       return true;
     });
@@ -505,6 +773,8 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
         act.wakers.push(resolve);
         if (
           activations.get(act.childId) !== act ||
+          !isSessionIdle(act.session) ||
+          (act.waitingForBashSince !== undefined && !hasBlockingBash(act)) ||
           !hasLiveWork(act)
         ) {
           wake(act);
@@ -520,12 +790,7 @@ export function installActivation(input: {
   parentSessionId: string;
   parentSessionPath: string;
   workspace: string;
-  session: InboxSession & {
-    messages: unknown[];
-    abort: () => Promise<unknown> | unknown;
-    dispose: () => void;
-    waitForIdle: () => Promise<void>;
-  };
+  session: AgentSessionLike;
   sessionManager?: {
     appendCustomEntry: (type: string, data: unknown) => void;
     getEntries: () => unknown[];
@@ -535,6 +800,7 @@ export function installActivation(input: {
   parentActivationId?: string;
   /** Natural first-idle settlement only. cancel / rollback must not call this. */
   onSettled?: (info: ActivationSettledInfo) => void;
+  onBashPhase?: (state: SubagentBashState | null, reply?: string) => void;
   /** 父会话没有登记宿主（CLI、worker 进程里的父会话）时，结算通知交给它（发起 spawn 的会话的扩展 API）。 */
   deliverFallback?: (notice: SettlementNotice) => void;
   /** 结算后留在驻留池（进程内会话）。默认 false。 */
@@ -556,6 +822,7 @@ export function installActivation(input: {
     workspace: input.workspace,
     mode: "continuable",
     session: input.session,
+    tracksBashExit: input.keepResident === true,
     sessionManager: input.sessionManager,
     routingMode,
     // 续聊 / 驻留之后的每一轮都在这个域里起，不跟着投递方（父会话）当下的 ALS。
@@ -581,6 +848,7 @@ export function installActivation(input: {
     skipSettle: false,
     wakers: [],
     onSettled: input.onSettled,
+    onBashPhase: input.onBashPhase,
     deliverFallback: input.deliverFallback,
     keepResident: input.keepResident === true,
   };
@@ -597,6 +865,22 @@ export function installActivation(input: {
   }
   // 激活期间这个子代理的漏网错误：中断这一轮，结算时按 error（leak-owner.ts）。
   act.offLeak = onLeakedError(act.childId, (error) => failActivation(act, leakedErrorText(error)));
+  if (act.keepResident) {
+    act.offRound = act.session.subscribe?.((event) => {
+      if (event.type === "agent_start") {
+        act.round = { finalReply: false, completed: false };
+        act.mustWaitForBusy = false;
+        updateBashPhase(act, false);
+        wake(act);
+      } else if (event.type === "agent_end" && act.round) {
+        const last = event.messages.at(-1);
+        act.round.finalReply = !event.willRetry && last?.role === "assistant" && last.stopReason === "stop";
+      } else if (event.type === "agent_settled" && act.round) {
+        act.round.completed = !event.aborted && act.round.finalReply;
+        wake(act);
+      }
+    });
+  }
   // 作为父会话被唤起（孙代理的结算通知、send_message）时，这一轮算它自己的。
   act.unregisterHost = registerParentSessionHost({
     sessionId: act.childId,
@@ -801,6 +1085,38 @@ function sessionCwd(sessionManager: unknown): string {
   return process.cwd();
 }
 
+/**
+ * 子会话的原始项目目录（不是工具 cwd）。
+ *
+ * 迁移只改 `subagent_meta.workspace` 与历史 cwd 段，会话头 cwd 刻意保持原样（物理身份不变）。
+ * 冷恢复的项目归属必须跟着 meta 走，否则又会回到源项目：审批档、模式、资源域都按它算。
+ */
+function transferredProjectRoot(entries: readonly unknown[], headerCwd: string): string | undefined {
+  const root = effectiveProjectRoot(entries, headerCwd);
+  return root === headerCwd ? undefined : root;
+}
+
+/**
+ * 迁移会话的确认位置：迁移在历史尾部追加了自定义行，物理 leaf 变成了追加行。
+ * 只有在迁移之后还没有新活动时才回到 metadata.leafId；已经续聊过的沿用当前 leaf。
+ * 调用方拿到的 sessionManager 必须支持 getEntry / branch / resetLeaf（SDK 的都有）。
+ */
+function restoreTransferredLeaf(sessionManager: unknown, entries: readonly unknown[]): void {
+  const target = transferredLeafToRestore(entries);
+  if (!target?.restore) return;
+  const sm = sessionManager as {
+    getEntry?: (id: string) => unknown;
+    branch?: (id: string) => void;
+    resetLeaf?: () => void;
+  };
+  try {
+    if (target.leafId === null) sm.resetLeaf?.();
+    else if (target.leafId && sm.getEntry?.(target.leafId)) sm.branch?.(target.leafId);
+  } catch {
+    /* 位置恢复失败不阻断冷恢复：沿用物理 leaf，下一次用户操作仍可切回 */
+  }
+}
+
 function metaString(data: Record<string, unknown>, key: string): string | undefined {
   const value = data[key];
   return typeof value === "string" && value.trim() ? value : undefined;
@@ -882,21 +1198,28 @@ export async function openResumedChildSession(
   opened?: ReturnType<typeof SessionManager.open>,
 ): Promise<ResumedChildSession> {
   const sessionManager = opened ?? SessionManager.open(sessionPath);
+  const entries = sessionManager.getEntries();
+  // 迁移过的子会话：先把用户确认的 leaf 恢复回来，再决定域／快照；之后的追加不会改写旧历史。
+  restoreTransferredLeaf(sessionManager, entries);
+  // 迁移记录是项目归属的权威；未迁移会话仍按 subagent_meta.workspace / 会话头 cwd（原行为）。
   const cwd = sessionCwd(sessionManager);
-  const meta = lastSubagentMeta(sessionManager.getEntries()) ?? {};
+  const meta = lastSubagentMeta(entries) ?? {};
+  const transferRoot = transferredProjectRoot(entries, cwd);
   // 域按会话自己落的标记重建（旧会话没有标记 → ordinary），不看父会话当下的模式。
   const routingMode = routingModeFromMeta(meta);
   // SDK 扩展初始化与后续新轮都在这个子会话自己的域里跑：父会话可能已经切了模式、换了 ALS，
   // 而子会话的选模来源必须还是它启动时那一份。
   const domain = routingWorkspaceContext(routingMode, {
-    workspace: metaString(meta, "workspace") ?? cwd,
+    workspace: transferRoot ?? metaString(meta, "workspace") ?? cwd,
     cwd,
   });
   const modelRuntime = sharedModelRuntime();
   const budgetAgentDir = getAgentDir();
+  // 资源／规则／技能按项目根加载：迁移过的子会话必须从目标项目取，而不是仍带源编码的会话头 cwd。
+  // 未迁移会话行为不变（仍用会话头 cwd）。
   const services = await runInWorkspace(domain, () =>
     createAgentSessionServices({
-      cwd,
+      cwd: transferRoot ?? cwd,
       agentDir: budgetAgentDir,
       ...(modelRuntime ? { modelRuntime } : {}),
     }),
@@ -926,6 +1249,8 @@ export async function openResumedChildSession(
       ...(resumedModel ? { model: resumedModel } : {}),
     }),
   );
+  // 迁移过的子会话：资源按目标项目加载（见上面的 services cwd），工具 cwd 仍按最后一条记录恢复；
+  // 记录在迁移之前时由共享 helper 落到目标根，不会把旧项目子目录重新带回来。
   attachModelCompactionControl(session, cwd, budgetAgentDir);
   attachUsageEntryTracking(session,getAgentDir());
   installToolRefreshBatching(session);
@@ -1036,7 +1361,7 @@ export function coldResumeAndDeliver(
   sessionPath: string,
   text: string,
   delivery: Delivery,
-  link: { senderActivationId?: string } = {},
+  link: ResumeLink = {},
 ): Promise<void> {
   // 重建会话、投递、开始监视都算这个子代理的（漏网错误归属，leak-owner.ts）。
   return childLock.run(childId, () => runAsChild(childId, () => resumeAndDeliver(childId, sessionPath, text, delivery, link)));
@@ -1047,8 +1372,16 @@ async function resumeAndDeliver(
   sessionPath: string,
   text: string,
   delivery: Delivery,
-  link: { senderActivationId?: string },
+  link: ResumeLink,
 ): Promise<void> {
+  const registry = link.registry;
+  const accounting = registry?.get(childId) ? {
+    onBashPhase: (state: SubagentBashState | null, reply?: string) => registry.setBashPhase(childId, state, reply),
+    onSettled: (info: ActivationSettledInfo) => {
+      const status = info.stopReason === "aborted" ? "cancelled" : info.stopReason === "error" ? "error" : "done";
+      registry.finish(childId, { status, output: info.output, error: info.diagnostic, exitCode: status === "done" ? 0 : -1, bashState: info.bashTimeout });
+    },
+  } : undefined;
   const parentLink =
     link.senderActivationId && activations.has(link.senderActivationId) ? { parentActivationId: link.senderActivationId } : {};
   const warm = residents.get(childId);
@@ -1069,8 +1402,10 @@ async function resumeAndDeliver(
       depth: warm.depth,
       routingMode: warm.routingMode,
       keepResident: true,
+      ...accounting,
       ...parentLink,
     });
+    if (accounting) registry?.finish(childId, { status: "running" });
     act.inbox.deliver(text, delivery);
     const record = activations.get(childId);
     if (record) poke(record);
@@ -1100,11 +1435,13 @@ async function resumeAndDeliver(
     announced: false,
     routingMode: resumed.routingMode,
     keepResident: meta.backend !== "worker",
+    ...(meta.backend === "worker" ? {} : accounting),
     depth: typeof meta.depth === "number" ? meta.depth : 0,
     ...(link.senderActivationId && activations.has(link.senderActivationId)
       ? { parentActivationId: link.senderActivationId }
       : {}),
   });
+  if (meta.backend !== "worker" && accounting) registry?.finish(childId, { status: "running" });
   act.inbox.deliver(text, delivery);
   const record = activations.get(childId);
   if (record) poke(record);
@@ -1113,9 +1450,14 @@ async function resumeAndDeliver(
 
 export function __resetActivationsForTest(): void {
   watchEpoch += 1;
+  for (const act of activations.values()) {
+    act.offRound?.();
+    wake(act);
+  }
   activations.clear();
   for (const r of residents.values()) disposeQuietly(r.session);
   residents.clear();
+  retiring.clear();
   __resetChildRunsForTest();
   __resetLeakOwnerForTest();
 }

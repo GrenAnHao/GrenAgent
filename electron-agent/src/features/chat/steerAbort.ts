@@ -43,7 +43,7 @@ export function settleAbortedSteers(
   const firstIndex = matched[0] ?? -1;
   const first = firstIndex >= 0 ? messages[firstIndex] : undefined;
   const drop = new Set(matched.slice(1).filter((index) => index >= 0));
-  const nextMessages = messages.flatMap((message, index) => {
+  const nextMessages = messages.flatMap<ChatMessage>((message, index) => {
     if (drop.has(index)) return [];
     if (index === firstIndex && message.kind === 'user') {
       const { steering: _steering, steerState: _steerState, ...plain } = message;

@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   promptOverlay: false,
   storeState: {
     messages: [] as unknown[],
+    runActive: false,
+    aborting: false,
     isStreaming: false,
     steering: [] as string[],
     followUp: [] as string[],
@@ -297,6 +299,8 @@ afterEach(() => {
   useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
   state.storeState = {
     messages: [],
+    runActive: false,
+    aborting: false,
     isStreaming: false,
     steering: [],
     followUp: [],
@@ -347,13 +351,14 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     expect(screen.getByTestId('composer-seat')).toBeTruthy();
   });
 
-  it('压缩进行中不在输入框上方再画一条正在压缩', () => {
+  it('历史未到时仍为独立压缩活动挂载时间线，不在输入区重复提示', () => {
     state.workspaceReady = true;
-    state.storeState.messages = [{}];
+    state.storeState.messages = [];
     state.storeState.compacting = true;
     render(<ChatView />);
-    expect(screen.queryByTestId('compaction-indicator')).toBeNull();
-    expect(screen.getByTestId('composer-seat').textContent).not.toContain('正在压缩');
+    expect(screen.getByTestId('chat-list')).toBeTruthy();
+    expect(screen.queryByTestId('empty-chat-prompt')).toBeNull();
+    expect(screen.getByTestId('composer-seat').textContent).not.toContain('压缩上下文');
   });
 
   it('composer seat matches the chat column background without a fade overlay', () => {

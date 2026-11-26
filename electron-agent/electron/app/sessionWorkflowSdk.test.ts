@@ -29,8 +29,8 @@ async function fixture(){
  session.agent.streamFunction=((model:unknown,context:unknown)=>{sent.push(structuredClone(context));const stream=ai.createAssistantMessageEventStream();const message={role:'assistant',content:[{type:'text',text:'stub result'}],api:'openai-completions',provider:'fixture',model:'local-stub',usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:'stop',timestamp:10};queueMicrotask(()=>{stream.push({type:'done',reason:'stop',message});stream.end();});return stream;}) as never;
  return{dir,sm,m,a,session,sent};
 }
-it('uses cli coding-agent 1.5.1 actual SDK and dependency root with zero network before explicit prompt',async()=>{
- const pkg=JSON.parse(await readFile(join(sdkPath,'../../package.json'),'utf8'));expect(pkg.version).toBe('1.5.1');
+it('uses the pinned CLI coding-agent SDK with zero network before explicit prompt',async()=>{
+ const pkg=JSON.parse(await readFile(join(sdkPath,'../../package.json'),'utf8'));expect(pkg.version).toBe(cliRequire('./package.json').dependencies['@earendil-works/pi-coding-agent']);
  let network=0;vi.stubGlobal('fetch',()=>{network++;throw Error('network forbidden');});
  const f=await fixture();try{
  const owner=new SessionWorkflowOwner(f.dir);const raw=f.sm.getEntry(f.a);await owner.execute(f.session,{action:'edit',...owner.tree(f.session),entryId:f.a,text:'summary'});

@@ -15,15 +15,15 @@
 
 ## 注册工具必须带官方提示词字段
 
-`pi.registerTool()` 的 `description` 只进工具 schema。自定义工具如果没有 `promptSnippet`，**不会**出现在默认系统提示词的 Available tools 里。后面新增或覆盖任何工具都要按官方字段补齐，不要只写 `description`，也不要把工具清单再抄进 Fable / 长系统提示词——Pi 会按当前激活工具自动拼 Available tools 与 Guidelines。
+`pi.registerTool()` 的 `description` 只进工具 schema。自定义工具如果没有 `promptSnippet`，**不会**出现在默认系统提示词的 `<tools>` 段。新增或覆盖工具时按下表补齐字段；Pi 会按当前激活的工具生成 `<tools>` 与 `<rules>`，不要把清单再抄进 Fable 或长系统提示词。
 
 | 字段 | 作用 | 本仓库要求 |
 | --- | --- | --- |
 | `description` | 给模型看的工具说明与参数语义 | 必填 |
-| `promptSnippet` | 一行摘要，写入 Available tools | 必填。没有这一行，自定义工具不会出现在该段 |
-| `promptGuidelines` | 工具激活时追加到 Guidelines 的条目 | 有路由或纪律时必填；每条必须写出工具名，禁止写 `this tool` |
+| `promptSnippet` | 一行摘要，写入 `<tools>` | 必填。没有这一行，自定义工具不会出现在该段 |
+| `promptGuidelines` | 工具激活时追加到 `<rules>` 的条目 | 有路由或纪律时必填；每条必须写出工具名，禁止写 `this tool` |
 
-官方说明见 [Pi SDK 扩展文档（v1.5.1）](https://github.com/earendil-works/pi/blob/v1.5.1/packages/coding-agent/docs/extensions.md#piregistertooldefinition)：`promptGuidelines` 是扁平追加、没有工具名前缀，必须写成 `Use my_tool when...`。覆盖内置工具时，`promptSnippet` / `promptGuidelines` **不会**从原工具继承，覆盖定义里要自己写。
+官方说明见 [Pi SDK 扩展文档（v1.6.0）](https://github.com/earendil-works/pi/blob/v1.6.0/packages/coding-agent/docs/extensions.md#piregistertooldefinition)：`promptGuidelines` 是扁平追加、没有工具名前缀，必须写成 `Use my_tool when...`。覆盖内置工具时，`promptSnippet` / `promptGuidelines` **不会**从原工具继承，覆盖定义里要自己写。
 
 ### 写法
 
@@ -34,7 +34,7 @@ pi.registerTool({
   name: "my_tool",
   label: "My Tool",
   description: "完整说明：做什么、关键参数、和相邻工具怎么分工。",
-  ...toolPrompt("一行说明，供 Available tools 使用。", [
+  ...toolPrompt("一行说明，供 <tools> 使用。", [
     "Use my_tool when ...; pass every relevant parameter from its schema.",
   ]),
   parameters: Type.Object({ /* ... */ }),
@@ -45,10 +45,10 @@ pi.registerTool({
 ```
 
 - `promptSnippet` 只写一行，不要复述整个 schema。
-- `promptGuidelines` 只写模型不看字段就会用错的纪律。不要给每个工具都堆一条复述 snippet 的空话，以免撑爆 Guidelines、反复重建系统提示前缀缓存。
+- `promptGuidelines` 只写模型不看字段就会用错的纪律，不要用复述 snippet 的条目撑长 `<rules>`。
 - 代码检索只注册 `code_explore`，在该工具上写 `promptGuidelines`，不要再加 `code_search` 等兄弟工具。索引是否存在只由 `code-retrieval` 每轮 hint 说一次。Fable 默认只注行为核，不要把工具手册再抄回去。
 - 动态投射的 MCP 工具用 server 给出的 description 填 `promptSnippet`；不要在 Fable 里枚举 `mcp__*` 名字。
-- 懒加载、会话中途才激活的工具：加上 `promptSnippet` / `promptGuidelines` 会重建系统提示。需要进 Available tools 的产品工具仍然要写 snippet；纯发现/代理类工具可以只靠 `description`。
+- 懒加载、会话中途才激活的工具也会更新提示词。需要进 `<tools>` 的产品工具仍然要写 snippet；纯发现/代理类工具可以只靠 `description`。
 
 ### 验收
 
@@ -68,6 +68,8 @@ npx vitest run prompt-metadata.test.ts
 
 ## UI 检查（ui-harness）
 
+工作台组件按角色取色，不写 `.light`、`.dark` 或 `[data-theme]` 的组件覆盖。更换皮肤只改主题根色板；字号、边框宽度、滚动条尺寸、布局和按钮变体两边共用。在用 Lobe 按钮的入口使用 `WorkbenchButton`，避免库按明暗自动更换变体。见[工作台语义皮肤](.agents/notes/implemented/architecture/2026-11-25-semantic-workbench-skin.md)。
+
 工具卡片、对话时间线、弹层开合、动画、主题色、布局对齐、键盘交互这类改动，jsdom 单测盖不到。`electron-agent/ui-harness/` 把真实组件渲染进 Electron 窗口，用 `sendInputEvent` 发真实的鼠标键盘事件，再读 DOM 断言。
 
 改了上面这类 UI，要新增或更新对应的场景，并把它跑到全部 PASS。只跑当前需求对应的场景，已经定档、不在本次需求里的场景不跑（见下面「跑哪些场景」）。纯逻辑改动写 vitest 单测；要真实主进程、pi 子进程或 IPC 的不归它管。
@@ -83,7 +85,13 @@ npx vitest run prompt-metadata.test.ts
 
 用 npm 跑，`--xxx` 参数必须放在 `--` 后面，否则 npm 会把它吃掉（场景名不受影响）。直接 `node ui-harness/check.mjs <参数>` 不用加。
 
-默认静默运行：离屏渲染，不弹窗、不进任务栏、不抢焦点，跑的时候可以照常用电脑，主仓库和 worktree 也能同时跑。`check.mjs` 会强制生产版构建，任一断言失败时退出码非 0。源码没变就复用上次构建（构建约 5 秒，输出里会写为什么重建）。构建产物和截图在系统临时目录（`%TEMP%\grenagent-ui-shots\` 等），按代码路径分目录，主仓库和 worktree 互不覆盖。
+默认静默运行：离屏渲染，不弹窗、不进任务栏、不抢焦点，跑的时候可以照常用电脑，主仓库和 worktree 也能同时跑。`check.mjs` 会强制生产版构建，任一断言失败时退出码非 0。源码没变就复用上次构建（构建约 5 秒，输出里会写为什么重建）。构建产物按代码路径隔离。`t.shot` 的手动截图仍写到 `%TEMP%\grenagent-ui-shots\`；自动失败附件另按工作区、运行、场景隔离。
+
+### 读失败现场
+
+场景失败时，先打开终端「失败现场」后的绝对路径（系统临时目录的 `grenagent-ui-failures` 下）。`failure.json` 的 `first` 是首次检测到的失败，`steps` 是之前的最近操作；对照发送坐标、实际收到按下事件的元素和焦点，再看 `window.png`。严格点击超时的遮挡物是派发前的观察，不代表它收到过点击。截图是当时发起的异步采样；窗口不可用时看 JSON 里的缺项原因，不用重跑来覆盖原现场。
+
+结构化附件不转储输入、粘贴正文和整页 DOM；截图会保留合成窗口的可见像素。要禁用某个场景的**自动**截图，在 `harness.config.mjs` 的 `failureScreenshotsDisabled` 加入场景名。显式调用的 `t.shot` 不受它控制。
 
 ### 跑哪些场景
 
@@ -105,7 +113,7 @@ npx vitest run prompt-metadata.test.ts
       check.mjs / run.mjs  # 构建（源码没变就复用）+ 逐场景起 Electron / 加载场景、跑 probe、汇报
       depsGraph.mjs        # vite 插件：记场景用到哪些源文件，跳过多余构建、算 --changed
       affected.mjs         # 改动的文件 → 受影响的场景（git + 依赖图，全局样式按规则缩小范围）
-      probe.mjs            # 工具箱 t：click / dblclick / rightClick / hover / mouse / drag / wheel / key / type / insertText /
+      probe.mjs            # 工具箱 t：click / clickReady / clock.advanceBy / dblclick / rightClick / hover / mouse / drag / wheel / key / type / insertText /
                            #   waitFor / waitUntil / waitForText / text / count / countVisible / style / rect / hitTest / js /
                            #   data / events / act / setTheme / resize / shot / sample / scrollFps /
                            #   check / ok / checkNear / checkColor / info
@@ -120,7 +128,17 @@ npx vitest run prompt-metadata.test.ts
 
 ### 现有场景
 
+- 工作台字体：`typography` 在真实标题栏、MCP 工具、命令/Markdown 和最近项目卡上核对字号、字重、字距及等宽数字。通过 Chromium 的实际字形记录区分打包字体与系统中文回退，并检查暗色和浅色。
+
+- 冷启动会话：`startup-session`（真实 App、启动页与 IPC 桩。定点恢复上次会话，先显示正文并可操作、再后台加载侧栏和清理空目录；过期空列表不覆盖当前会话。读取失败展示原因并保留原位置，支持重试恢复或主动新建；新建失败可重试。只跑 `npm run ui:check -- startup-session`）
+
+- 工具状态图标：`tool-status-indicator`（真实 StatusIndicator；24px 外框内的 16px 网络动画，运行转完成／失败后撤下忙碌状态并显示对应图标）
+
+- 长会话交互响应：`long-session-responsiveness`（真实 AgentStore / InlineQuestionCard，单项目及双项目各约 71 MiB 历史并持续推流；后端 I/O 用桩。真实鼠标点「确定」，检查单次答复、回执后立即收卡、无需前端清理草稿、只补用户消息元数据、界面历史增量写入；记录点击延迟和渲染进程工作集。真实磁盘追加与替换单独由 `uiHistoryService.test.ts` 验证。只跑同名场景）
+
 - 项目上下文：`project-context`（真实 ProjectContextPanel；只请求当前工作区的 CodeGraph 状态，验证请求失败、点击重试、索引统计和无 Wiki 区块）
+
+- 规则注入提示：`rule-injection`（真实会话列表和事件/历史投影，验证默认收起、展开来源、相同规则的两轮各有提示、重复事件和历史重叠去重、空规则不显示、浅色窄窗；真实 SDK 请求与历史恢复另由 `contextRuleInjection.sdk.integration.test.ts` 验证。只跑 `npm run ui:check -- rule-injection`）
 
 - 内置模型参数：`builtin-model-settings`（真实 ProvidersSettings / ProviderModelCard / 稀疏覆盖适配器，主进程目录和磁盘用桩；完整纵向卡片列表、无目录 Select、显隐图标与展开同行（宽屏单行高≤72px，与自定义卡一致）、只读 ID 去输入底色、默认不显示恢复入口、改动后恢复、Tooltip/Tab 键盘聚焦、每张独立展开与恢复、固定 ID/协议、名称/上下文/输出/价格/档位/图片/Fast 与高级参数，false/0、只写修改叶子、跨卡片/供应商草稿、非法 JSON、保存/刷新失败与仅重试、重挂载与同 ID 替换排除，深浅主题和窄屏。只读目录 IPC 与真实 SDK 合并另由定向测试覆盖，不发真实模型请求。只跑 `npm run ui:check -- builtin-model-settings`）
 
@@ -130,7 +148,7 @@ npx vitest run prompt-metadata.test.ts
 
 - 按模型压缩预算：`model-compaction-budgets`（真实 SettingsPanel / 预算分区；精确 provider/model 身份、SDK 继承/桌面覆盖/有效值、显式0与清除、A/B隔离、旧表单保存不覆写预算、已保存/同步失败分别回显、仅重试同步及深浅主题。实际当前模型投射、进行中 preparation 快照及 main/host/worker IPC 另由真实 SDK/生产探针覆盖。只跑 `npm run ui:check -- model-compaction-budgets`）
 
-- 用量来源：`usage-provenance`（真实用量展示；供应商原始费用/本地估算/未知分开，预热与助手统计分列、未知不补零；外部历史不计入本机账单、派生历史去重及延迟补录另由 registry/ledger 和真实会话集成覆盖。只跑 `npm run ui:check -- usage-provenance`）
+- 用量统计：`usage-provenance`（真实用量页；核对时间 / 项目筛选、三图指标、费用来源和准确占比。明暗实测首中尾及最高柱的顶部浮层和本地日期、圆心长名和图例联动、项目滚动表头，以及最近会话排序、搜索与分页、调用明细模型 / 供应商筛选）。只改报表时点名此场景；涉及打开历史会话时加 `usage-session-navigation`（真实 App，从费用表点击同项目和跨项目会话并读取对应正文）。SQLite 归一及可信补录由 usage-ledger / usageService 单测覆盖。
 
 - Pi 1.5 模型兼容：`model-compat`（真实 ProvidersSettings / ProviderModelCard / 配置 adapter，主进程 I/O 用内存盘桩；四个新版兼容字段按协议展示和保存，布尔项区分跟随 SDK / 开启 / 关闭，显式 false 保存与重挂恢复、还原默认删除覆盖；OpenAI 与 Anthropic / Responses 往返、深浅主题和窄屏。真实 SDK 请求由 modelCompat.integration.test.ts 在注入 fetch 的传输边界另验。只跑 `npm run ui:check -- model-compat`）
 
@@ -138,31 +156,43 @@ npx vitest run prompt-metadata.test.ts
 
 - GrenAgent 品牌：`brand-assets`（真实 Titlebar / EmptyChatPrompt / BrowserBody 新页 / BrowserErrorState 与原稿 SVG；仅窗口与 guest I/O 使用桩，不导航外网或调用模型。检查完整路径字标与独立 G 的路径/变换/画布、16/18/24/32/48px、可访问名称、中性前景与明暗对比、窄屏无横向溢出、搜索焦点与错误重试；加载失败的 guest 错误页直接预览 `browserErrorPageUrl()` 生成文档（禁脚本的同源 srcdoc），检查原稿、中性前景与静止；保存深浅及 guest 截图。只跑 `npm run ui:check -- brand-assets`；工作台布局回归另用 `workbench-layout`，系统原生图标与安装效果由资源测试和实际平台验证）
 
+- 扩展资源文件：`extension-resource-library` 与 `extensions-workbench` 共用真实四页及桥接夹具，单独验证技能多维筛选、详情与资源树、归档及删除确认、命令模板空态、Windows 路径和四页顶栏几何。规则自动选中、项目指令预览保存与 POSIX 路径由 `prompt-library-panel` 验证。只改这三页时点名这两个场景。
+
+- MCP 管理：`mcp-management`（共用真实 ExtensionsPanel，以 8、51、81 工具和远程慢连接验证全局估算、搜索计数、批量覆盖确认、配置标签可达性、握手日志和取消，覆盖参数试调、凭据脱敏及宽窄切换。只跑 `npm run ui:check -- mcp-management`；真实 STDIO、HTTP 握手取消、参数审批和配置迁移由 runtime / desktop 定向测试覆盖。）
+
 - 扩展资源工作台：`extensions-workbench`（真实 ExtensionsPanel / MCP 目录与详情 / 技能 / 命令 / 规则，只有主进程 I/O 使用确定性内存桩；宽模块纵向导航，收窄横排；内容窄列目录与详情切换、返回与宽窄往返不重挂正文编辑器、不丢草稿；MCP 实时状态优先工具缓存、已有权限首次回显和其他工具策略保留、重载、原配置来源启停/编辑、参数规则、快速添加与 JSON 导入；技能列表/网格、偏好自动保存、新增、目录/ZIP/单文件导入与永久删除确认；深浅主题、短窗末项滚动。命令/规则深层编辑约束另由 `prompt-library-panel` 覆盖）
 
 - 外观设置：`appearance-settings`（真实 AppearanceSettings / WorkbenchThemeProvider / Popover；只保留字号和浅色 / 深色 / 跟随系统；点击后验证真实控件、外壳与浮层颜色一致，CDP 改系统明暗验证自动跟随，偏好写入不含旧配色字段）
 
-- 专业工作台：`workbench-layout`（真实 Titlebar / ModuleRail / Sidebar / MainChatColumn / ChatView / ChatInput；空态标题和输入卡整体居中、字号/宽高/留白按真实聊天列响应，600px 列在大窗口挤窄与小窗口中表现一致，空态卡最大 880px；已有消息仍贴底、两侧对齐且不遮末行；宽窄往返、草稿切换与重挂载保留正文，顶部会话标题同步，侧栏选择折叠，图标栏 52px / 按钮 36px / 图标 18px 且无选中竖条，深浅色与短窗多附件整组原生滚动；仅主进程读写使用桩）
+- 专业工作台：`workbench-layout`（真实 Titlebar / ModuleRail / Sidebar / MainChatColumn / ChatView / ChatInput；空态标题和输入卡整体居中、标题沿用统一的 18px，卡片宽高与留白按真实聊天列响应，600px 列在大窗口挤窄与小窗口中表现一致，空态卡最大 880px；已有消息仍贴底、两侧对齐且不遮末行；宽窄往返、草稿切换与重挂载保留正文，顶部会话标题同步，侧栏选择折叠，图标栏 52px / 按钮 36px / 图标 18px 且无选中竖条，深浅色与短窗多附件整组原生滚动；仅主进程读写使用桩）
 
 - 会话偏好隔离：`session-preferences`（真实 ModelThinkingAction / ModeAction / ApprovalAction；同项目 A/B 同模型不同思考档、两个显式会话作用域同时挂载、A/B 往返、单项修改不串写、Ask 保留审查偏好、非推理模型仅改变有效档、显式项目默认、两份未落盘草稿独立、按会话记录重挂载恢复与浅色主题。桥只替换后端，targetSessionPath 缺失即报错；真实 SDK / JSONL 恢复由 sessionPreferences.integration.test.ts 覆盖）
 
 - Ultra 模式与设置：`ultra-mode`（真实 ModeAction 与现有设置字段/表单；五项模式且无 Brainstorm、独立 Ultra 模式选择与会话恢复、切 Ask 不叠加、未确认 Plan 阻止切入、普通与 Ultra 模型配置独立保存/重载、浅色主题；模型路由隔离与实际 SDK 请求另由 multi-agent 定向测试和 ultra-sdk.integration.test.ts 覆盖）
 
-- 子代理详情：`subagent-conversation`（真实 SubAgentConversation → ChatMessageItems；单轮 180 次工具循环按时间线行虚拟化，上下文分组和嵌套调用保持完整；完成态长思考沿用 160px 上限并可内部滚动；顶部历史与最终正文可以来回滚动，离屏条目卸载，整轮仅一个复制入口；列表末尾留 96px 空白，贴底时最后一行和「正在处理…」不压在面板底边上；主对话 / 子代理行距几何对照；真实 SubAgentBody 在后台启动工具已返回时仍跟随运行态，折叠思考追加文字时逐帧滑动，展开限高、重新折叠恢复预览，真正完成后结束运行状态；后台回执不带 sessionPath 时靠登记表路径接上事件流、完成并释放轮询后正文不丢，终态挂载缺路径只补查一次 `subagent_list`；虚拟列表里点击 / 滚轮前先 `settleHit` 等目标被指针命中满 300ms）
+- 子代理详情：`subagent-conversation`（真实 SubAgentConversation → ChatMessageItems；单轮 180 次工具循环按时间线行虚拟化，上下文分组和嵌套调用保持完整；完成态长思考沿用 160px 上限并可内部滚动；顶部历史与最终正文可以来回滚动，离屏条目卸载，整轮仅一个复制入口；列表末尾留 96px 空白，贴底时最后一行和「正在处理…」不压在面板底边上；主对话 / 子代理行距几何对照；真实 SubAgentBody 在后台启动工具已返回时仍跟随运行态，折叠思考追加文字时逐帧滑动，展开限高、重新折叠恢复预览，真正完成后结束运行状态；后台回执不带 sessionPath 时靠登记表路径接上事件流、完成并释放轮询后正文不丢，终态挂载保留已知事实；当前启动与缺路径自动对账另由 `subagent-detached` 覆盖；虚拟列表用 `clickReady` 等实际落点持续命中 300 ms 后展开思考；正文滚轮仍单独等命中）
 - 子代理历史卡：`subagent-history`（已完成的卡片重新挂载后恢复任务标题、模型与思考档；历史缺字段时共享一次注册表查询；并行子代理任务同名时按 agentId 匹配模型；非空 task 带空 tasks/chain 仍显示真实单卡与错误，跟进正文并回原卡；单步/多步 chain、混合 task/tasks 的标题/模型/索引不丢；参数流从空数组到两项、重挂载及浅色错误正文）
 - 后台 bash 工具卡：`bash-job-card`（走真实 reducer → groupMessages → TurnTimeline，主进程那头的 `job_snapshot` / `job_kill` / `pi://jobs` 用桩，数据形状照真实会话里 `run_in_background` 的结果；实时 / 历史回放 / 任务已不在三种情况；折叠行的行图标跟着后台任务走（在跑是转圈、不是 ✓）、时长从任务起算并在结束后定格、「后台运行中 / 已完成 / 正在停止」状态、展开后的终端与底栏、输出帧追加、停止、结束、任务已不在时回退到工具结果；运行中的前台命令跟随它的匿名 job：默认展开、底栏只说状态不写 id、输出帧追加、停止只发 job_kill、结束后同一张卡换成最终结果并自动收起，可手动重新展开；前台转后台等待快照不误收起，历史首次终态快照保持手动展开、找不到 job 时静默回退到 partial 文本；沙箱事实：前台被拒的行写「沙箱拒绝 · 只读」、展开后底栏一句中文、终端正文保留给模型的标记，已升权的行和底栏写明权限，后台任务被拒时底栏换成中文、不贴升权提示原文）
 - 工具卡：`codemode-card`（走真实 reducer → groupMessages → TurnTimeline；实时完成 / 运行中 / 失败 / 历史回放 / 调用很多五种情况；标题摘要与调用次数、嵌套调用列表的状态和服务器标签、历史靠 details.calls 还原、展开后脚本与输出、去掉结果头、JSON 缩进、脚本错误标红且排在脚本前、MCP 结果 markdown / JSON 渲染与全文路径、超过 6 条折叠、浅色主题）
-- 视觉设计面板：`visual-panel`（真实 VisualPanel + HtmlPreview + `buildSrcDoc(fill)`，`extension_ui_respond` 用桩；iframe 里的几何靠主进程 `webFrameMain.executeJavaScript` 读；长页面滚到底选项 B 完整露在确认条上方且 hit test 命中、确认条保持 fixed 单行横排且样式节点不画成文字、点 B 只选中、点确认才回传 `change`；矮页面比较区仍撑满、选项贴在确认条预留区上方）
+- 视觉设计面板：`visual-panel`（真实 VisualPanel + HtmlPreview + `buildSrcDoc(fill)`；iframe 几何由主进程 frame 读取。长／矮页滚动与 hit-test、方案点击只切换演示，不注入确认条／补充输入，不产生旧 visual-choice 回传；预览不承担评审。只跑 `npm run ui:check -- visual-panel`）
+- 视觉评审：`visual-review`（真实 InlineQuestionCard／VisualPanel；固定封闭通过／打回、非封闭自定义、补充、旧 iframe 消息无效、新 previewId 重新评审、后台暂存恢复、换版与取消；真实鼠标操作，只跑 `npm run ui:check -- visual-review`）
+- 会话目标生命周期：`goal-lifecycle`（真实 GoalPill／SessionGoalDrawer 与控制回执桥；原会话旧补拉、dirty 草稿／延迟提交／失败／冲突、异常冻结计时、上限新批次与累计、暂停未保存重读、深浅主题及窄栏；只跑 `npm run ui:check -- goal-lifecycle`，新旧续跑卡另跑 `goal-round-card`）
+- 通信恢复反馈：`request-recovery-feedback`（真实 reducer／ChatView；有效正文／思考／工具增量撤旧提示，空 start 不清，迟到尝试不清新错误，再次失败与恢复后取消，深浅主题；只跑同名场景）
+- 会话压缩：`session-compaction`（真实 store／Sidebar／ChatView／ContextUsageTag；独立 preparing／running、A/B 归属、快照待确认、contextRevision 统计刷新、逐帧内部 abort 不闪红、真实失败及原会话停止；窗口重载和后台完成按对应 probe 验证；只跑同名场景）
 - 会话归档：`session-archive`（真实 Sidebar + 真实 `archiveActions`，`set_sessions_archived` / `subagent_get_session_messages` 用桩、桩里维护一份「磁盘」会话与归档登记，形状照 `workspaceService`（归档的带 `archived: true`）；已归档的不在侧栏、对话只显示最新一份；运行中的会话菜单「归档」置灰且点了不发请求、悬停也没有归档按钮；空闲行悬停时「更多」左边紧挨一个同尺寸的归档按钮，点了立即归档、不弹确认、不触发整行打开；归档后行消失、底部「已归档 N」跟着变、不弹确认；归档对话时目录下两份一起归档、次新的不顶上来；弹窗按时间倒序、项目写目录名、对话写「对话」；查看是只读弹窗（正文加载、没有输入框）；取消归档回到侧栏；删除先确认、取消不删；浅色主题弹窗浅底；Esc 关闭后入口仍在。会话行按标题文字找、antd 弹窗按 `wrapClassName`（`archived-modal` / `archived-viewer` / `archived-delete`）找）
+
+- 会话跨项目移动：`session-project-transfer`（真实 Sidebar 两种会话行 + 共用菜单「移动到项目…」、真实 `SessionProjectTransferDialog` 走 typed `agent_session_project_transfer` 合同、真实 `ChatInput` 与草稿 / 附件 store、真实 `DockPanel` 文件管理器 / 终端；只有 `agent_session_project_transfer`、列表、文件树 / 读文件 / `shell_start` 用桩。弹窗显示源 / 目标完整路径和「不搬代码文件」、已有项目与 `pickDirectory` 本地目录、族摘要与「权限回退 Ask / 只读」说明；取消不发请求；busy / stale / no-op 就地提示，stale 要求重新预览；提交流程 `previewed → opened`，成功只在目标项目列出这一份、源其他会话保留、置顶按 path 保留，`committed-needs-open` 显示「已移动」并可重开且不重复提交；旧列表按逻辑代次丢弃、不回流不重复。完整草稿（胶囊参数、文件标签、图片、粘贴块）随会话保留且从未自动发送，文件标签改成源项目绝对路径、标签名与另一份草稿不受影响，重挂载仍能恢复；迁移打开跳过 `resetWorkspaceTabs`，旧文件标签保留源根与未保存修改、旧终端记 `originWorkspace` 不重启，目标新文件管理器用目标根。历史消息（真实 `AppLinkGuard` + `LazyMarkdown` + `data-source-cwd`）里的相对链接按源项目绝对路径请求：源文件已不存在时在源路径的文件标签里报错，不读也不打开目标同名文件，既有脏标签与未保存修改保留。浅色弹窗与 720px 窄屏不横向溢出。只跑 `npm run ui:check -- session-project-transfer`）
 - 侧栏分区折叠：`sidebar-sections`（真实 Sidebar + 真实 sidebarPrefsStore，新建对话 / 新建项目只记事件；置顶 / 对话 / 项目三个区头点标题或标题右边空白收起 / 展开，收起只剩区头和新建按钮、下一个区头紧接上来；箭头在标题后面，展开时只在悬停或键盘聚焦时出现，收起时常驻朝右；Enter / Space 切换；折叠写进 localStorage `pi-sidebar` 的 `collapsedSections`；新建对话按钮展开时不折叠、收起时先展开，新建项目打开下拉不展开、选了菜单项才展开；收起置顶后置顶会话哪里都不出现，右键置顶一项后置顶区自动展开；标题距左沿 14px、新建按钮与标题垂直居中；浅色主题。区头按 `[data-testid="sidebar-section"][data-section=…]` 找，`t.click` 点完 80ms 就移开鼠标，读箭头淡出前先等 300ms）
 - 会话内查找：`chat-find`（真实 ChatMessageItems（virtua 虚拟化、Markdown、代码块）+ 真实 `useSessionFind` / `FindBar` / `FindShortcutHost`，外层按 ChatView 的结构摆（根带 `data-find-scope`、查找栏绝对定位在顶部、列表顶边下移 40px、底部悬浮输入区），没有挂真实 ChatView；80 条消息里关键词 9 处，位置和个数写死在 `EXPECTED`。焦点在底部输入框时 Ctrl+F 仍拦截、范围外输入框的 document 级 Ctrl+F 监听不被抢、点了消息文字后按最后点击的范围认领；查找栏占独立一行、不压消息不碰输入区、控件靠右；计数覆盖没渲染的消息，逐个跳转每步当前项完整可见、末尾循环、跳到离屏代码块精确定位；高亮走 CSS Highlight（`CSS.highlights.get('gren-find')` 读条数，不改 DOM，加粗 / 行内代码 / 链接 / 部分匹配都在）；无结果空状态、Enter / Shift+Enter、Esc 关闭清高亮并把焦点还给输入框、新消息到来计数更新、换会话关闭、浅色主题高亮计算色。Ctrl+F 用 `t.key('f', ['control'])` 发）
 - 会话标题：`session-title`（真实 Sidebar + 真实 `fallbackSessionTitle`，首条消息按真实会话的形状造（输入框粘贴块、pi 展开的技能块、图片说明），`generate_session_title` 用桩、每次返回由 probe 经 act 放行的 deferred；没有生成标题的会话侧栏不出现 `<pi:attachment` / `<skill` / `[Image`，粘贴块会话显示粘贴内容第一行、技能会话显示用户正文；右键菜单「重命名」下面紧跟「重新生成标题」，点了先出「正在生成标题…」、行标题不动，放行后行标题换成新标题、提示「标题已更新：X」替换掉生成中的提示；空结果提示保留原标题、不改名；主进程报错提示原因；浅色主题提示浅底。提示的底色画在哪一层随 antd 版本变，取 `.ant-message-notice` 里第一个不透明的底色）
 - 侧栏会话行：`session-row`（真实 SessionItem，回调只记事件；运行中的行转圈和「更多」共用行尾同一格：静止只有转圈，悬停整行或鼠标正好停在转圈上，转圈在原位换成「更多」，标题宽度和占位格都不变、按钮中心就是转圈原来的位置、格子与按钮同尺寸、鼠标下面点得到按钮；点按钮只开菜单不触发整行点击，点行本身仍打开会话；移开变回转圈；空闲行照旧悬停才出现「更多」，位置和运行行同一列；五种注意状态角标（等待批准 / 需要选择 / 失败 / 受阻 / 完成未读）的图标与颜色对照主题 token、审批压过转圈、选择在呼吸，悬停时角标同样在原位让给「更多」；整行悬停 400ms 后出状态 Tooltip（长报错截断加「…」），不到 400ms 不出；折叠的分组头显示汇总角标和需要处理的会话数，展开的不显示；浅色主题。`t.hover` 自己停 240ms，量「400ms 前不出」要在 hover 返回后立即读）
-- 应用内提示：`attention-toast`（真实 AttentionHost + sessionAttention + 通知器，外面包 antd App；主进程 `attention_notify` / `attention_badge` / `attention_window_focused` 用桶、`route` 固定 in-app，pi 事件和审批请求由 probe 经 act 推；Goal 续跑（一轮结束 300ms 后又开）不冒完成；后台会话完成出提示、不计入任务栏数字、10 秒内自己收起；失败提示带报错、「前往」打开会话并收起、打开后计数回到 0；审批提示 9 秒后仍在、答复后收起，计数 1 → 0；当前会话在前台时不问主进程、不提示；深 / 浅色主题下提示背景是对应的浮层色。提示按 `[data-testid="attention-toast"][data-kind=…]` 找，入场动画里不透明度接近 0，量可见性和颜色前先等 400ms；不要把鼠标停在提示上，antd 悬停会暂停自动收起）
+- 应用内提示：`attention-toast`（真实 AttentionHost + sessionAttention + 通知器，外面包 antd App；主进程 `attention_notify` / `attention_badge` / `attention_window_focused` 用桶、`route` 固定 in-app，pi 事件和审批请求由 probe 经 act 推；Goal 续跑（一轮结束 300ms 后又开）不冒完成；后台会话完成出提示、不计入任务栏数字、业务时间到 7,999 ms 尚未开始关闭、再推进 1 ms 后经真实退出动画收起；失败提示带报错、「前往」打开会话并收起、打开后计数回到 0；审批提示推进业务时间 9,000 ms 后仍在、答复后收起，计数 1 → 0；当前会话在前台时不问主进程、不提示；深 / 浅色主题下提示背景是对应的浮层色。提示按 `[data-testid="attention-toast"][data-kind=…]` 找，入场动画里不透明度接近 0，量可见性和颜色前先等 400ms；不要把鼠标停在提示上，antd 悬停会暂停自动收起）
 - 命令胶囊：`command-pill`（真实 lobehub Editor + CommandPill 插件，插入走 `INSERT_COMMAND_PILL_COMMAND`，`list_prompt_commands` 用桩；插入后焦点在第一个参数；Tab / Shift+Tab 轮转，最后一个参数上 Tab 跳出到胶囊后，第一个参数上 Shift+Tab / ← 不动；必填参数空着时 Enter 被拦下、焦点回到缺的参数并标红；发送文本是调用文本 `/名 "值" ""` 加补充正文；空参数 Backspace 回退、第一个参数里删整个胶囊；气泡里 `<command>` 块整块成胶囊且正文不出现，刚发出的调用文本也成胶囊、空参数显示默认值；浅色主题）
 - 输入框正文原样发出：`composer-text`（真实 lobehub Editor，参数照 MessageEditor（type text、chat、纯文本粘贴、关 markdown），发送走 `readComposerText`、回填走 `writeComposerText`；真实键入 `* [ ~ _ & <`、Shift+Enter 换行、缩进行、`* ` / `+ ` / `# ` 开头的行，回车发出的和键入的一字不差；多行代码的缩进和制表符原样发出（系统剪贴板写不进去时写 INFO，改走 lobehub `handlePlainTextPaste` 之后派发的 `CONTROLLED_TEXT_INSERTION_COMMAND`）；文件标签发成 `@路径`；回填不出列表、每行一个段落、读出和写进去相同，CRLF 统一成 LF；旧路径 `getDocument('markdown')` 的输出只用 INFO 记录对照；整份草稿走 `readComposerDraft` / `writeComposerDraft`：胶囊（参数填了一半）+ 文件标签 + 文字存成 JSON 草稿、清空、恢复后胶囊和标签仍是装饰器节点、参数值不变、读出文本相同，只有文本的旧草稿恢复成纯文字。胶囊插入自带尾随空格、跳出后光标在它前面，要在后面接着打字先 `Delete` 掉它；恢复后不要 `t.click` 输入框左沿，那里是胶囊、会进第一个空参数）
 - 输入框上方的图片 / 粘贴块：`composer-chips`（真实 InputChips + 真实 composerFiles store（挂着 IndexedDB persist），图用 canvas 画、base64 经 exposeData 交给 probe；缩略图 48px，点第一张弹出 lobehub Image 预览（`[role="dialog"] img`）、计数「1 / 2」、点右侧箭头切到第二张、Esc 关掉；IndexedDB 存档里图片没有 url 只有 data；模拟重启（`dropMemoryKeepStorage`：短作用域内临时禁用 persist 写入、清内存后在 finally 恢复 adapter，不改权威 owner 桶）后 `rehydrate` 图片和粘贴块都回来、url 由 data 重建；内存里已有的桶在 rehydrate 时优先；X 移除到空后存档里没有这个 key。预览里的 ArrowRight 在离屏模式下按不到，用点按钮切图）
-- 命令与规则面板：`prompt-library-panel`（真实 CommandsPanel / RulesPanel，主进程命令用内存桩；命令列表项是胶囊带参数个数；改提示词时参数实时识别、占位符背景高亮；与保留名重名就地报错、保存不可点；规则开关立即写盘；没有工作区时项目范围置灰）
+- 扩展页滚动边界：`extension-viewport` 在真实工作台用 48 份规则、100 节 Markdown 验证目录、预览和源码独立滚动、页头与操作坐标不变，窄短窗保存、命令末项和技能末项可达。MCP 的服务器目录、工具列表及连接配置另由 `mcp-management` 验证。
+
+- 命令与规则面板：`prompt-library-panel`（真实 CommandsPanel / RulesPanel，主进程命令用内存桩；命令列表项是胶囊带参数个数；改提示词时参数实时识别、占位符背景高亮；与保留名重名就地报错、保存不可点；规则项目名、末段路径和开关列对齐；项目名／正文检索与各范围计数；单文件估算、内置指令 Ctrl+S 后刷新、窄屏深浅色及自定义规则模式编辑。无工作区时禁用项目范围。真实原文件与生产 IPC 由 `RulesPanel.disk.test.tsx` 验证；真实扩展工作台里的开关与宽窄切换保留草稿单跑 `rules-workbench`）
 - 供应商测活：`provider-diagnostics`（真实 ProvidersSettings + ProviderDiagnostics，`get_provider_config` / `list_models_global` / `diagnose_provider_model` / `diagnose_provider_model_abort` 用桩，分片和放行由 probe 用 `t.act` 推；详情分两层，设置层单独滚动、测活层贴住详情列底边，滚设置时测活层不动；思考档位按模型映射列出，null 档隐藏、原生名不同附在后面；发送中锁住模型和档位、出现取消，思考和正文分开流式显示；取消只发当前 requestId 的 abort，保留已收到的正文、不出指标、回到可发送；Ctrl+Enter 发送，完成后标题栏写成功与总耗时、指标含思考 tokens、模型和档位解锁；分隔条上拖变高、拖到顶仍给设置层留高度；测活层默认收起只有标题栏，标题栏收起 / 展开；内置供应商也能测，换供应商清掉上一次结果；浅色主题）
 - 模型 Fast 与能力：`model-fast`（真实 ModelThinkingAction + ProviderModelCard + 配置 adapter；两种供应商各八种能力组合，默认未勾选、保存与重载、图片 / 思考 / Fast 图标顺序和语义悬停提示、缺失元数据不显示；闪电紧贴档位右侧、开关两态与键盘、按会话记忆、同项目同模型的 A/B 开关相互隔离、非推理模型可独立使用 Fast、保存失败保持原状态、取消能力移除控件并保留偏好；280px 窄屏、读取失败重试、浅色主题、中英文切换。主进程桥用内存盘桩，请求构造另由 fastMode.integration.test.ts 走真实 Pi SDK 验证）
 - 供应商 OAuth 登录：`provider-oauth-login`（真实 ProvidersSettings + ProviderOAuthLoginModal，主进程用桩，登录事件由 probe 用 `t.act` 推；能力发现只给有 OAuth 的供应商显示互斥方式选择器、无能力的仍只有 API Key；未登录账号卡显示运行时 loginLabel，已登录显示来源 / 到期 / 订阅标识与退出；授权弹层覆盖进度、授权链接与浏览器打开 / 复制、设备码与用户码、手动回调码输入及 per-prompt signal 取消、错误重试、登录成功；成功后刷新凭据状态、绿点按凭据类型判定而不是看 API Key 输入框；从 OAuth 切回 API Key 需二次确认；退出后回到未登录。只跑 `npm run ui:check -- provider-oauth-login`）
@@ -175,11 +205,14 @@ npx vitest run prompt-metadata.test.ts
 - 子代理审批卡：`subagent-approval`（真实 ExtensionUiHost → uiPromptStore → PromptRequestCard，pi://ui-request 信封由 probe 经 act 推、形状照 sessionUiAdapter，`extension_ui_respond` 记成事件；子代理的请求卡头写「子代理请求批准」、标题写出子代理（孙代理带父链）、按收到的时刻倒计时；几条同时来只显示第一条并写「还有 N 条」，答完下一条顶上来，双击不会顺手答掉顶上来的那条；`dismiss` 收回显示中的那条后下一条顶上来，收回排队中的那条不动显示中的；主会话自己的审批没有倒计时；剩 10 秒以内倒计时变警示色；浅色主题）
 - 代理通信：`agent-message`（真实 reducer → groupMessages → renderMessageBody；send_message 的发送卡与静默/唤醒两类接收消息默认展开显示双方、Markdown 全文与投递状态，支持收起/展开且折叠头保留双方和状态；任务消息在前后正文之间保持原位；start/end 去重、同正文独立发送保留；长文限高可滚动、长单词不撑破窄屏、空正文保留身份且说明缺口；codemode 超过六条调用仍常驻通信，历史参数预览标明可能不完整和回执缺失；普通注入保持原样；浅色主题。场景中明确提供当前代理身份，子代理详情由 AgentIdentityContext 使用 agentId）
 - 后台任务结算：`task-notices`（真实 reducer → groupMessages → renderMessageBody；job-done / subagent-settled 的完成、非零退出、失败、取消、超时及未知状态，默认紧凑收起、标题交代任务和终态，展开显示完整结果/诊断；已有 job_snapshot 补留存输出与耗时、记录缺失时如实说明；长正文、字段缺失、历史回放与实时重复帧；深浅主题和窄屏）
-- Goal 续跑卡片：`goal-round-card`（真实 reducer → renderMessageBody；Goal 每一轮续跑的 `goal-round` 自定义消息是 display: false，仍画成「目标续跑 · 第 N 轮」卡片，正文用真实 `buildGoalRoundPrompt` 造；标题不写轮次预算；默认收起、展开看这一轮的完成条件、再点收起；别的 display: false 消息照旧不显示；probe 经 act 推一轮实时的（message_start / message_end）只出一张；浅色主题）
+- Goal 续跑卡片：`goal-round-card`（真实 reducer → renderMessageBody；hidden `goal-round` 仍画卡，旧正文保留「第 N 轮」，新 details 显示「第 X 批 · 第 Y 轮」，不写轮次预算；默认收起，展开完整条件；实时 start/end 去重、其他 display:false 不显示、浅色主题；只跑同名场景）
 - 等待中的引导取消 / 编辑：`steer-cancel`（真实 createAgentStore → renderMessageBody，`agent_cancel_steer` 用桩、正文是「已经在注入的那条」时回 cancelled: false，输入框只装 composerBridge 的回填接缝；等待中的引导悬停才浮现操作栏，按钮是取消引导（X）/ 编辑 / 复制、没有「更多」；点 X 按正文撤这一条、气泡去掉、输入框不动；撤不回来时提示并保留气泡；编辑先取消、撤下后原文和图片回到输入框；已引导的消息没有取消；浅色主题 X 可见）
-- 代码索引：`code-retrieval-panel`（真实 CodeRetrievalPanel，外面套定高的 `styles.panel`，用桩提供 `agentData_code_*` 和 `read_file`，项目 3000 个文件、两份源码（400 行小文件、12000 行大文件，每 200 行一条折成多行的长注释）；搜索框留空时桩按 limit / offset 分页返回并把每次请求记成事件，只画已加载的页、尾部「显示更多」滚得到点得到、点一次向主进程要一页、一路点到底 3000 个全在且按钮消失（不退回前端切页）、没有一次请求返回超过一页，顶部写真实总数；外层面板不被撑长、结果列表在左栏内滚动；原始结果展开前不画内容、展开后高度有上限并标注已截断；换成搜索后页数重置、不足一页没有「显示更多」；点结果进详情，详情栏与列表栏同高并在栏内滚动，小文件整块渲染，大文件虚拟化（DOM 里只有窗口附近的行、索引行居中、跳到第 9000 行居中、折行行高不一不重叠、滚到头尾都对）；矮窗口保住卡片 320px 的下限、放不下的部分由外层面板滚动；窄视口只显示详情栏时同样有上限）
-- 代码索引自动同步：`code-index-sync`（真实 CodeRetrievalPanel，`agentData_code_status` 的返回由 probe 经 act 切换，形状照 codegraph-host 的 `CodeGraphThreads.status`（state + phase / progress / lastError / watcher），每次读状态记一条事件；增量同步中标签「同步中」、搜索框可用、文件列表照常查出、title 带阶段与进度；调度器推进期间静默轮询、标签一帧不闪「检查中」，回到空闲后数字更新、轮询停下；被别的程序占锁写「等待重试」不写失败；全量重建「索引中」、搜索框不可用；熔断后横幅写明已暂停、轮询停下；文件监听不可用时提示手动同步）
-- 前台 run 转后台：`subagent-detached`（真实 messagesFromAgent → renderMessageBody，`subagent_list` 用桩，probe 经 act 在注册表里把转后台的子代理改成已完成；单任务回执 status: running / detached 时卡片按后台子代理画运行中；并行组里已完成的那项是已完成、转后台的那几项是运行中而不是出错，组头写「N 个在后台运行」且没有失败计数；卡片第一次读注册表时还没建出来的那一行从挂载起一次也不画成已中断（工具返回后再读一次确认），注册表里确实没有的那一行画「已中断」、不算失败也不算在后台，转后台时没有 agentId 的那一行按任务文字跟上注册表；注册表结束后经轮询变成已完成、后台计数消失；都结束后不再轮询（轮询停掉、store 清空时不能退回运行中再把轮询拉起来））
+- 代码索引：`code-retrieval-panel`（真实 CodeRetrievalPanel，外面套定高的 `styles.panel`，用桩提供 `agentData_code_*` 和 `read_file`，项目 3000 个文件、两份源码（400 行小文件、12000 行大文件，每 200 行一条折成多行的长注释）；搜索框留空时桩按 limit / offset 分页返回并把每次请求记成事件，只画已加载的页、尾部「显示更多」滚得到点得到、点一次向主进程要一页、一路点到底 3000 个全在且按钮消失（不退回前端切页）、没有一次请求返回超过一页，顶部写真实总数；项目概览提供核心文件入口，文件详情展示源码与跨文件引用；外层面板不被撑长、结果列表在左栏内滚动；原始结果展开前不画内容、展开后高度有上限并标注已截断；换成搜索后页数重置、不足一页没有「显示更多」；点结果进详情，详情栏与列表栏同高并在栏内滚动，小文件整块渲染，大文件虚拟化（DOM 里只有窗口附近的行、索引行居中、跳到第 9000 行居中、折行行高不一不重叠、滚到头尾都对）；矮窗口保住卡片 320px 的下限、放不下的部分由外层面板滚动；窄视口只显示详情栏时同样有上限）
+- 代码索引最近项目：`code-index-projects`（18 个项目的首屏、等高卡片和完整路径提示、长列表滚动、状态与路径筛选、各项目独立的构建时间、单卡及批量原地同步、完整重建、打开目录与移除后恢复；真实索引库的无变更检查和删除同步另由 `codeGraphRuntime.integration.test.ts` 验证）
+
+- 代码索引项目浏览：`code-index-browser`（未选项目时真实检查全部目录、最近项目卡片与添加本地目录、下拉按名称/路径筛选且长名不压状态；手动同步计数推进、换回卡片继续显示、成功轻提示及搜索框纵坐标不变；目录逐级开合、显示隐藏项、平铺排序、语言与入度概览、直达源码/引用、搜索快捷键、复制相对路径和添加到对话，含窄窗浅色。系统目录、索引、剪贴板与输入框回调为桩）
+- 代码索引自动同步：`code-index-sync`（真实 CodeRetrievalPanel，按调度器状态与任务阶段更新顶栏；增量同步可查询、全量重建不可查、占锁等待、失败退避/熔断、监听未就绪与降级。进度可直接看见；结束后更新统计、从快速读状态退回空闲复查，不插通栏提示）
+- 前台 run 转后台：`subagent-detached`（真实消息／单卡／组卡／dock／菜单；启动、等待首响应、待确认与可信终态分开，旧空缓存、连续缺行／读取失败不误判中断；共享按原父会话与稳定 ID 查询并自动退避恢复，没有人工重试按钮；首响应以登记行的 `responseStarted` 为准，孩子开跑几十个工具调用时不再停在「等待首响应」等最终 `output`；超过 50 行的已知事实并入列表，旧 running 不覆盖终态；原后台 Bash 等待／超时／停止语义不变，明确终态及无观察者停止查询；只跑 `npm run ui:check -- subagent-detached`）
 - 右侧边栏跟会话走：`dock-session-binding`（真实 DockDndProvider（useDockSessionSwitch）+ RightPanelShell + DockPanel，左边两个会话行按侧栏 handleOpenSession 的字段写会话 store，「右栏」按钮走真实 toggleRightPanel，启动页点「文件管理器」开真实 FileTreeBody、目录用内存桩；启动页入口和 dock 标签条都写「文件管理器」；A 里打开的右栏和文件标签切到 B 不跟过来、B 默认收起，B 再打开只看到自己的空启动页；切回 A 按离开时的样子展开、标签是同一个 body 实例没被重建；B 自己开的文件标签是另一份，两份各自挂着、只显示当前会话那份；各会话的展开 / 收起互不带动）
 - 参数无法解析的工具调用：`invalid-arguments-card`（真实 reducer → groupMessages → TurnTimeline；pi 1.3.0 对参数不是合法 JSON 的调用给空 args 加 `Invalid arguments for tool "…": … Received arguments: …` 的错误结果，场景里的错误文本按 pi-ai `parseToolCallArguments` + `validateToolArguments` 实测造；实时 bash、历史回放 bash（toolCall 带 argumentsError）、MCP 工具三种都画成「<工具> 参数无法解析 · 未执行」，不画成空命令的 bash 卡、没有终端块；折叠行给解析错误，默认收起，展开后错误块在上、模型原样发来的参数在下；MCP 工具保留服务器标签、不出现 mcp__ 原名；普通 bash 失败仍是 bash 卡；浅色主题下错误块底色跟着变）
 - 计划侧栏：`plan-panel`（真实 ExtensionUiHost → planStore → openPlanDockTab → DockPanel / PlanPanel，对话流是真实 PlanSummaryCard，输入栏是真实 ModeAction；agent-mode 扩展与主进程用桩：`agent_prompt` 收面板发的 `/plan-update` `/plan-confirm` `/plan-cancel` `/plan-finish` 并按扩展规则改桩里的计划、推 `setStatus('agent-plan')` / `notify`，`agent_set_mode` 照 `writeAgentMode` 在未确认时回 `PLAN_UNCONFIRMED`；created 推送自动打开右栏标签、步骤全文进编辑框；改字 / 下移 / 加步骤后保存为第 2 版 · 已手动修改，`/plan-update` 带同一 planId、基准 rev、全文步骤并打到计划所属会话；有改动时确认执行不可点并写原因；用户改着时模型修订出冲突提示，载入最新换成新版本；手切 Agent 被拦后选择器退回 Plan、toast 宿主原文；确认执行发 `/plan-confirm <id> <rev>` 后模式变 Agent、面板只读、进度随 [DONE:n] 推进、标记完成进已完成；新计划使旧摘要卡写「已被新的计划取代」、按钮不可点；取消要 Popconfirm 二次确认；浅色主题。模式下拉是 base-ui Select，选项按 `[role="option"]` 的文字找，先打 data 属性再 `t.click`）
@@ -201,6 +234,8 @@ harness 自检不在这个清单里，也不常驻 `scenarios/`。怀疑 harness
 
 ### 写 probe
 
+- 虚拟列表滚动后要点到指定控件，用 `await t.clickReady(button, { dx: 20 })`。它在真正的偏移落点等待持续命中，超时不发送点击。故意验证遮挡层或禁用状态时仍用 `await t.click(button, 20)`，并断言谁收到事件或哪个回调没有触发。滚轮不走严格点击。
+- 要给场景启用业务时钟，在 `ui-harness/probeClock.mjs` 的 `wallClockScenarios` 中登记场景名（当前只有 `attention-toast`），然后用 `await t.clock.advanceBy(ms)`；它推进该场景读到的 `Date.now()`，不推进 `setTimeout`、动画帧或主进程看门狗。到达通知关闭时刻后等真实退出动画，再断言不可见。
 - 交互只用 `t.*` 的真实事件，不在页面里调 `element.click()`。
 - 判断弹层开合用 `countVisible`。颜色用 `checkColor`。尺寸近似值用 `checkNear`。动画用 `sample` 逐帧断言。
 - 异步加载的内容（`LazyHighlighter`、`LazyMarkdown` 都是懒加载）用 `waitForText` / `waitFor` 等到再断言。

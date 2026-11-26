@@ -1,0 +1,14 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "compilerOptions": { "typeRoots": ["../../../electron-agent/node_modules/@types"], "types": ["node"] },
+  "files": [
+    "../../../electron-agent/src/stores/subagentLiveStore.ts",
+    "../../../electron-agent/src/features/chat/SubAgentInline.tsx",
+    "../../../electron-agent/src/features/chat/SubAgentGroupInline.tsx",
+    "../../../electron-agent/src/features/dock/SubAgentBody.tsx",
+    "../../../electron-agent/src/features/dock/SubAgentLogBody.tsx",
+    "../../../electron-agent/src/features/panels/SubAgentConversation.tsx",
+    "../../../electron-agent/ui-harness/scenarios/subagent-detached.tsx"
+  ],
+  "references": []
+}

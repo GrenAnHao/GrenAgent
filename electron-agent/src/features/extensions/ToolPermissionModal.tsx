@@ -1,4 +1,5 @@
-import { Button, Modal } from '@lobehub/ui';
+import { Modal } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../components/WorkbenchButton';
 import { Segmented, Select } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Plus, Trash2 } from 'lucide-react';

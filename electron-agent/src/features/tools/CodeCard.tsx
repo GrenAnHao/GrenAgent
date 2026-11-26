@@ -29,6 +29,7 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 4px;
     border-block-end: 1px solid ${cssVar.colorFillQuaternary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 13px;
     color: ${cssVar.colorTextSecondary};
   `,

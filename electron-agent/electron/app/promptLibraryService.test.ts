@@ -166,3 +166,28 @@ describe('规则模式范围', () => {
     expect(moved.modes).toEqual(['ultra']);
   });
 });
+
+it('shows native configured paths and edits the selected repository file without copying or injecting the shadowed file', async () => {
+  const linked = join(agentDir, 'other');
+  await mkdir(linked);
+  const projectFile = join(workspace, 'AGENTS.md'), secondary = join(workspace, 'CLAUDE.md');
+  await writeFile(projectFile, '# A\r\n'); await writeFile(secondary, '# C\r\n');
+  await writeFile(join(linked, 'CLAUDE.md'), '# other');
+  const catalog = new PromptLibraryService(agentDir, async () => [linked, workspace]);
+  expect(catalog.directory('commands')).toBe(join(agentDir, 'prompts'));
+  expect(catalog.directory('rules', workspace)).toBe(join(workspace, '.pi', 'rules'));
+  expect(await catalog.listLibraryRules(workspace)).toMatchObject([
+    { path:projectFile, enabled:true, currentProject:true }, { path:secondary, enabled:false, currentProject:true },
+    { path:join(linked, 'CLAUDE.md'), enabled:true, currentProject:false },
+  ]);
+  await catalog.saveBuiltin(workspace, secondary, '# C\r\n', '# edited\r\n');
+  await expect(catalog.saveBuiltin(workspace, secondary, '# C\r\n', '# stale')).rejects.toThrow('其他地方更改');
+  await expect(catalog.saveBuiltin(workspace, join(agentDir, 'CLAUDE.md'), '', 'no')).rejects.toThrow('已关联项目');
+  expect(await readFile(secondary,'utf8')).toBe('# edited\r\n');
+  expect(await catalog.listRules(workspace)).toEqual([]);
+});
+it('preserves glob conditions through save and immediate enable/disable', async () => {
+  const rule = await service.saveRule({ workspace, scope:'project', title:'TS', body:'check', enabled:true, globs:['src/**/*.ts'] });
+  await service.setRuleEnabled(rule, false, workspace);
+  expect(await service.listRules(workspace)).toMatchObject([{enabled:false, globs:['src/**/*.ts']}]);
+});

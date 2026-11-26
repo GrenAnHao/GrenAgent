@@ -1,6 +1,6 @@
 import {requestObservations} from '../../extensions/_shared/requestObservation.js';
 import {RequestObservationService} from './app/requestObservationService';
-import { app, BrowserWindow, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, nativeImage, Notification } from "electron";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -20,6 +20,7 @@ import { PiPackageService } from "./app/piPackageService";
 import { ProviderService } from "./app/providerService";
 import { acquireSingleInstanceLock } from "./app/singleInstance";
 import { WorkspaceService } from "./app/workspaceService";
+import { installSessionProjectTransferMainGate } from './app/sessionProjectTransferMainGate';
 import { generateSessionTitle } from "./app/sessionTitle";
 import { UiHistoryService } from "./app/uiHistoryService";
 import { WorkspaceApprovalService } from "./app/workspaceApprovalService";
@@ -63,7 +64,8 @@ import { canSendTo, recordDiagEvent, recordDroppedSend, recordEventSend, startRu
 import { installFastRealpath } from "./fastRealpath";
 import { mergeRuntimeSettingsFile } from "./app/settingsService";
 import { AgentProcessClient } from "./agentProcess/agentProcessClient";
-import { BROADCAST_CHANNEL, DIAG_CHANNEL, type BroadcastPayload } from "./agentProcess/contract";
+import { BROADCAST_CHANNEL, DIAG_CHANNEL, GOAL_WORKSLOT_CHANNEL, type BroadcastPayload } from "./agentProcess/contract";
+import { GoalOwnerLossTracker } from './agentProcess/goalOwnerLoss';
 import { createAgentPorts, createHostMethods } from "./agentProcess/mainBindings";
 import { startJobGuard } from "./agentProcess/jobGuard";
 
@@ -229,10 +231,11 @@ if (!process.env.VITEST && singleInstance) {
       onBreaker: (event) => reportBreaker(event),
     });
     // 宿主退出后自行重拉，不依赖下一次请求。
+    let shutdownStarted = false;
     const codeGraphSupervisor = new CodeGraphHostSupervisor({
       isRunning: () => mainCodeGraph.isRunning,
       start: () => mainCodeGraph.ensureRunning(),
-      shouldRun: () => !app.isQuitting,
+      shouldRun: () => !shutdownStarted,
       onRecovered: (info) => recordDiagEvent({ kind: 'codegraph-host-recovered', ...info }),
       onFailed: (error, info) => recordDiagEvent({ kind: 'codegraph-host-recover-failed', attempt: info.attempt, message: error instanceof Error ? error.message : String(error) }),
     });
@@ -275,7 +278,7 @@ if (!process.env.VITEST && singleInstance) {
         settle: (owner, auditId, resolution) => runPermission(owner, 'permission.tool.settle', { auditId, resolution }),
       },
     });
-    const runPermission = (owner: string, method: string, params: Record<string, unknown>) => {
+    const runPermission = async (owner: string, method: string, params: Record<string, unknown>) => {
       const handler = agentData.extensionMethod(method, owner);
       if (!handler) throw new Error(`METHOD_NOT_FOUND: ${method}`);
       return handler(params);
@@ -294,6 +297,7 @@ if (!process.env.VITEST && singleInstance) {
       extensions: () => agent.extensions.catalog(),
       requestReload: () => agent.resources.reload(),
     });
+    const goalOwnerLoss = new GoalOwnerLossTracker();
     agentProcess = new AgentProcessClient({
       entry: resolveAgentHostEntry(entryInput),
       // 子进程崩溃（或主进程崩溃）时，它拉起的 MCP 服务器、bash、子代理留下的子孙进程由守卫清掉。
@@ -309,6 +313,9 @@ if (!process.env.VITEST && singleInstance) {
           agentData.registerKnownWorkspace(resolved);
           return resolved;
         },
+        invalidateSessionRecords: (paths) => workspace.invalidateSessionRecords(paths),
+        goalLossClaim: (sessionPath, sessionId) => goalOwnerLoss.claim(sessionPath, sessionId),
+        goalLossAck: (loss) => goalOwnerLoss.ack(loss),
         // 扩展只认一个端点：由最小端点服务 codeRetrieval.call 与 permission.tool.*，
         // 其余方法返回 METHOD_NOT_FOUND。端点与令牌在进程生命周期内不变；令牌按工作区签发，
         // 权限层的 owner 由令牌决定，不取请求负载。
@@ -334,6 +341,10 @@ if (!process.env.VITEST && singleInstance) {
           recordDiagEvent({ kind: 'agent-host-sample', ...(payload as Record<string, unknown>) });
           return;
         }
+        if (channel === GOAL_WORKSLOT_CHANNEL) {
+          goalOwnerLoss.report(payload);
+          return;
+        }
         if (channel !== BROADCAST_CHANNEL) return;
         const message = payload as BroadcastPayload;
         if (typeof message?.channel === 'string') broadcastPiEvent(message.channel, message.payload);
@@ -347,13 +358,22 @@ if (!process.env.VITEST && singleInstance) {
           ...(exit.fatal ? { fatal: exit.fatal } : {}),
           stderrTail: exit.stderrTail.slice(-4096),
         });
-        if (exit.expected) return;
+        if (exit.expected) {
+          goalOwnerLoss.clearExpectedExit();
+          return;
+        }
+        const confirmedGoalLosses = goalOwnerLoss.confirmUnexpectedExit();
         console.error('agent-host exited unexpectedly', exit.code, exit.signal, exit.fatal ?? exit.stderrTail.slice(-2000));
         // 运行时整个没了：每个打开过的工作区发一条不带会话的 pi://exit，渲染层把这个项目的运行态全部熄灭。
-        for (const target of agent.tracker.drain()) {
-          broadcastPiEvent('pi://exit', { workspace: target, code: exit.code ?? 1, source: 'interactive' });
+        for (const target of new Set([...agent.tracker.drain(), ...confirmedGoalLosses.map(loss => loss.workspace)])) {
+          broadcastPiEvent('pi://exit', { workspace: target, code: exit.code ?? 1, source: 'interactive',
+            confirmedGoalLosses: confirmedGoalLosses.filter(loss => loss.workspace === target) });
         }
       },
+    });
+    installSessionProjectTransferMainGate({
+      agentDir, workspace,
+      recover: async () => { await agentProcess!.request('pi.recoverSessionTransfers', {}); },
     });
     let mainWindow: BrowserWindow | undefined;
     const attention = new AttentionService({
@@ -387,13 +407,20 @@ if (!process.env.VITEST && singleInstance) {
       jobs: agent.jobs,
       mcpPolicy: new McpPolicyService(app.getPath('home'), {
         permissionManager: permissions,
+        inspect: agent.mcp.inspect,
+        cancelAttempt: agent.mcp.cancelAttempt,
+        testCall: agent.mcp.testCall,
+        confirmTest: async (name, args) => (await dialog.showMessageBox({
+          type: 'question', title: 'MCP 工具审批', message: `允许调用 ${name}？`,
+          detail: JSON.stringify(args, null, 2), buttons: ['取消', '允许本次'], defaultId: 0, cancelId: 0,
+        })).response === 1,
         probe: (configJson) => agent.mcp.probe(configJson),
       }),
       mcpConfig,
       subagent: agent.subagent,
       files: new FileService(),
-      skills: new SkillService(app.getPath('home')),
-      promptLibrary: new PromptLibraryService(agentDir),
+      skills: new SkillService(app.getPath('home'), agentDir),
+      promptLibrary: new PromptLibraryService(agentDir, () => workspace.listProjects()),
       piPackages,
       usage: agent.usage,
       pi: agent.pi,
@@ -458,7 +485,6 @@ if (!process.env.VITEST && singleInstance) {
     // 删会话前先停掉并摘下持有它的 handle，否则还在跑的会话会把文件写回来。
     workspace.setSessionReleaser((paths) => agent.pi.releaseSessions(paths));
     workspace.setSubagentControl(agent.controlPlane);
-    let shutdownStarted = false;
     let shutdownDone = false;
     app.on('before-quit', (event) => {
       if (shutdownDone) return;

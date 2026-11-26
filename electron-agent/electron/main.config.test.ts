@@ -15,7 +15,7 @@ describe('browserWindowOptions', () => {
       nodeIntegration: false,
       sandbox: true,
     })
-    expect(browserWindowOptions.webPreferences.preload).toMatch(/preload\\preload\.js$/)
+    expect(browserWindowOptions.webPreferences?.preload).toMatch(/preload[\\/]preload\.js$/)
     expect(browserWindowOptions.icon).toBeUndefined()
   })
 

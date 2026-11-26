@@ -1,0 +1,83 @@
+{
+  "label": "cross-2-old",
+  "ok": true,
+  "timing": {
+    "entry": 168,
+    "window": 2247,
+    "domReady": 2801
+  },
+  "marks": {
+    "html": 2559,
+    "splashDom": 2562,
+    "domLoaded": 2800,
+    "editor": 3105,
+    "splashLeaving": 6572,
+    "active": 6648,
+    "splashRemoved": 7023
+  },
+  "input": {
+    "attempt": 6669,
+    "point": {
+      "x": 750,
+      "y": 667
+    },
+    "confirmed": 6691
+  },
+  "shown": false,
+  "blockedRendererNetwork": 4,
+  "errors": [
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-mono/1.0.0/files/css/index.css",
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-harmony-sans/1.0.0/files/css/index-full.css",
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-harmony-sans-sc/1.0.0/files/css/index.css",
+    "Failed to load font from https://registry.npmmirror.com/katex/0.18.1/files/dist/katex.min.css"
+  ],
+  "commands": [
+    {
+      "command": "list_all_sessions",
+      "start": 3077,
+      "count": 365,
+      "activeListed": true,
+      "end": 5717
+    },
+    {
+      "command": "list_all_sessions",
+      "start": 3144,
+      "count": 365,
+      "activeListed": true,
+      "end": 5718
+    },
+    {
+      "command": "open_workspace",
+      "start": 5837,
+      "end": 6120
+    },
+    {
+      "command": "list_pi_sessions",
+      "start": 6121,
+      "count": 5,
+      "end": 6357
+    },
+    {
+      "command": "agent_switch_session",
+      "start": 6122,
+      "end": 6512
+    },
+    {
+      "command": "agent_get_messages",
+      "start": 6513,
+      "snapshot": {
+        "keys": [
+          "leafId",
+          "messages"
+        ],
+        "messages": 1
+      },
+      "end": 6527
+    },
+    {
+      "command": "ui_history_read",
+      "start": 6513,
+      "end": 6521
+    }
+  ]
+}

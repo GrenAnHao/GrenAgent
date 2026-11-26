@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@lobehub/ui';
 import { AddMcpModal } from './AddMcpModal';
@@ -51,6 +51,27 @@ describe('AddMcpModal', () => {
       { name: 'r', config: { url: 'https://x.com', headers: { Authorization: 'Bearer abc' } } },
       true,
     );
+  });
+
+  it('keeps masked credentials, spaced argv and extra fields across both modes and surfaces invalid JSON', async () => {
+    const submit = vi.fn();
+    const config = { command:'node',args:['C:/My Files/app.js',''],env:{API_TOKEN:'fixture-secret'},exposure:'direct',headers:{} };
+    renderModal({editing:{name:'demo',config,enabled:false,scope:'project'}, onSubmitForm:submit});
+    expect(screen.getByTestId('mcp-env-val-0')).toHaveAttribute('type','password');
+    fireEvent.click(screen.getByTestId('mcp-tab-json'));
+    const json=screen.getByTestId('mcp-json') as HTMLTextAreaElement;
+    expect(json.readOnly).toBe(true); expect(json.value).not.toContain('fixture-secret');
+    fireEvent.click(screen.getByText('显示凭据并编辑 JSON'));
+    expect(JSON.parse(json.value).mcpServers.demo).toEqual(config);
+    fireEvent.change(json,{target:{value:'{'}});
+    fireEvent.click(screen.getByTestId('mcp-tab-config'));
+    expect(screen.getByText('JSON 解析失败')).toBeInTheDocument();
+    fireEvent.change(json,{target:{value:JSON.stringify({...config, command:'node2'})}});
+    fireEvent.click(screen.getByTestId('mcp-tab-config'));
+    expect(screen.getByTestId('mcp-command')).toHaveValue('node2');
+    fireEvent.change(screen.getByRole('combobox'),{target:{value:'global'}});
+    fireEvent.click(screen.getByTestId('mcp-submit'));
+    await waitFor(()=>expect(submit).toHaveBeenCalledWith({name:'demo',config:{...config,command:'node2'}},false,'global'));
   });
 
   it('imports JSON with multiple servers', () => {

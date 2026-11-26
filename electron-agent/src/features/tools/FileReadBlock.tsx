@@ -3,7 +3,7 @@ import { languageFromPath } from './codeLanguage';
 import { LazyHighlighter } from './LazyHighlighter';
 import { CodeCard, codeCardContentClass } from './CodeCard';
 
-const codeStyle = { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } as const;
+const codeStyle = { fontFamily: 'var(--font-mono)', fontVariantLigatures: 'none', fontSize: 13 } as const;
 
 export const FileReadBlock = memo(function FileReadBlock({
   path,

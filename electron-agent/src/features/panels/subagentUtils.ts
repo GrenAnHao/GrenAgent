@@ -232,12 +232,44 @@ export function isBackgroundSpawn(result: unknown): boolean {
 /**
  * 后台卡片该显示的注册表状态。
  * 重启把可续聊行收成 done 只是为了不通知父模型；界面不能把它画成已完成。
- * 列表里已经找不到时，同样不能当成成功结束。
+ * 查询缺行只能说明状态未确认，不能推断孩子中断。
  */
 export function backgroundRegistryStatus(row: { status?: string; error?: string | null } | undefined): string {
-  if (!row?.status) return 'interrupted';
+  if (!row?.status) return 'status-unconfirmed';
   if (row.status === 'done' && row.error === SIDECAR_RESTARTED) return 'interrupted';
   return row.status;
+}
+
+export type SubAgentStartupPhase = 'starting' | 'awaiting-first-response' | 'running' | 'status-unconfirmed' | 'done' | 'error' | 'cancelled' | 'interrupted';
+
+/**
+ * 登记行是否已有首响应证据。运行期看 `responseStarted`（首个正文/思考/工具活动），
+ * 终态看最终 `output`。只等 `output` 会让孩子干活期间一直停在「等待首响应」。
+ */
+export function subAgentHasResponded(
+  row: { output?: string | null; responseStarted?: number | null } | undefined | null,
+): boolean {
+  return Boolean(row && (row.output || (row.responseStarted ?? 0) > 0));
+}
+
+/** 所有视图共用：父调用结束不代表后台孩子结束；只有明确结果/登记行可给出终态。 */
+export function subAgentStartupPhase(input: {
+  parentStatus: 'running' | 'done' | 'error'; background: boolean;
+  registry?: {
+    status?: string; error?: string | null; sessionPath?: string | null;
+    output?: string | null; responseStarted?: number | null;
+  };
+  hasResponse?: boolean; unconfirmed?: boolean;
+}): SubAgentStartupPhase {
+  const { parentStatus, background, registry, hasResponse, unconfirmed } = input;
+  if (!background && parentStatus !== 'running') return parentStatus;
+  if (parentStatus === 'error') return 'error';
+  const status = registry?.status ? backgroundRegistryStatus(registry) : null;
+  if (status === 'done' || status === 'error' || status === 'cancelled' || status === 'interrupted') return status;
+  if (unconfirmed) return 'status-unconfirmed';
+  const responded = Boolean(hasResponse) || subAgentHasResponded(registry);
+  if (!registry?.status && !responded) return 'starting';
+  return responded ? 'running' : 'awaiting-first-response';
 }
 
 /** 跟进结果里登记的子代理状态。没有则 null。 */
@@ -274,9 +306,9 @@ export function followUpCardStatus(
 }
 
 /** registry 状态字符串 → 会话视图三态（cancelled 归入 error）。 */
-export function mapSubAgentStatus(status: string): 'running' | 'done' | 'error' {
-  if (status === 'running') return 'running';
-  if (status === 'error' || status === 'cancelled') return 'error';
+export function mapSubAgentStatus(status: string, error?: string | null): 'running' | 'done' | 'error' {
+  if (status === 'running' || status === 'starting' || status === 'status-unconfirmed') return 'running';
+  if (status === 'error' || status === 'cancelled' || status === 'interrupted' || (status === 'done' && error === SIDECAR_RESTARTED)) return 'error';
   return 'done';
 }
 

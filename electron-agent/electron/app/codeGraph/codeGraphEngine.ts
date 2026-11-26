@@ -7,16 +7,19 @@ import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import { executeCodeGraphTool } from './codeGraphQuery';
 import { timeSync } from '../../agentData/methodTiming';
 import { isIndexed } from './indexProbe';
+import { indexCommitTime, recordIndexCommit } from './indexCommitTime';
 import { closeIndexVersions, indexDataVersion, observeRead } from './readConsistency';
 import type { SyncView } from './syncScheduler';
 
-export const CODEGRAPH_SDK_VERSION = '1.6.2';
+export const CODEGRAPH_SDK_VERSION = '1.6.4';
 type Sdk = typeof import('@colbymchenry/codegraph');
 /** FileWatcher 只有写线程挂监听时才用到；测试注入的假 SDK 可以不带。 */
 export type CodeGraphSdk = Pick<Sdk, 'CodeGraph' | 'isInitialized'> & Partial<Pick<Sdk, 'FileWatcher'>>;
 export type SyncMode = 'incremental' | 'full';
 /** 调度器派发前问写线程：这次同步该走哪条路。uninitialized = 还没有索引。 */
 export type SyncPlan = SyncMode | 'uninitialized';
+/** Explicit desktop rebuilds go through the same writer as ordinary syncs. */
+export interface ManualSyncOptions { mode?: 'full' }
 export interface SyncRunOptions {
   /** 不给时按原规则自己判断（没索引、上次没建完、抽取器升级 → 全量，否则增量）。 */
   mode?: SyncMode;
@@ -46,6 +49,8 @@ export interface CodeGraphStatusView extends Partial<SyncView> {
   nodes?: number;
   edges?: number;
   lastIndexedAt?: number | null;
+  /** Latest committed build/content change, independent of scheduler attempts. */
+  syncedAt?: number | null;
   message?: string;
   watcher?: { active: boolean; degraded: boolean; reason?: string };
   /** 正在用上一次提交的索引应答（有同步在跑、在排队，或监听报过的改动还没进索引）。 */
@@ -90,11 +95,11 @@ export class CodeGraphEngine {
       const sdk = await this.load();
       if (this.writers.has(key)) {
         const graph = this.entries.get(key)?.graph;
-        return { ...base, ...(graph ? this.snapshot(graph) : {}), state: 'indexing' };
+        return { ...base, ...(graph ? this.snapshot(workspace, graph) : {}), state: 'indexing' };
       }
       if (!sdk.isInitialized(workspace)) return { ...base, indexed: false, state: 'unavailable' };
       return await this.read(workspace, async (graph) => ({
-        ...base, ...this.snapshot(graph),
+        ...base, ...this.snapshot(workspace, graph),
         ...(this.failures.has(key) ? { state: 'failed' as const, message: this.failures.get(key) } : {}),
       }));
     } catch (error) {
@@ -157,6 +162,7 @@ export class CodeGraphEngine {
         this.checkCancelled(controller.signal);
         outcome = { mode: 'incremental', filesChanged: result.filesAdded + result.filesModified + result.filesRemoved };
       }
+      if (outcome.mode === 'full' || (outcome.filesChanged ?? 0) > 0) recordIndexCommit(workspace);
       this.failures.delete(key);
       return outcome;
     }).catch((error) => {
@@ -321,16 +327,17 @@ export class CodeGraphEngine {
     return this.sdk;
   }
 
-  private snapshot(graph: CodeGraph): Pick<CodeGraphStatusView, 'indexed' | 'connected' | 'state' | 'files' | 'nodes' | 'edges' | 'lastIndexedAt'> {
+  private snapshot(workspace: string, graph: CodeGraph): Pick<CodeGraphStatusView, 'indexed' | 'connected' | 'state' | 'files' | 'nodes' | 'edges' | 'lastIndexedAt' | 'syncedAt'> {
     const stats = graph.getStats();
     const indexState = graph.getIndexState();
+    const lastIndexedAt = graph.getLastIndexedAt();
     let state: CodeGraphStatusView['state'] = graph.isIndexStale() ? 'stale' : 'indexed';
     if (indexState === 'indexing' || indexState === 'partial') state = 'partial';
     if (indexState === 'failed') state = 'failed';
     return {
       indexed: true, connected: true,
       state,
-      files: stats.fileCount, nodes: stats.nodeCount, edges: stats.edgeCount, lastIndexedAt: graph.getLastIndexedAt(),
+      files: stats.fileCount, nodes: stats.nodeCount, edges: stats.edgeCount, lastIndexedAt, syncedAt: indexCommitTime(workspace, lastIndexedAt, indexState === 'complete' || indexState === null),
     };
   }
 

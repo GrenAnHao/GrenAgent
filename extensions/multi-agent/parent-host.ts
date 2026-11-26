@@ -50,6 +50,7 @@ export function settlementMessage(notice: SettlementNotice): {
     details: {
       childId: notice.childId,
       stopReason: notice.stopReason,
+      ...(notice.bashTimeout ? { bashTimeout: notice.bashTimeout, reply: notice.reply } : {}),
       ...(notice.sessionPath ? { sessionPath: notice.sessionPath } : {}),
     },
   };

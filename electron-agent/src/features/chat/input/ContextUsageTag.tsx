@@ -68,6 +68,8 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorText};
   `,
   total: css`
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     color: ${cssVar.colorTextTertiary};
     font-variant-numeric: tabular-nums;
   `,
@@ -107,6 +109,8 @@ const styles = createStaticStyles(({ css }) => ({
     white-space: nowrap;
   `,
   rowValue: css`
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     color: ${cssVar.colorText};
     font-variant-numeric: tabular-nums;
   `,
@@ -135,9 +139,11 @@ const styles = createStaticStyles(({ css }) => ({
   autoValue: css`
     color: ${cssVar.colorPrimary};
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     font-variant-numeric: tabular-nums;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
   `,
   follow: css`
     margin-top: 2px;
@@ -234,11 +240,15 @@ function AutoCompactSlider({ sessionPath }: { sessionPath: string | null | undef
 function UsageCard({
   stats,
   compacting,
+  refreshing,
+  refreshError,
   sessionPath,
   onCompact,
 }: {
   stats: ContextStats;
   compacting: boolean;
+  refreshing: boolean;
+  refreshError?: string;
   sessionPath: string | null | undefined;
   onCompact: () => void;
 }) {
@@ -251,7 +261,7 @@ function UsageCard({
   return (
     <div className={styles.card}>
       <div className={styles.head}>
-        <span className={styles.title}>上下文用量</span>
+        <span className={styles.title}>上下文用量{refreshing ? ' · 旧值，刷新中' : refreshError ? ' · 读取失败，保留旧值' : ''}</span>
         <span className={styles.total}>
           {stats.contextKnown ? `${Math.round(stats.contextPercent)}% 已用` : '未知'} · ~{usedText} / {limitText}
         </span>
@@ -313,10 +323,11 @@ export function ContextUsageTag() {
   // 打开 / 切换会话时历史异步加载进 store；消息数变化即触发 stats 重拉，
   // 解决「打开旧会话首拉为 0（会话宿主 会话尚未就绪）后再不更新」。
   const messageCount = store.useStore((s) => s.messages.length);
+  const contextRevision = store.useStore((s) => s.contextRevision ?? 0);
   const compacting = store.useStore((s) => Boolean(s.compacting));
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   // 按画面上这份会话取统计：同项目另一个会话在前景跑时，不能显示它的上下文用量。
-  const { stats: fetched } = useSessionStats(workspace, messageCount, store.getLoadedSessionPath() ?? activeSessionPath);
+  const { stats: fetched, loading: refreshing, error: refreshError } = useSessionStats(workspace, `${messageCount}:${contextRevision}`, store.getLoadedSessionPath() ?? activeSessionPath);
   const stats = displayContextStats(fetched, !activeSessionPath);
   const sessionPath = store.getLoadedSessionPath() ?? activeSessionPath;
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -335,7 +346,7 @@ export function ContextUsageTag() {
   return (
     <Popover
       arrow={false}
-      content={<UsageCard compacting={compacting} sessionPath={sessionPath} onCompact={() => void pi.compact(workspace)} stats={stats} />}
+      content={<UsageCard compacting={compacting} refreshing={refreshing} refreshError={refreshError} sessionPath={sessionPath} onCompact={() => void pi.compact(workspace, undefined, sessionPath)} stats={stats} />}
       placement="topLeft"
       positionerProps={{
         collisionAvoidance: { align: 'flip', fallbackAxisSide: 'none', side: 'flip' },

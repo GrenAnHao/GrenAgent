@@ -11,11 +11,10 @@ import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
 import { computeSubAgentUnits, computeAnsweredQuestions } from '../chat/messagePrecompute';
-import { buildSubAgentConversationMessages, subAgentSessionPath } from './subagentUtils';
+import { buildSubAgentConversationMessages, subAgentSessionPath, type SubAgentStartupPhase } from './subagentUtils';
 import { pi } from '../../lib/pi';
 import { useChildSessionBinding } from './useChildSessionBinding';
 import { useSubAgentLive } from '../../hooks/useSubAgentLive';
-import { useSubAgentLiveStore } from '../../stores/subagentLiveStore';
 import { PendingResponseStatus } from '../chat/PendingResponseStatus';
 import { AgentIdentityContext } from '../chat/AgentCommunicationCard';
 
@@ -144,6 +143,8 @@ interface SubAgentConversationProps {
   agentId?: string | null;
   /** 调用方已经从登记表记下的子会话路径（后台回执里没有）。 */
   sessionPath?: string | null;
+  parentSessionPath?: string | null;
+  phase?: SubAgentStartupPhase;
   'data-testid'?: string;
 }
 
@@ -155,6 +156,8 @@ export function SubAgentConversation({
   workspace,
   agentId,
   sessionPath: knownPath,
+  parentSessionPath,
+  phase,
   'data-testid': testId,
 }: SubAgentConversationProps) {
   const liveResult = useThrottledValue(result, 100, { enabled: status === 'running' });
@@ -162,19 +165,17 @@ export function SubAgentConversation({
   // 登记表轮询在最后一个消费者退出时会清掉整个项目的行，路径不能只从 store 里现读：
   // 见过就按 agentId 记住；终态挂载时还没有，就借共享轮询补查一次首包，读到就释放。
   const [seenPath, setSeenPath] = useState<{ agentId: string; path: string } | null>(null);
-  const [lookedUp, setLookedUp] = useState<string | null>(null);
   const rememberedPath = agentId && seenPath?.agentId === agentId ? seenPath.path : null;
   const needsPathLookup = Boolean(
-    workspace && agentId && status !== 'running' && !givenPath && !rememberedPath && lookedUp !== agentId,
+    workspace && agentId && status !== 'running' && !givenPath && !rememberedPath,
   );
-  const live = useSubAgentLive(workspace ?? '', agentId ?? null, status === 'running' || needsPathLookup);
-  const registryLoaded = useSubAgentLiveStore((s) => s.itemsByWorkspace.has(workspace ?? ''));
+  const live = useSubAgentLive(workspace ?? '', agentId ?? null,
+    !['done', 'error', 'cancelled', 'interrupted'].includes(phase ?? '') && (status === 'running' || needsPathLookup), parentSessionPath);
   useEffect(() => {
     if (!agentId) return;
     const path = live.sessionPath;
     if (path) setSeenPath((prev) => (prev?.agentId === agentId && prev.path === path ? prev : { agentId, path }));
-    if (registryLoaded) setLookedUp(agentId);
-  }, [agentId, live.sessionPath, registryLoaded]);
+  }, [agentId, live.sessionPath]);
 
   // 后台 one-shot 的工具结果在子会话建立前就返回了，里面没有 sessionPath；注册表行里有。
   // 有了它就和主代理一样吃流式事件，不再靠 2.5s 拉 registry transcript 回放。
@@ -189,7 +190,7 @@ export function SubAgentConversation({
   const registryTranscript = useRegistryTranscript(
     workspace ?? '',
     sessionHasWork || inlineTranscript ? null : agentId,
-    status === 'running',
+    status === 'running' && phase !== 'status-unconfirmed',
   );
 
   const transcript = inlineTranscript || registryTranscript;
@@ -205,12 +206,18 @@ export function SubAgentConversation({
   const display = useMemo(() => groupMessages(messages), [messages]);
   const subAgents = useMemo(() => computeSubAgentUnits(display), [display]);
   const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
+  // 登记表的首响应标记可能还没轮到下一轮查询（续聊的会话不上报进度帧）：已经回放出正文或工具，
+  // 本身就是更强的首响应证据，不能再画成「等待首响应」。
+  const hasWorkInView = replayMessages.some((m) => m.kind === 'assistant' || m.kind === 'tool');
+  const shownPhase = phase === 'awaiting-first-response' && hasWorkInView ? 'running' : phase;
   // 子代理面板下面没有输入框，列表末尾自己留一段空白，最新一行不压在面板底边上。
   // 不走 paddingBottom：那会把「回到底部」按钮一起抬高，它是给主对话的输入框让位的。
   const footer = (
     <>
       {status === 'running' ? (
-        <PendingResponseStatus label="正在处理…" startedAt={live.createdAt ?? undefined} />
+        shownPhase === 'status-unconfirmed'
+          ? <div data-testid="subagent-status-unconfirmed">状态待确认</div>
+          : <PendingResponseStatus label={shownPhase === 'starting' ? '启动中…' : shownPhase === 'awaiting-first-response' ? '等待首响应…' : '正在处理…'} startedAt={live.createdAt ?? undefined} />
       ) : null}
       <div data-testid="subagent-tail-space" style={{ height: TAIL_SPACE }} />
     </>

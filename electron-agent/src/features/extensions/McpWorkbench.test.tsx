@@ -21,6 +21,7 @@ describe('McpWorkbench', () => {
   it('keeps a malformed file configuration readable without rendering object children', () => {
     render(<McpWorkbench workspace="/ws" entries={[{ name: 'broken', scope: 'global', enabled: false, config: { command: { bad: true } } as never }]} runtimeServers={[]} toolsCache={{}} probing={new Set()} policyRaw={{}} onToggle={() => {}} onEdit={() => {}} onDelete={() => {}} onReload={() => {}} onPermChange={() => {}} onOpenRules={() => {}} />);
     expect(screen.getByTestId('mcp-server-broken')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', {name:'连接配置 & 环境变量'}));
     expect(screen.getByText('格式无效')).toBeInTheDocument();
   });
 
@@ -34,6 +35,7 @@ describe('McpWorkbench', () => {
     />);
     expect(screen.getByTestId('mcp-select-fs')).toHaveTextContent('已连接 · 2 工具');
     expect(screen.getByTestId('mcp-status-fs')).toHaveTextContent('已连接 · 2 工具');
+    fireEvent.click(screen.getByRole('tab', {name:'连接配置 & 环境变量'}));
     const config = screen.getByRole('region', { name: '连接配置' });
     expect(config).not.toHaveTextContent('只读摘要');
     expect(config).not.toHaveTextContent('连接方式');
@@ -46,16 +48,31 @@ describe('McpWorkbench', () => {
   it('shows the full connection config and hides env and header values', () => {
     const noop = () => {};
     const { rerender } = render(<McpWorkbench workspace="/ws" entries={[{ name: 'fs', scope: 'global', enabled: true, config: { command: 'npx', args: ['-y', 'pkg', 'C:/My Files'], cwd: '/repo', env: { API_KEY: 'sk-secret' } } }]} runtimeServers={[]} toolsCache={{}} probing={new Set()} policyRaw={{}} onToggle={noop} onEdit={noop} onDelete={noop} onReload={noop} onPermChange={noop} onOpenRules={noop} />);
+    fireEvent.click(screen.getByRole('tab', {name:'连接配置 & 环境变量'}));
     let config = screen.getByRole('region', { name: '连接配置' });
     expect(config).toHaveTextContent('npx -y pkg "C:/My Files"');
     expect(config).toHaveTextContent('/repo');
     expect(config).toHaveTextContent('API_KEY');
     expect(config).not.toHaveTextContent('sk-secret');
     rerender(<McpWorkbench workspace="/ws" entries={[{ name: 'web', scope: 'global', enabled: true, config: { url: 'https://mcp.example/sse', headers: { Authorization: 'Bearer abc' } } }]} runtimeServers={[]} toolsCache={{}} probing={new Set()} policyRaw={{}} onToggle={noop} onEdit={noop} onDelete={noop} onReload={noop} onPermChange={noop} onOpenRules={noop} />);
+    fireEvent.click(screen.getByRole('tab', {name:'连接配置 & 环境变量'}));
     config = screen.getByRole('region', { name: '连接配置' });
     expect(config).toHaveTextContent('https://mcp.example/sse');
     expect(config).toHaveTextContent('Authorization');
     expect(config).not.toHaveTextContent('Bearer abc');
+  });
+
+  it('reloads only enabled failures, not stale probes, and searches the directory without hiding the active anchor', async () => {
+    const reload=vi.fn(); const entries=['dead','ok','cached','paused'].map(n=>({name:n,scope:'global' as const,enabled:n!=='paused',config:{command:n}}));
+    render(<McpWorkbench workspace="/w" entries={entries} runtimeServers={[{name:'dead',status:'failed',error:'ECONNREFUSED',tools:0},{name:'ok',status:'connected',tools:0}]}
+      toolsCache={{ok:{ok:false,error:'stale',toolNames:[],probedAt:''},cached:{ok:false,error:'timeout',toolNames:[],probedAt:''},paused:{ok:false,error:'bad',toolNames:[],probedAt:''}}}
+      probing={new Set()} policyRaw={{}} onToggle={()=>{}} onEdit={()=>{}} onDelete={()=>{}} onReload={reload} onOpenRules={()=>{}} onPermChange={()=>{}} />);
+    fireEvent.click(screen.getByRole('button',{name:'重载全部异常项'}));
+    await vi.waitFor(()=>expect(reload.mock.calls.map(([n])=>n)).toEqual(['dead','cached']));
+    fireEvent.change(screen.getByLabelText('搜索服务器'),{target:{value:'OK'}});
+    expect(screen.queryByTestId('mcp-select-dead')).toBeNull();
+    expect(screen.getByTestId('mcp-select-ok')).toHaveAttribute('aria-pressed','true');
+    expect(screen.getByTestId('mcp-server-ok')).toBeInTheDocument();
   });
 
   it('keeps the default selected server when disabling it reorders the directory', () => {

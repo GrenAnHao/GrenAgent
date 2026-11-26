@@ -15,8 +15,18 @@ export function goalRoundTitle(firstLine: string): string {
   return `目标续跑 · 第 ${match[1]} 轮`;
 }
 
-function GoalRoundPillInner({ content }: { content: string }) {
-  return <NoticeSplitPill content={content} icon={Target} testId="goal-round-pill" formatTitle={goalRoundTitle} />;
+export function goalRoundDetailsTitle(firstLine: string, details?: unknown): string {
+  const value = details && typeof details === 'object' ? details as Record<string, unknown> : {};
+  const { runNumber, runRound } = value;
+  if (typeof runNumber === 'number' && Number.isSafeInteger(runNumber) && runNumber > 0
+    && typeof runRound === 'number' && Number.isSafeInteger(runRound) && runRound > 0) {
+    return `目标续跑 · 第 ${runNumber} 批 · 第 ${runRound} 轮`;
+  }
+  return goalRoundTitle(firstLine);
+}
+
+function GoalRoundPillInner({ content, details }: { content: string; details?: unknown }) {
+  return <NoticeSplitPill content={content} icon={Target} testId="goal-round-pill" formatTitle={(line) => goalRoundDetailsTitle(line, details)} />;
 }
 
 export const GoalRoundPill = memo(GoalRoundPillInner);

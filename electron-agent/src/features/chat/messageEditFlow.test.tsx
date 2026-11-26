@@ -144,7 +144,7 @@ function seedUser(store: AgentStoreApi, entryId: string, text: string) {
 describe('messageEditFlow', () => {
   let store: AgentStoreApi;
   const composerValues: string[] = [];
-  const normalSend = vi.fn(() => Promise.resolve());
+  const normalSend = vi.fn<NonNullable<Parameters<typeof registerComposerSend>[0]>>(() => Promise.resolve());
 
   beforeEach(() => {
     truncateTo.mockReset().mockResolvedValue({ ok: true, lines: [] });

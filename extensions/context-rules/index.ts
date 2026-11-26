@@ -4,15 +4,18 @@
 // 规则可带 frontmatter `modes`：只在列出的模式下注入；没有 modes 的旧规则适用所有模式。
 // 过滤用真实的当前会话模式（agent-mode 的 live 表，按 ALS 会话 id 查），不看会话条目里可能过期的模式。
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import { getAgentMode } from "../agent-mode/modes.js";
 import { projectCwd } from "../_shared/session-cwd.js";
 import { currentSessionId } from "../_shared/workspace-context.js";
-import { activeRuleContextFiles, createRuleCache, globalRulesDir, projectRulesDir } from "./rules.js";
+import { activeRuleContextFiles, referencedRuleFiles, createRuleCache, globalRulesDir, projectRulesDir, type RuleFile } from "./rules.js";
+import { RULE_INJECTION_ENTRY } from "./injectionNotice.js";
 
 export default function (pi: ExtensionAPI) {
   const cache = createRuleCache((rule) => console.error(`[context-rules] 跳过 ${rule.path}：${rule.error}`));
   // 只清理本扩展实际注入过的路径，避免误删其它来源的 rules/AGENTS.md 等上下文。
   const injectedPaths = new Set<string>();
+  let pending: RuleFile[] = [];
 
   pi.on("before_agent_start", async (event, ctx) => {
     const options = event.systemPromptOptions;
@@ -25,7 +28,9 @@ export default function (pi: ExtensionAPI) {
     ]);
     // 当前目录实际发现的规则也归本扩展管理；重载工厂后仍能移除上次模式的条目。
     for (const rule of rules) injectedPaths.add(rule.path);
-    const files = activeRuleContextFiles(rules, mode);
+    const files = activeRuleContextFiles(rules, mode, event.messageType === "user" && rules.some((rule) => rule.globs?.length) ? referencedRuleFiles(event.prompt, ctx.cwd) : []);
+    const activePaths = new Set(files.map((file) => file.path));
+    pending = rules.filter((rule) => activePaths.has(rule.path));
     // 先去掉上一次调用追加的规则条目（同一个 options 对象被复用时，切模式不能残留旧范围的规则）。
     const current = options.contextFiles ?? [];
     const base = current.filter((file) => !injectedPaths.has(file.path));
@@ -38,4 +43,17 @@ export default function (pi: ExtensionAPI) {
     const unchanged = next.length === current.length && next.every((file, i) => file === current[i]);
     if (!unchanged) options.contextFiles = next;
   });
+
+  pi.on("context_with_system", (event) => {
+    if (!pending.length) return;
+    // Replay prompt patches instead of treating a cached/unchanged prompt as no injection.
+    const projectContext = getCurrentSystemMessage(event.messages)?.sections?.project_context;
+    const rules = pending
+      .filter(({ path, body }) => projectContext?.includes(`<project_instructions path="${path}">\n${body}\n</project_instructions>`))
+      .map(({ id, title, scope }) => ({ id, title, scope }));
+    pending = [];
+    if (rules.length) pi.appendEntry(RULE_INJECTION_ENTRY, { rules });
+  });
+
+  pi.on("agent_end", () => { pending = []; });
 }

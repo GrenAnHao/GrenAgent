@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises';
+import { rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
@@ -34,6 +34,27 @@ describe('UiHistoryService', () => {
     await service.write(workspace, 's', 'first');
     await service.write(workspace, 's', 'second');
     await expect(service.read(workspace, 's')).resolves.toBe('second');
+  });
+
+  it('appends and replaces UTF-8 history tails and refuses stale or deleted bases', async () => {
+    const { service, workspace } = await createService();
+    const first = '{"text":"旧行 🌱"}';
+    const original = `${first}\n{"text":"等待"}`;
+    await service.write(workspace, 's', original);
+    const { revision } = await service.readSnapshot(workspace, 's', true);
+    expect(revision).toBeTruthy();
+    const offset = Buffer.byteLength(original);
+    const suffix = '\n{"text":"新行"}';
+    const appended = await service.patch(workspace, 's', revision!, offset, suffix);
+    expect(appended).toBeTruthy();
+    await expect(service.read(workspace, 's')).resolves.toBe(original + suffix);
+    await expect(service.patch(workspace, 's', revision!, offset, 'stale')).resolves.toBeNull();
+    await expect(service.patch(workspace, 's', appended!, Buffer.byteLength(first), '\n{"text":"完成"}')).resolves.toEqual(expect.any(String));
+    await expect(service.read(workspace, 's')).resolves.toBe(first + '\n{"text":"完成"}');
+    expect((await stat(join(workspace, '.pi', 'ui-history', 's.jsonl'))).size).toBe(Buffer.byteLength(first + '\n{"text":"完成"}'));
+    await service.delete(workspace, 's');
+    await expect(service.patch(workspace, 's', appended!, 0, 'stale')).resolves.toBeNull();
+    await expect(service.read(workspace, 's')).resolves.toBe('');
   });
 
   it('deletes history and makes subsequent reads empty', async () => {

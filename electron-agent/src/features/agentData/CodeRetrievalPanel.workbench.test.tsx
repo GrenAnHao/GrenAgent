@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const options = vi.hoisted(() => ({ value: [{ cwd: 'D:/a', name: 'A' }, { cwd: 'D:/b', name: 'B' }] }));
 vi.mock('./useProjectOptions', () => ({ useProjectOptions: () => options.value }));
-vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { projects: vi.fn(), status: vi.fn(), search: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
+vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { overview: vi.fn(), projects: vi.fn(), status: vi.fn(), search: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
 vi.mock('../../lib/files', () => ({ files: { read: vi.fn() } }));
 vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
 vi.mock('./CodeSourceLines', async () => await import('./codeSourceLinesStub'));
@@ -27,7 +27,8 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     const calls = vi.mocked(agentDataApi.code.call).mock.calls.length;
     options.value = [{ cwd: 'D:/b', name: 'B' }];
     rerender(<CodeRetrievalPanel initialProject="D:/a" />);
-    expectSelectDisplay('项目', '请选择项目');
+    expect(screen.queryByRole('combobox', { name: '项目' })).toBeNull();
+    expect(screen.getByRole('region', { name: '最近项目' })).toBeTruthy();
     expect(screen.queryByText('src/a.ts')).toBeNull();
     expect(screen.queryByLabelText('搜索代码')).toBeNull();
     expect(screen.queryByRole('button', { name: '同步索引' })).toBeNull();
@@ -46,6 +47,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(agentDataApi.code.overview).mockResolvedValue({ structuredContent: {schemaVersion:1, rows:[], extra:{languages:{}}} });
     options.value = [{ cwd: 'D:/a', name: 'A' }, { cwd: 'D:/b', name: 'B' }];
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([]);
     vi.mocked(agentDataApi.code.status).mockImplementation(async (workspace) => ({ workspace, connected: true, indexed: true }));
@@ -58,29 +60,29 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     options.value = Array.from({ length: 51 }, (_, index) => ({ cwd: `D:/group-${index}/repo`, name: 'repo' }));
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([{ workspace: 'D:/works/temporary', indexed: true }]);
     render(<CodeRetrievalPanel initialProject="D:/works/temporary" />);
-    await waitFor(() => expect(agentDataApi.code.projects).toHaveBeenCalled());
-    await openSelect('项目');
-    expect(document.querySelectorAll('.ant-select-item-option')).toHaveLength(52);
-    expect(screen.getByTitle(/group-50/)).toBeTruthy();
-    expect(screen.queryByTitle(/temporary/)).toBeNull();
-    expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe('');
-    expect(agentDataApi.code.status).not.toHaveBeenCalled();
+    await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledWith('D:/group-50/repo'));
+    expect(document.querySelectorAll('[data-project-card]')).toHaveLength(51);
+    expect(screen.getByText('D:/group-50/repo')).toBeTruthy();
+    expect(screen.queryByText(/temporary/)).toBeNull();
+    expect(screen.queryByRole('combobox', { name: '项目' })).toBeNull();
+    expect(agentDataApi.code.status).not.toHaveBeenCalledWith('D:/works/temporary');
+    expect(agentDataApi.code.call).not.toHaveBeenCalled();
   });
 
   it('accepts equivalent real initial and status paths', async () => {
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'd:\\A\\', indexed: true, connected: true });
     render(<CodeRetrievalPanel initialProject={'d:\\a\\'} />);
-    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'flat', limit: 100 } }));
+    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'children', hideIgnored: true, limit: 100 } }));
   });
 
   it('uses files for empty query, search for symbols and explore for related context', async () => {
     render(<CodeRetrievalPanel initialProject="D:/a" />);
-    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'flat', limit: 100 } }));
+    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'children', hideIgnored: true, limit: 100 } }));
     fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
     await screen.findByText('src/a.ts');
-    expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_search', args: { query: 'parse', limit: 20 } });
+    expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_search', args: { query: 'parse', limit: 20, hideIgnored: true } });
     fireEvent.click(screen.getByRole('radio', { name: '相关上下文' }));
-    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_explore', args: { query: 'parse', limit: 20 } }));
+    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_explore', args: { query: 'parse', limit: 20, hideIgnored: true } }));
     expect(agentDataApi.code.search).not.toHaveBeenCalled();
   });
 
@@ -122,17 +124,17 @@ describe('CodeRetrievalPanel workbench isolation', () => {
       servePages();
       render(<CodeRetrievalPanel initialProject="D:/a" />);
       await screen.findByText('src/file-0.ts');
-      expect(filesCalls()).toEqual([{ format: 'flat', limit: 100 }]);
+      expect(filesCalls()).toEqual([{ format: 'children', hideIgnored: true, limit: 100 }]);
       expect(listed()).toBe(100);
       expect(screen.getByText('250 个结果')).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 150 项）' }));
+      fireEvent.click(screen.getByText('显示更多（还有 150 项）').closest('button')!);
       await screen.findByText('src/file-199.ts');
-      expect(filesCalls()).toEqual([{ format: 'flat', limit: 100 }, { format: 'flat', limit: 100, offset: 100 }]);
+      expect(filesCalls()).toEqual([{ format: 'children', hideIgnored: true, limit: 100 }, { format: 'children', hideIgnored: true, limit: 100, offset: 100 }]);
       expect(listed()).toBe(200);
-      fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 50 项）' }));
+      fireEvent.click(screen.getByText('显示更多（还有 50 项）').closest('button')!);
       await screen.findByText('src/file-249.ts');
       expect(listed()).toBe(250);
-      expect(screen.queryByRole('button', { name: /显示更多/ })).toBeNull();
+      expect(screen.queryByText(/显示更多/)).toBeNull();
       expect(screen.getByText('250 个结果')).toBeTruthy();
     });
 
@@ -194,7 +196,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
       await screen.findByText('src/file-0.ts');
       reported.total = 251;
       fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
-      await waitFor(() => expect(filesCalls()).toEqual([{ format: 'flat', limit: 100 }, { format: 'flat', limit: 100, offset: 100 }, { format: 'flat', limit: 100 }]));
+      await waitFor(() => expect(filesCalls()).toEqual([{ format: 'children', hideIgnored: true, limit: 100 }, { format: 'children', hideIgnored: true, limit: 100, offset: 100 }, { format: 'children', hideIgnored: true, limit: 100 }]));
       await screen.findByText('251 个结果');
       expect(listed()).toBe(100);
       expect(screen.getByRole('button', { name: '显示更多（还有 151 项）' })).toBeTruthy();
@@ -390,7 +392,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     expect(screen.getByText('12 文件')).toBeTruthy();
     expect(screen.queryByText('这个项目还没有索引')).toBeNull();
     await openSelect('项目');
-    expect(screen.getByRole('option', { name: /B.*未检查/ })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /B.*未获取/ })).toBeTruthy();
   });
 
   it('keeps readable same-project content when status and query refresh fail', async () => {
@@ -443,6 +445,6 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     rerender(<CodeRetrievalPanel />);
     await screen.findByText('fresh.ts');
     expect(agentDataApi.code.call).toHaveBeenCalledTimes(3);
-    expect(agentDataApi.code.status).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(agentDataApi.code.status).mock.calls.filter(([p]) => p === 'D:/a')).toHaveLength(2);
   });
 });

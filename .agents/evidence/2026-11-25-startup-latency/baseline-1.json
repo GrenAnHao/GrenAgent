@@ -1,0 +1,75 @@
+{
+  "label": "baseline-1",
+  "ok": false,
+  "timing": {
+    "entry": 433,
+    "window": 6041,
+    "domReady": 6630
+  },
+  "marks": {
+    "html": 6306,
+    "splashDom": 6331,
+    "domLoaded": 6626,
+    "editor": 7143,
+    "splashLeaving": 20863,
+    "splashRemoved": 21313
+  },
+  "shown": false,
+  "blockedRendererNetwork": 4,
+  "errors": [
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-mono/1.0.0/files/css/index.css",
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-harmony-sans/1.0.0/files/css/index-full.css",
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-harmony-sans-sc/1.0.0/files/css/index.css",
+    "Failed to load font from https://registry.npmmirror.com/katex/0.18.1/files/dist/katex.min.css",
+    "ResizeObserver loop completed with undelivered notifications."
+  ],
+  "commands": [
+    {
+      "command": "list_all_sessions",
+      "start": 7107,
+      "count": 365,
+      "activeListed": true,
+      "end": 11409
+    },
+    {
+      "command": "list_all_sessions",
+      "start": 7213,
+      "count": 365,
+      "activeListed": true,
+      "end": 11411
+    },
+    {
+      "command": "agent_get_session_stats",
+      "start": 11510,
+      "error": "SessionOperationLeaseBusyError: SESSION_OPERATION_LEASE_BUSY: c:/users/rxstudio/appdata/local/temp/gren-boot-bench-8f5702ca/home/.pi/agent/sessions/--c--users-rxstudio-appdata-local-temp-gren-boot-bench-8f5702ca-projects-bench-21--/2026-01-01t00-00-00-000z_ba781200-0000-4000-8000-000000000023.jsonl",
+      "end": 12232
+    },
+    {
+      "command": "open_workspace",
+      "start": 11513,
+      "end": 20198
+    },
+    {
+      "command": "list_pi_sessions",
+      "start": 20199,
+      "count": 5,
+      "end": 20586
+    },
+    {
+      "command": "agent_switch_session",
+      "start": 20199,
+      "end": 20789
+    },
+    {
+      "command": "agent_get_messages",
+      "start": 20789,
+      "end": 20805
+    },
+    {
+      "command": "ui_history_read",
+      "start": 20790,
+      "end": 20793
+    }
+  ],
+  "state": "warm\n\nplain text with inline code\n\na\tb\n1\t2\nconst x: number = 1;\n\n𝐸\n=\n𝑚\n𝑐\n2\nE=mc2\n\nwarmup.ts\nconst x = 1;\nconst x = 1;\nGrenAgent\nCtrl\nF\n对话\n项目\nbench-03\nbench-07\nbench-11\nbench-15\nbench-19\nbench-21\nBench active\nBench 24\nBench 28\nBench 32\nBench 36\nbench-22\nbench-23\nbench-24\nbench-27\nbench-29\nbench-31\nBench active\nbench-21\n想在这里完成什么？\n\n\n\n\n输入消息，@ 引用文件/目录，/ 调用命令…\nAgent\n替我审批\nunknown\nbench-21\n没有可用的本地分支\n项目上下文"
+}

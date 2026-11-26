@@ -72,7 +72,7 @@ async function restoreInlineQuestionOnLoadAsync(
   let draft: AskUserDraft | null = null;
   if (sessionPath) {
     try {
-      draft = await pi.readAskUserDraft(workspace, toolCallId);
+      draft = await pi.readAskUserDraft(workspace, toolCallId, sessionPath);
     } catch {
       draft = null;
     }

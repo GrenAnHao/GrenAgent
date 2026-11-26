@@ -16,7 +16,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: {
     open: (...args: unknown[]) => sdk.open(...args),
   },
-  createAgentSessionServices: (...args: unknown[]) => sdk.createAgentSessionServices(...args),
+  createAgentSessionServices: sdk.createAgentSessionServices,
   createAgentSessionFromServices: async (...args: unknown[]) => {
     const created = await sdk.createAgentSessionFromServices(...args);
     if (created?.session) originalBudgetSessionMethods.set(created.session, { prompt: created.session.prompt, dispose: created.session.dispose });
@@ -41,6 +41,7 @@ const jobsMock = vi.hoisted(() => {
 });
 vi.mock("../jobs/service.js", () => ({ jobs: jobsMock }));
 
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { SubagentError } from "./inbox.js";
 import {
   __resetApprovalRoutesForTest,
@@ -58,6 +59,7 @@ import {
   authorizeParent,
   coldResumeAndDeliver,
   activationHasLiveWork,
+  activationIsWaitingForBash,
   agentMessage,
   deliverToChild,
   deliverWithoutWaking,
@@ -67,6 +69,10 @@ import {
   interruptChild,
   markAnnounced,
   residentChildIds,
+  disposeResidentForTransfer,
+  hasUnsettledRetiringResident,
+  isResidentRetiring,
+  residentIsIdle,
   writeTornDown,
   drainByParent,
   __resetActivationsForTest,
@@ -94,6 +100,7 @@ function deferred() {
 function mockSession() {
   let idle = deferred();
   const state = { isStreaming: false, isCompacting: false };
+  const listeners = new Set<(event: AgentSessionEvent) => void>();
   return {
     get isStreaming() {
       return state.isStreaming;
@@ -105,12 +112,19 @@ function mockSession() {
       return !state.isStreaming && !state.isCompacting;
     },
     pendingMessageCount: 0,
-    messages: [{ role: "assistant", content: [{ type: "text", text: "child done" }] }],
+    messages: [{ role: "assistant", content: [{ type: "text", text: "child done" }] }] as Array<{ role: string; content: string | { type: string; text: string }[] }>,
     prompt: vi.fn(async () => {
       state.isStreaming = true;
     }),
     abort: vi.fn(async () => {}),
     dispose: vi.fn(),
+    subscribe(listener: (event: AgentSessionEvent) => void) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    emit(event: AgentSessionEvent) {
+      for (const listener of listeners) listener(event);
+    },
     sendCustomMessage: vi.fn(),
     waitForIdle: () => {
       if (!state.isStreaming && !state.isCompacting) return Promise.resolve();
@@ -127,9 +141,9 @@ function mockSession() {
 function registerHost(over: {
   sessionPath?: string;
   workspace?: string;
-  sendMessage?: ReturnType<typeof vi.fn>;
+  sendMessage?: ReturnType<typeof vi.fn<Parameters<typeof registerParentSessionHost>[0]["sendMessage"]>>;
 } = {}) {
-  const sendMessage = over.sendMessage ?? vi.fn();
+  const sendMessage = over.sendMessage ?? vi.fn<Parameters<typeof registerParentSessionHost>[0]["sendMessage"]>();
   registerParentSessionHost({
     sessionId: "p1",
     sessionPath: over.sessionPath ?? "/ws/parent.jsonl",
@@ -525,6 +539,48 @@ describe("activation", () => {
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
   });
 
+  it("projects only an observed normal reply as waiting for Bash, clears it on a new turn or when Bash exits, and still waits for grandchildren", async () => {
+    const session = mockSession();
+    const sendMessage = registerHost();
+    const final = { ...session.messages[0], stopReason: "stop" } as unknown as Extract<AgentSessionEvent, { type: "agent_end" }>["messages"][number];
+    jobsMock.hasLive.mockReturnValue(true);
+    markChildRunning("sa-grand", "sa-1");
+    install(session, { announced: true, keepResident: true });
+    markChildRunning("sa-1", "p1");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(activationIsWaitingForBash("sa-1")).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    const start = () => {
+      session.isStreaming = true;
+      session.emit({ type: "agent_start" });
+    };
+    const finish = (aborted: boolean) => {
+      session.emit({ type: "agent_end", willRetry: false, messages: [final] });
+      session.emit({ type: "agent_settled", aborted });
+      session.resolveIdle();
+    };
+    start();
+    finish(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(activationIsWaitingForBash("sa-1")).toBe(false);
+    start();
+    finish(false);
+    await vi.waitFor(() => expect(activationIsWaitingForBash("sa-1")).toBe(true));
+    expect(runningChildrenOf("p1")).toEqual(["sa-1"]);
+    expect(sendMessage).not.toHaveBeenCalled();
+    start();
+    expect(activationIsWaitingForBash("sa-1")).toBe(false);
+    finish(false);
+    await vi.waitFor(() => expect(activationIsWaitingForBash("sa-1")).toBe(true));
+    jobsMock.hasLive.mockReturnValue(false);
+    jobsMock.listener?.({ owner: "sa-1" });
+    await vi.waitFor(() => expect(activationIsWaitingForBash("sa-1")).toBe(false));
+    expect(sendMessage).not.toHaveBeenCalled();
+    markChildSettled({ childId: "sa-grand", parentSessionId: "sa-1", stopReason: "completed" });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+  });
+
   it("does not settle while a worker background grandchild runs; settles once it settles", async () => {
     const session = mockSession();
     const sendMessage = registerHost();
@@ -582,6 +638,135 @@ describe("activation", () => {
     } finally {
       off();
     }
+  });
+});
+
+describe("cold resume after a session project transfer", () => {
+  beforeEach(() => {
+    __resetActivationsForTest();
+    __resetParentHostsForTest();
+    __resetApprovalRoutesForTest();
+    vi.clearAllMocks();
+  });
+
+  function transferEntry(leafId: string | null) {
+    return {
+      type: "custom",
+      customType: "session_project_transfer",
+      data: {
+        version: 1,
+        operationId: "op-1",
+        fromWorkspace: "/source",
+        toWorkspace: "/target",
+        previousCwd: "/source",
+        leafId,
+        boundary: { afterEntryId: leafId, entryCount: 2 },
+        history: { version: 1, ref: "op-1" },
+        createdAt: 10,
+      },
+    };
+  }
+
+  function meta(extra: Record<string, unknown> = {}) {
+    return {
+      type: "custom",
+      customType: "subagent_meta",
+      data: {
+        mode: "continuable",
+        tornDown: false,
+        parentSessionId: "p1",
+        parentSessionPath: "/ws/parent.jsonl",
+        workspace: "/target",
+        agentId: "sa-1",
+        ...extra,
+      },
+    };
+  }
+
+  function opening(entries: unknown[]) {
+    return {
+      getEntries: () => entries,
+      getCwd: () => "/source",
+      cwd: "/source",
+      getEntry: vi.fn((id: string) => entries.find((entry) => (entry as { id?: string }).id === id)),
+      branch: vi.fn(),
+      resetLeaf: vi.fn(),
+    };
+  }
+
+  it("loads rules/skills from the target project and restores the confirmed leaf before it was appended over", async () => {
+    const session = mockSession();
+    Object.assign(session, { bindExtensions: vi.fn(async () => {}) });
+    const sm = opening([
+      { type: "message", id: "q1", message: { role: "user", content: "go", timestamp: 1 } },
+      { type: "message", id: "answer-1", message: { role: "assistant", content: [], timestamp: 2 } },
+      transferEntry("answer-1"),
+      { type: "custom", customType: "working_directory", data: { cwd: "/target/sub" } },
+      meta(),
+    ]);
+    sdk.open.mockReturnValue(sm);
+    sdk.createAgentSessionFromServices.mockResolvedValue({ session });
+    registerHost();
+
+    await coldResumeAndDeliver("sa-1", "/target/child.jsonl", "continue", "followUp");
+
+    // 项目根跟迁移目标（不是仍带源编码的会话头 cwd）；资源按目标加载。
+    expect(sdk.createAgentSessionServices).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/target" }));
+    // 确认位置回到迁移前那条；追加行不算用户选择。
+    expect(sm.branch).toHaveBeenCalledWith("answer-1");
+    expect(sm.resetLeaf).not.toHaveBeenCalled();
+    // 工具 cwd 仍按 working_directory 记录（迁移之后那条）。
+    expect(getActivation("sa-1")).toBeDefined();
+  });
+
+  it("keeps a null root as the confirmed position", async () => {
+    const session = mockSession();
+    Object.assign(session, { bindExtensions: vi.fn(async () => {}) });
+    const sm = opening([transferEntry(null), { type: "custom", customType: "working_directory", data: { cwd: "/target" } }, meta()]);
+    sdk.open.mockReturnValue(sm);
+    sdk.createAgentSessionFromServices.mockResolvedValue({ session });
+    registerHost();
+
+    await coldResumeAndDeliver("sa-1", "/target/child.jsonl", "continue", "followUp");
+    expect(sm.resetLeaf).toHaveBeenCalledTimes(1);
+    expect(sm.branch).not.toHaveBeenCalled();
+  });
+
+  it("does not rewind to the pre-transfer leaf once the child already continued", async () => {
+    const session = mockSession();
+    Object.assign(session, { bindExtensions: vi.fn(async () => {}) });
+    const sm = opening([
+      { type: "message", id: "q1", message: { role: "user", content: "go", timestamp: 1 } },
+      { type: "message", id: "answer-1", message: { role: "assistant", content: [], timestamp: 2 } },
+      transferEntry("answer-1"),
+      meta(),
+      { type: "message", id: "after-1", message: { role: "user", content: "next", timestamp: 3 } },
+    ]);
+    sdk.open.mockReturnValue(sm);
+    sdk.createAgentSessionFromServices.mockResolvedValue({ session });
+    registerHost();
+
+    await coldResumeAndDeliver("sa-1", "/target/child.jsonl", "continue", "followUp");
+    expect(sm.branch).not.toHaveBeenCalled();
+    expect(sm.resetLeaf).not.toHaveBeenCalled();
+    // 资源仍然按目标项目加载。
+    expect(sdk.createAgentSessionServices).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/target" }));
+  });
+
+  it("keeps the ordinary path for a child that was never transferred", async () => {
+    const session = mockSession();
+    Object.assign(session, { bindExtensions: vi.fn(async () => {}) });
+    const sm = opening([{ type: "custom", customType: "subagent_meta", data: {
+      mode: "continuable", tornDown: false, parentSessionId: "p1", parentSessionPath: "/ws/parent.jsonl", workspace: "A",
+    } }]);
+    sdk.open.mockReturnValue(sm);
+    sdk.createAgentSessionFromServices.mockResolvedValue({ session });
+    registerHost();
+
+    await coldResumeAndDeliver("sa-1", "/ws/child.jsonl", "continue", "followUp");
+    expect(sdk.createAgentSessionServices).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/source" }));
+    expect(sm.branch).not.toHaveBeenCalled();
+    expect(sm.resetLeaf).not.toHaveBeenCalled();
   });
 });
 
@@ -840,6 +1025,126 @@ describe("idle residency (settled in-process children stay warm)", () => {
 
     await drainByParent("/ws/other.jsonl");
     expect(b.dispose).toHaveBeenCalledTimes(1);
+    expect(residentChildIds()).toEqual([]);
+  });
+
+  it("disposeResidentForTransfer waits for a worker proxy's dispose acknowledgement and leaves others alone", async () => {
+    const sendMessage = registerHost();
+    const workerSession = mockSession();
+    let ack!: () => void;
+    const acknowledged = new Promise<void>((resolve) => {
+      ack = resolve;
+    });
+    const disposeAndWait = vi.fn(async () => {
+      await acknowledged;
+      return { confirmed: true };
+    });
+    Object.assign(workerSession, { disposeAndWait });
+    install(workerSession, { announced: true, keepResident: true, childId: "sa-w" });
+    const other = mockSession();
+    install(other, { announced: true, keepResident: true, childId: "sa-other" });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(residentChildIds().sort()).toEqual(["sa-other", "sa-w"]));
+
+    let settled = false;
+    const draining = disposeResidentForTransfer("sa-w").then((result) => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    // 迁移 owner 在这之前不能往下写：worker 还没确认收口。
+    expect(settled).toBe(false);
+    expect(workerSession.dispose).not.toHaveBeenCalled();
+    // 等待期间它已被移出可复用驻留池，但仍作为「未确认收口的写者」被看见（fail-closed）。
+    expect(residentChildIds()).toEqual(["sa-other", "sa-w"]);
+    expect(isResidentRetiring("sa-w")).toBe(true);
+
+    ack();
+    await expect(draining).resolves.toEqual({ confirmed: true });
+    expect(disposeAndWait).toHaveBeenCalledTimes(1);
+    expect(other.dispose).not.toHaveBeenCalled();
+    expect(residentChildIds()).toEqual(["sa-other"]);
+  });
+
+  it("keeps an unconfirmed worker quarantined: a second drain still refuses until the late ack arrives", async () => {
+    const sendMessage = registerHost();
+    const session = mockSession();
+    let disposalConfirmed = false;
+    Object.defineProperty(session, "disposalConfirmed", { get: () => disposalConfirmed, configurable: true });
+    Object.assign(session, { disposeAndWait: vi.fn(async () => ({ confirmed: disposalConfirmed })) });
+    install(session, { announced: true, keepResident: true, childId: "sa-w" });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(residentChildIds()).toEqual(["sa-w"]));
+
+    await expect(disposeResidentForTransfer("sa-w", { timeoutMs: 5 })).resolves.toMatchObject({
+      confirmed: false,
+      diagnostic: expect.stringContaining("timeout"),
+      retiring: true,
+    });
+    // 已被摘下可复用驻留池，但隔离区让下一次 drain / 活动检查仍然看到这个写者。
+    expect(isResidentRetiring("sa-w")).toBe(true);
+    expect(hasUnsettledRetiringResident("sa-w")).toBe(true);
+    expect(residentIsIdle("sa-w")).toBe(false);
+    await expect(disposeResidentForTransfer("sa-w", { timeoutMs: 5 })).resolves.toMatchObject({
+      confirmed: false,
+      retiring: true,
+    });
+
+    // 迟到的 ack / 进程退出完成收口：隔离区收敛，之后的 drain 才允许通过。
+    disposalConfirmed = true;
+    expect(hasUnsettledRetiringResident("sa-w")).toBe(false);
+    expect(hasUnsettledRetiringResident("sa-w")).toBe(false);
+    await expect(disposeResidentForTransfer("sa-w", { timeoutMs: 5 })).resolves.toEqual({ confirmed: true });
+  });
+
+  it("activity keeps refusing a family whose previous drain timed out (quarantine is visible)", async () => {
+    const sendMessage = registerHost();
+    const session = mockSession();
+    // 已结算但旧 writer 无法确认收口：会话不在可复用驻留池，但仍在隔离区。
+    let confirmed = false;
+    Object.defineProperty(session, "disposalConfirmed", { get: () => confirmed, configurable: true });
+    Object.assign(session, { disposeAndWait: vi.fn(async () => ({ confirmed })) });
+    install(session, { announced: true, keepResident: true, childId: "sa-w" });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(residentChildIds()).toEqual(["sa-w"]));
+    await expect(disposeResidentForTransfer("sa-w", { timeoutMs: 5 })).resolves.toMatchObject({ confirmed: false });
+
+    const { checkTransferFamilyActivity } = await import("./session-project-transfer.js");
+    const members = [{ sessionPath: "/ws/child.jsonl", sessionId: "sa-w", agentId: "sa-w", workspace: "/ws" }];
+    expect(checkTransferFamilyActivity(members)).toContain("旧运行环境");
+
+    // 收口证明到位后，检查才放行。
+    confirmed = true;
+    expect(hasUnsettledRetiringResident("sa-w")).toBe(false);
+    expect(checkTransferFamilyActivity(members)).toBeUndefined();
+  });
+
+  it("does not swallow an in-process dispose failure as success", async () => {
+    const sendMessage = registerHost();
+    const session = mockSession();
+    session.dispose.mockImplementation(() => {
+      throw new Error("handle stuck");
+    });
+    install(session, { announced: true, keepResident: true, childId: "sa-w" });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(residentChildIds()).toEqual(["sa-w"]));
+    await expect(disposeResidentForTransfer("sa-w")).resolves.toMatchObject({
+      confirmed: false,
+      diagnostic: expect.stringContaining("handle stuck"),
+      retiring: true,
+    });
+    expect(hasUnsettledRetiringResident("sa-w")).toBe(true);
+  });
+
+  it("disposeResidentForTransfer disposes in-process sessions synchronously and never writes tornDown", async () => {
+    const sendMessage = registerHost();
+    const session = mockSession();
+    install(session, { announced: true, keepResident: true, childId: "sa-w", sessionManager: entriesManager().sm });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(residentChildIds()).toEqual(["sa-w"]));
+    await expect(disposeResidentForTransfer("sa-w")).resolves.toEqual({ confirmed: true });
+    expect(session.dispose).toHaveBeenCalledTimes(1);
     expect(residentChildIds()).toEqual([]);
   });
 });

@@ -1,6 +1,8 @@
 import { parseSessionWorkflowRequest } from '../app/sessionWorkflowContractValidation.js';
 import type { SessionWorkflowRequest } from '../app/sessionWorkflowContracts.js';
-import {writeFile} from 'node:fs/promises';
+import { assertTransferSourceWorkspace, parseSessionProjectTransferRequest } from '../app/sessionProjectTransferContracts.js';
+import type { SessionProjectTransferRequest } from '../app/sessionProjectTransferContracts.js';
+import {mkdir, writeFile} from 'node:fs/promises';
 import type { ModelCompactionSettingsService } from '../app/modelCompactionSettings';
 import { BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
@@ -12,10 +14,11 @@ import { isListingSkippedName, type FileService } from '../app/fileService';
 import { FileWatchService } from '../app/fileWatchService';
 import type { SkillService } from '../app/skillService';
 import type { PromptLibraryService } from '../app/promptLibraryService';
-import type { UsageReport } from '../../src/lib/usageReport';
+import { type CallPage, type CallQuery, readCallQuery, readUsageFilters, type UsageFilters, type UsageReport } from '../../src/lib/usageReport';
 import type { DiagnoseChunk, ProviderLoginUiEvent, ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
 import type { UiHistoryService } from '../app/uiHistoryService';
+import type { SubagentLookup } from '../app/subagentService';
 import type { WorkspaceApprovalService } from '../app/workspaceApprovalService';
 import type { GitService } from '../app/gitService';
 import type { IsolatedWorkspaceService } from '../app/isolatedWorkspaceService';
@@ -35,12 +38,18 @@ import { recordIpc } from '../runtimeDiag';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
+type TerminalCommands = Pick<TerminalService, 'execute'>;
+type UiHistoryCommands = Pick<UiHistoryService, 'readSnapshot' | 'read' | 'write' | 'patch' | 'delete'>;
+type WorkspaceApprovalCommands = Pick<WorkspaceApprovalService, 'approve' | 'isApproved'>;
+type GitCommands = Pick<GitService, 'status' | 'diff' | 'branches' | 'checkout' | 'createBranch' | 'logGraph'>;
+
 /**
  * 运行时命令的三组接口。实现在 agent-host 子进程里，主进程注入的是经 RPC 转发的薄封装；
  * 单测可以直接塞进程内的 PiRuntimeService / SubagentService / JobsBridge。
  */
 export interface PiCommandsPort {
   sessionWorkflow?(workspace: string, request: SessionWorkflowRequest): unknown;
+  sessionProjectTransfer?(workspace: string, request: SessionProjectTransferRequest): unknown;
   openWorkspace(workspace: string): unknown;
   listRunningTurns(): unknown;
   warmWorkspace(workspace: string): unknown;
@@ -51,6 +60,7 @@ export interface PiCommandsPort {
 
 export interface SubagentPort {
   list(workspace: string, sessionPath?: string): unknown;
+  lookup(workspace: string, agentId: string, parentSessionPath: string): SubagentLookup | Promise<SubagentLookup>;
   transcript(workspace: string, agentId: string): unknown;
   sessionMessages(sessionPath: string): unknown[] | Promise<unknown[]>;
   cancel(workspace: string, agentId: string): unknown;
@@ -79,7 +89,8 @@ export interface IpcServices {
   promptLibrary?: PromptLibraryService;
   /** 用量账本（在 agent-host 里查）。 */
   usage?: {
-    report(): Promise<UsageReport>;
+    calls(query: CallQuery): Promise<CallPage>;
+    report(filters?: UsageFilters): Promise<UsageReport>;
     reconcile(): Promise<{ files: number; added: number }>;
   };
   pi?: PiCommandsPort;
@@ -93,11 +104,11 @@ export interface IpcServices {
   workspaceProjectsChanged?: () => Promise<void>;
   /** 会话菜单「重新生成标题」：按会话文件的第一条用户消息起名，只返回标题，写回走 set_session_display_name。 */
   sessionTitle?: { generate(sessionPath: string): Promise<string> };
-  uiHistory?: UiHistoryService;
-  workspaceApproval?: WorkspaceApprovalService;
-  git?: GitService;
+  uiHistory?: UiHistoryCommands;
+  workspaceApproval?: WorkspaceApprovalCommands;
+  git?: GitCommands;
   isolatedWorkspace?: Pick<IsolatedWorkspaceService, 'create' | 'list' | 'syncBack' | 'state' | 'remove' | 'probe'>;
-  terminal?: TerminalService;
+  terminal?: TerminalCommands;
   create?: CreateService;
   tempHtml?: TempHtmlService;
   shell?: ShellService;
@@ -206,7 +217,8 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   }
   if (services.usage) {
     const usage = services.usage;
-    registerCommand('usage_report', () => usage.report());
+    registerCommand('usage_calls', (_event,args) => usage.calls(readCallQuery(args.query)));
+    registerCommand('usage_report', (_event, args) => usage.report(readUsageFilters(args.filters)));
     registerCommand('usage_reconcile', () => usage.reconcile());
   }
   if (services.pi) registerPiCommands(services.pi);
@@ -269,13 +281,14 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_status', () => services.agentData!.status());
     registerCommand('agentData_start', () => services.agentData!.start());
     registerCommand('agentData_stop', () => services.agentData!.stop());
-    registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
+    registerCommand('agentData_code_status', (_event, args) => services.agentData!.requestAdmin('codeRetrieval.admin.status', {
       workspace: readString(args, 'workspace'),
     }));
     registerCommand('agentData_code_projects', () => services.agentData!.request('codeRetrieval.admin.projects', {}));
     registerCommand('agentData_jobs_create', (_event, args) => services.agentData!.request('admin.jobs.create', {
       kind: readString(args, 'kind'),
       workspace: readString(args, 'workspace'),
+      ...(args.rebuild === true ? { rebuild: true } : {}),
     }));
     registerCommand('agentData_code_search', (_event, args) => services.agentData!.request('codeRetrieval.search', {
       workspace: readString(args, 'workspace'),
@@ -335,16 +348,27 @@ function registerMcpPolicyCommands(service: McpPolicyService): void {
   registerCommand('write_mcp_policy', (_event, args) => service.writePolicy(readText(args, 'content')));
   registerCommand('read_mcp_audit', () => service.readAudit());
   registerCommand('read_mcp_tools_cache', () => service.readToolsCache());
+  registerCommand('cancel_mcp_attempt', (_event, args) => service.cancelAttempt(readString(args, 'workspace'), readString(args, 'name'), readString(args, 'attemptId')));
+  registerCommand('inspect_mcp_server', (_event, args) => service.inspect(readString(args, 'workspace'), readString(args, 'name'), typeof args.since === 'string' ? args.since : undefined));
+  registerCommand('test_mcp_tool', (_event, args) => service.testCall(readString(args, 'workspace'), readString(args, 'name'), readString(args, 'fullName'), readRecord(args, 'args')));
   registerCommand('probe_mcp_server', (_event, args) => service.probe(readString(args, 'configJson')));
 }
 
 function registerMcpConfigCommands(service: McpConfigService): void {
+  registerCommand('open_mcp_directory', async () => {
+    const error = await shell.openPath(await service.openGlobalDirectory());
+    if (error) throw new Error(error);
+  });
   registerCommand('list_mcp_configs', (_event, args) => service.list(readString(args, 'workspace')));
   registerCommand('effective_mcp_configs', (_event, args) => service.effective(readString(args, 'workspace')));
   registerCommand('upsert_mcp_config', (_event, args) => {
     if (typeof args.config !== 'object' || !args.config || Array.isArray(args.config)) throw new Error('config must be an object');
     if (typeof args.enabled !== 'boolean') throw new Error('enabled must be a boolean');
     return service.upsert(readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'), args.config, args.enabled);
+  });
+  registerCommand('move_mcp_config', (_event, args) => {
+    if (typeof args.enabled !== 'boolean') throw new Error('enabled must be a boolean');
+    return service.move(readString(args, 'workspace'), readString(args, 'from'), readString(args, 'original'), readString(args, 'to'), readString(args, 'name'), args.config, args.enabled);
   });
   registerCommand('remove_mcp_config', (_event, args) => service.remove(
     readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'),
@@ -404,6 +428,9 @@ function registerSubagentCommands(service: SubagentPort): void {
   registerCommand('subagent_list', (_event, args) => service.list(
     readString(args, 'workspace'),
     typeof args.sessionPath === 'string' && args.sessionPath.trim() ? args.sessionPath : undefined,
+  ));
+  registerCommand('subagent_lookup', (_event, args) => service.lookup(
+    readString(args, 'workspace'), readString(args, 'agentId'), readString(args, 'parentSessionPath'),
   ));
   registerCommand('subagent_get_transcript', (_event, args) => service.transcript(
     readString(args, 'workspace'), readString(args, 'agentId'),
@@ -480,9 +507,17 @@ function registerFileWatchCommands(service: FileService): void {
 }
 
 function registerSkillCommands(service: SkillService): void {
-  registerCommand('list_skills', () => service.list());
+  registerCommand('list_skills', (_event, args) => service.list(readOptionalWorkspace(args)));
+  registerCommand('list_skill_files', (_event, args) => service.files(readString(args, 'path'), readString(args, 'folder'), readOptionalWorkspace(args)));
+  registerCommand('read_skill', (_event, args) => service.detail(readString(args, 'path'), readOptionalWorkspace(args)));
+  registerCommand('save_skill', (_event, args) => service.save(readString(args, 'path'), readText(args, 'original'), readText(args, 'content'), readOptionalWorkspace(args)));
+  registerCommand('archive_skill', (_event, args) => service.archive(readString(args, 'path'), readOptionalWorkspace(args)));
+  registerCommand('open_skill_folder', async (_event, args) => {
+    const error = await shell.openPath(await service.checkedDirectory(readString(args, 'path'), readOptionalWorkspace(args)));
+    if (error) throw new Error(error);
+  });
   registerCommand('create_skill', (_event, args) => service.create(readString(args, 'name'), readText(args, 'description'), readText(args, 'body')));
-  registerCommand('delete_skill', (_event, args) => service.remove(readString(args, 'path')));
+  registerCommand('delete_skill', (_event, args) => service.remove(readString(args, 'path'), readOptionalWorkspace(args)));
   registerCommand('import_skill_from_dir', (_event, args) => service.importDirectory(readString(args, 'src')));
   registerCommand('import_skill_from_file', (_event, args) => service.importFile(readString(args, 'src')));
   registerCommand('install_skill_from_zip', (_event, args) => service.installZip(readString(args, 'src')));
@@ -511,6 +546,18 @@ function readOptionalRuleModes(args: Record<string, unknown>): string[] | undefi
 }
 
 function registerPromptLibraryCommands(service: PromptLibraryService): void {
+  registerCommand('extension_directory', async (_event, args) => {
+    const builtin = args.kind === 'builtin-rule';
+    const dir = builtin ? await service.builtinDirectory(readOptionalWorkspace(args), readString(args, 'path'))
+      : service.directory(readString(args, 'kind'), readOptionalWorkspace(args));
+    if (args.open === true) {
+      if (!builtin) await mkdir(dir, { recursive: true });
+      const error = await shell.openPath(dir);
+      if (error) throw new Error(error);
+    }
+    return dir;
+  });
+  registerCommand('save_builtin_rule', (_event, args) => service.saveBuiltin(readOptionalWorkspace(args), readString(args, 'path'), readText(args, 'original'), readText(args, 'content')));
   registerCommand('list_prompt_commands', () => service.listCommands());
   registerCommand('save_prompt_command', (_event, args) => service.saveCommand({
     originalName: typeof args.originalName === 'string' && args.originalName ? args.originalName : undefined,
@@ -520,7 +567,7 @@ function registerPromptLibraryCommands(service: PromptLibraryService): void {
     reserved: Array.isArray(args.reserved) ? args.reserved.filter((item): item is string => typeof item === 'string') : [],
   }));
   registerCommand('delete_prompt_command', (_event, args) => service.deleteCommand(readString(args, 'name')));
-  registerCommand('list_context_rules', (_event, args) => service.listRules(readOptionalWorkspace(args)));
+  registerCommand('list_context_rules', (_event, args) => service.listLibraryRules(readOptionalWorkspace(args)));
   registerCommand('save_context_rule', (_event, args) => {
     const original = args.original && typeof args.original === 'object' ? (args.original as Record<string, unknown>) : undefined;
     return service.saveRule({
@@ -532,6 +579,7 @@ function registerPromptLibraryCommands(service: PromptLibraryService): void {
       body: readText(args, 'body'),
       // 模式范围可选；服务端校验已知模式并去重，空数组等同所有模式。
       modes: readOptionalRuleModes(args),
+      globs: args.globs === undefined ? undefined : readStringArray(args, 'globs'),
     });
   });
   registerCommand('set_context_rule_enabled', (_event, args) => service.setRuleEnabled(
@@ -630,6 +678,8 @@ function registerWorkspaceCommands(service: WorkspaceService, projectsChanged?: 
     return service.pruneOrphanConversations(keep);
   });
   registerCommand('list_all_sessions', () => service.listAllSessions());
+  registerCommand('lookup_startup_session', (_event, args) => service.lookupStartupSession(readString(args, 'sessionPath')));
+  registerCommand('startup_scratch_has_sessions', (_event, args) => service.startupScratchHasSessions(readString(args, 'workspace')));
   registerCommand('list_projects', () => service.listProjects());
   registerCommand('list_pi_sessions', (_event, args) => service.listSessions(readString(args, 'workspace')));
   registerCommand('set_session_display_name', (_event, args) =>
@@ -651,20 +701,28 @@ function registerWorkspaceCommands(service: WorkspaceService, projectsChanged?: 
   });
 }
 
-function registerUiHistoryCommands(service: UiHistoryService): void {
-  registerCommand('ui_history_read', (_event, args) => service.read(readString(args, 'workspace'), readString(args, 'sessionKey')));
+function registerUiHistoryCommands(service: UiHistoryCommands): void {
+  registerCommand('ui_history_read', (_event, args) => {
+    const workspace = readString(args, 'workspace');
+    const sessionKey = readString(args, 'sessionKey');
+    return args.checkpoint === true ? service.readSnapshot(workspace, sessionKey, true) : service.read(workspace, sessionKey);
+  });
   registerCommand('ui_history_write', (_event, args) => service.write(
-    readString(args, 'workspace'), readString(args, 'sessionKey'), readText(args, 'content'),
+    readString(args, 'workspace'), readString(args, 'sessionKey'), readText(args, 'content'), args.checkpoint === true,
+  ));
+  registerCommand('ui_history_patch', (_event, args) => service.patch(
+    readString(args, 'workspace'), readString(args, 'sessionKey'), readString(args, 'revision'),
+    readFiniteNumber(args, 'offset'), readText(args, 'content'),
   ));
   registerCommand('ui_history_delete', (_event, args) => service.delete(readString(args, 'workspace'), readString(args, 'sessionKey')));
 }
 
-function registerWorkspaceApprovalCommands(service: WorkspaceApprovalService): void {
+function registerWorkspaceApprovalCommands(service: WorkspaceApprovalCommands): void {
   registerCommand('request_workspace_approval', (_event, args) => service.approve(readString(args, 'path')));
   registerCommand('is_workspace_approved', (_event, args) => service.isApproved(readString(args, 'path')));
 }
 
-function registerGitCommands(service: GitService): void {
+function registerGitCommands(service: GitCommands): void {
   registerCommand('get_git_status', (_event, args) => service.status(readString(args, 'workspacePath')));
   registerCommand('get_git_diff', (_event, args) => service.diff(readString(args, 'workspacePath'), readString(args, 'filePath')));
   registerCommand('get_git_branches', (_event, args) => service.branches(readString(args, 'workspacePath')));
@@ -739,7 +797,7 @@ function registerIsolatedWorkspaceCommands(
   );
 }
 
-function registerTerminalCommands(service: TerminalService): void {
+function registerTerminalCommands(service: TerminalCommands): void {
   registerCommand('execute_command', (_event, args) => {
     if (!Array.isArray(args.args) || !args.args.every((arg) => typeof arg === 'string')) throw new Error('args must be a string array');
     if (args.workspace !== undefined && typeof args.workspace !== 'string') throw new Error('workspace must be a string');
@@ -766,6 +824,18 @@ function registerShellCommands(service: ShellService): void {
 }
 
 function registerPiCommands(service: PiCommandsPort): void {
+  registerCommand('agent_session_project_transfer', (_event, args) => {
+    const { workspace, ...input } = args;
+    if (typeof workspace !== 'string' || !workspace.trim()) throw new Error('workspace must be a non-empty string');
+    const request = parseSessionProjectTransferRequest(input);
+    // 来源以外部 workspace 参数为准；请求体只能确认它，不能把来源改写成别的项目。
+    assertTransferSourceWorkspace(workspace, request.sourceWorkspace);
+    // 下发给宿主时用外部 workspace 作为唯一来源，避免大小写／分隔符差异在远端再次严格比较时误判。
+    const authoritative = { ...request, sourceWorkspace: workspace };
+    return service.sessionProjectTransfer
+      ? service.sessionProjectTransfer(workspace, authoritative)
+      : service.send(workspace, 'agent_session_project_transfer', authoritative as unknown as Record<string, unknown>);
+  });
   registerCommand('agent_session_workflow', async (event, args) => {
     const workspace = readString(args, 'workspace');
     // Renderer paths never confer filesystem authority. Only this native dialog supplies source/destination.
@@ -797,7 +867,7 @@ function registerPiCommands(service: PiCommandsPort): void {
     'agent_get_available_models', 'agent_set_thinking_level', 'agent_cycle_thinking_level', 'agent_set_mode',
     'agent_set_approval', 'agent_set_fast_mode', 'agent_exclude_entry', 'agent_restore_entry', 'agent_rewind_to', 'agent_truncate_to',
     'agent_compact', 'agent_set_auto_compaction', 'agent_abort_retry', 'agent_get_session_stats', 'agent_get_state',
-    'agent_get_messages', 'agent_get_goal', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
+    'agent_get_messages', 'agent_get_goal', 'agent_goal_control', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
     'agent_clone', 'agent_get_fork_messages', 'agent_set_session_name',
     'agent_get_session_defaults', 'agent_set_session_defaults',
     'ask_user_draft_read', 'ask_user_draft_write', 'ask_user_draft_delete',

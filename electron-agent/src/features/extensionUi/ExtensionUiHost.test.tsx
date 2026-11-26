@@ -2,28 +2,29 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { setStatus, goalSetGoal, goalSetSnapshot, setServers, msg, setRequest, setWaitingUiPrompt, dismiss } = vi.hoisted(() => ({
+const { setStatus, goalSetGoal, goalSetSnapshot, goalMarkOwnerLost, goalBumpFence, setServers, msg, setRequest, setWaitingUiPrompt, dismiss, respondVisual } = vi.hoisted(() => ({
   setStatus: vi.fn(),
   goalSetGoal: vi.fn(),
   goalSetSnapshot: vi.fn(),
+  goalMarkOwnerLost: vi.fn(),
+  goalBumpFence: vi.fn(),
   setServers: vi.fn(),
   msg: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() },
   setRequest: vi.fn(),
   setWaitingUiPrompt: vi.fn(),
   dismiss: vi.fn(),
+  respondVisual: vi.fn(async () => {}),
 }));
 let emit: (e: unknown) => void = () => {};
-let emitPi: (e: unknown) => void = () => {};
+let emitExit: (e: unknown) => void = () => {};
 let loadedPath: string | null | undefined;
 vi.mock('../../lib/pi', () => ({
+  onPiExit: (handler: (e: unknown) => void) => { emitExit = handler; return Promise.resolve(() => {}); },
   onPiUiRequest: (h: (e: unknown) => void) => {
     emit = h;
     return Promise.resolve(() => {});
   },
-  onPiEvent: (h: (e: unknown) => void) => {
-    emitPi = h;
-    return Promise.resolve(() => {});
-  },
+  extensionUiRespond: respondVisual,
 }));
 vi.mock('antd', async (importOriginal) => {
   const actual = await importOriginal<typeof import('antd')>();
@@ -33,7 +34,7 @@ vi.mock('../../stores/planModeStore', () => ({
   usePlanModeStore: { getState: () => ({ setStatus }) },
 }));
 vi.mock('../../stores/goalStore', () => ({
-  useGoalStore: { getState: () => ({ setGoal: goalSetGoal, setSnapshot: goalSetSnapshot }) },
+  useGoalStore: { getState: () => ({ setGoal: goalSetGoal, setSnapshot: goalSetSnapshot, markOwnerLost: goalMarkOwnerLost, bumpMutationFence: goalBumpFence, bindSessionPath: () => {} }) },
 }));
 vi.mock('../../stores/mcpStatusStore', () => ({
   useMcpStatusStore: { getState: () => ({ setServers }) },
@@ -64,13 +65,19 @@ afterEach(() => {
   setStatus.mockClear();
   goalSetGoal.mockClear();
   goalSetSnapshot.mockClear();
+  goalMarkOwnerLost.mockClear();
+  goalBumpFence.mockClear();
+  emitExit = () => {};
   setServers.mockClear();
   setRequest.mockClear();
   setWaitingUiPrompt.mockClear();
   dismiss.mockClear();
+  respondVisual.mockClear();
   emit = () => {};
   msg.info.mockClear();
+  msg.success.mockClear();
   msg.warning.mockClear();
+  msg.error.mockClear();
   useImMessagesStore.getState().setConversations([]);
   loadedPath = undefined;
   clearStashedUiRequestsForTest();
@@ -87,15 +94,25 @@ describe('ExtensionUiHost visual pending', () => {
     expect(entry()).toMatchObject({ pending: false, requestId: null });
   });
 
-  it('clears a pending visual choice when its session ends the turn', () => {
+  it('cancels an old visual sentinel without queuing an ask_user or approval card', () => {
     render(<ExtensionUiHost />);
-    useVisualStore.getState().setPending(owner, true, 'vc-2');
-    emitPi({ workspace: '/ws', sessionPath: owner.sessionPath, source: 'interactive', event: { type: 'agent_end', messages: [] } });
-    expect(entry()).toMatchObject({ pending: false });
+    emit({ workspace: '/ws', sessionPath: owner.sessionPath, request: { id: 'vc-2', method: 'input', title: JSON.stringify({ __visualChoice: 1 }) } });
+    expect(respondVisual).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'vc-2', cancelled: true });
+    expect(setRequest).not.toHaveBeenCalled();
+    expect(entry()).toMatchObject({ pending: false, requestId: null });
   });
 });
 
 describe('ExtensionUiHost', () => {
+  it('routes confirmed owner loss to a frozen unavailable projection, never to a persisted pause receipt', () => {
+    render(<ExtensionUiHost />);
+    emitExit({ workspace: '/ws', code: 1, confirmedGoalLosses: [{ sessionPath: '/ws/a.jsonl', sessionId: 'a', ownerEpoch: 'dead', goalId: 'g', revision: 3, runNumber: 1, conditionRevision: 1 }] });
+    expect(goalBumpFence).toHaveBeenCalledWith('/ws/a.jsonl');
+    expect(goalMarkOwnerLost).toHaveBeenCalledWith('a', 'dead', 'g');
+    expect(goalSetSnapshot).not.toHaveBeenCalled();
+    expect(msg.success).not.toHaveBeenCalled();
+  });
+
   it('routes select to the uiPromptStore without a modal', () => {
     render(<ExtensionUiHost />);
     const request = { id: 'u1', method: 'select', title: '允许？', options: ['允许', '拒绝'] };
@@ -440,7 +457,7 @@ describe('ExtensionUiHost', () => {
       useVisualStore.setState({ entries: {}, seq: 0, submittedIds: new Set() });
     });
 
-    it('后台会话的页面和等待请求记到它自己名下，不覆盖当前会话的', () => {
+    it('后台会话的预览记到它自己名下，旧等待只定向取消', () => {
       loadedPath = '/ws/b.jsonl'; // 画面上是 B
       render(<ExtensionUiHost />);
       emit({ workspace: '/ws', sessionPath: '/ws/b.jsonl', request: showStatus('v-b', '<p>B</p>') });
@@ -452,8 +469,9 @@ describe('ExtensionUiHost', () => {
       const { entries } = useVisualStore.getState();
       const a = entries[visualKeyOf({ sessionPath: '/ws/a.jsonl', workspace: '/ws' })];
       const b = entries[visualKeyOf({ sessionPath: '/ws/b.jsonl', workspace: '/ws' })];
-      expect(a).toMatchObject({ html: '<p>A</p>', pending: true, requestId: 'wait-a', sessionPath: '/ws/a.jsonl' });
-      expect(b).toMatchObject({ html: '<p>B</p>', pending: true, requestId: 'wait-b' });
+      expect(a).toMatchObject({ html: '<p>A</p>', pending: false, sessionPath: '/ws/a.jsonl' });
+      expect(b).toMatchObject({ html: '<p>B</p>', pending: false });
+      expect(respondVisual).toHaveBeenCalledTimes(2);
       // 哨兵不当成普通输入卡显示
       expect(setRequest).not.toHaveBeenCalled();
     });

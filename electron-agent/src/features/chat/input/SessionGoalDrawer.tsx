@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button, Drawer, Input } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Icon } from '@lobehub/ui';
-import { Save, Trash2 } from 'lucide-react';
-import { pi } from '../../../lib/pi';
+import { RotateCw, Save, Trash2 } from 'lucide-react';
 import { refreshGoalStatus } from '../../extensionUi/goalStatus';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useGoalStore, type GoalHistoryItem, type GoalSnapshot } from '../../../stores/goalStore';
+import { useSessionStore } from '../../../store/session';
+import { goalNeedsRestart, goalPauseLabel } from './goalStatusLabels';
+import { controlGoal, useGoalEditor } from './useGoalEditor';
 import { useAskConfirm } from '../../../components/askConfirm';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -84,6 +86,7 @@ const styles = createStaticStyles(({ css }) => ({
     justify-content: flex-end;
     padding-top: 2px;
   `,
+  warning: css`font-size: 12px; color: ${cssVar.colorError}; overflow-wrap: anywhere;`,
   editor: css`
     display: flex;
     flex-direction: column;
@@ -100,6 +103,7 @@ export interface SessionGoalDrawerProps {
   open: boolean;
   sessionId: string;
   snapshot?: GoalSnapshot;
+  sessionPath?: string | null;
   onClose: () => void;
   onSnapshot?: (snapshot: GoalSnapshot) => void;
 }
@@ -118,61 +122,44 @@ function historyKey(item: GoalHistoryItem, index: number): string {
   return `round-${item.round}-${item.revision}-${index}`;
 }
 
-export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: SessionGoalDrawerProps) {
+export function SessionGoalDrawer({ open, sessionId, sessionPath, snapshot, onClose }: SessionGoalDrawerProps) {
   const ask = useAskConfirm();
-  const { workspace, store } = useAgentStoreContext();
+  const { workspace } = useAgentStoreContext();
+  const activePath = useSessionStore((state) => state.activeSessionPath);
+  const path = sessionPath ?? activePath;
   const liveSnapshot = useGoalStore((state) => (sessionId ? state.bySession[sessionId] : undefined));
   const currentSnapshot = liveSnapshot ?? snapshot;
+  const editor = useGoalEditor(workspace, path, currentSnapshot);
   const [mutating, setMutating] = useState(false);
-  const [savingCondition, setSavingCondition] = useState(false);
-  const [conditionDraft, setConditionDraft] = useState(currentSnapshot?.condition ?? '');
+  const [actionError, setActionError] = useState('');
   const inflight = useRef(false);
   const valid = !!currentSnapshot && currentSnapshot.sessionId === sessionId;
   const history = currentSnapshot?.history ?? [];
 
-  useEffect(() => {
-    setConditionDraft(currentSnapshot?.condition ?? '');
-  }, [currentSnapshot?.goalId, currentSnapshot?.revision, currentSnapshot?.condition]);
-
   const clearable = !!currentSnapshot;
   const canEditCondition = !!currentSnapshot && editableStatuses.includes(currentSnapshot.status);
 
-  const runCommand = async (message: string) => {
+  const runAction = async (action: 'clear' | 'resume', target: GoalSnapshot, originalPath: string) => {
     if (!workspace || inflight.current) return;
     inflight.current = true;
+    setMutating(true);
+    setActionError('');
     try {
-      const path = store.getLoadedSessionPath();
-      await pi.prompt(workspace, message, undefined, undefined, path);
-      void refreshGoalStatus(workspace, path);
+      await controlGoal(workspace, originalPath, target, action);
+      void refreshGoalStatus(workspace, originalPath);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '目标操作未提交，请重新读取。');
     } finally {
       inflight.current = false;
-    }
-  };
-
-  const clearGoal = async () => {
-    if (!currentSnapshot || !clearable || mutating || savingCondition || inflight.current) return;
-    if (!(await ask({ title: '清除当前目标？' }))) return;
-    setMutating(true);
-    try {
-      await runCommand('/goal clear');
-    } catch {
-      // 失败不藏条；扩展回执说明原因。
-    } finally {
       setMutating(false);
     }
   };
 
-  const saveCondition = async () => {
-    const condition = conditionDraft.trim();
-    if (!currentSnapshot || !canEditCondition || !condition || condition === currentSnapshot.condition || mutating || savingCondition) return;
-    setSavingCondition(true);
-    try {
-      await runCommand(`/goal edit ${condition}`);
-    } catch {
-      // 失败留草稿。
-    } finally {
-      setSavingCondition(false);
-    }
+  const clearGoal = async () => {
+    if (!currentSnapshot || !path || !clearable || mutating || editor.busy || inflight.current) return;
+    const target = currentSnapshot;
+    const originalPath = path;
+    if (await ask({ title: '清除当前目标？' })) await runAction('clear', target, originalPath);
   };
 
   if (!open || !valid || !currentSnapshot) return null;
@@ -191,7 +178,9 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
     >
       <div className={styles.header}>
         <p className={styles.condition}>{currentSnapshot.condition}</p>
-        <p className={styles.status}>{statusLabels[currentSnapshot.status]}</p>
+        <p className={styles.status}>{currentSnapshot.runtimeUnavailable ? '已停止，暂停未保存' : statusLabels[currentSnapshot.status]}</p>
+        {goalPauseLabel(currentSnapshot) ? <p className={currentSnapshot.runtimeUnavailable ? styles.warning : styles.status} data-testid="goal-drawer-reason">{goalPauseLabel(currentSnapshot)}</p> : null}
+        {currentSnapshot.runtimeUnavailable && path ? <Button icon={<Icon icon={RotateCw} size={14} />} onClick={() => void refreshGoalStatus(workspace, path)} size="small">重新读取目标状态</Button> : null}
       </div>
 
       {canEditCondition ? (
@@ -202,29 +191,38 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
             autoSize={{ minRows: 2, maxRows: 6 }}
             id="session-goal-condition"
             maxLength={4000}
-            onChange={(event) => setConditionDraft(event.target.value)}
-            value={conditionDraft}
+            onChange={(event) => editor.setDraft(event.target.value)}
+            readOnly={editor.busy}
+            value={editor.draft}
           />
           <div className={styles.actions}>
             <Button
-              disabled={mutating || savingCondition || !conditionDraft.trim() || conditionDraft.trim() === currentSnapshot.condition}
+              disabled={mutating || editor.busy || editor.conflict || !editor.dirty || !editor.draft.trim()}
               icon={<Icon icon={Save} size={14} />}
-              loading={savingCondition}
-              onClick={() => void saveCondition()}
+              loading={editor.busy}
+              onClick={() => void editor.save().then((done) => {
+                if (!done && open) document.getElementById('session-goal-condition')?.focus();
+              })}
               size="small"
               type="primary"
             >
               保存目标
             </Button>
           </div>
+          {editor.error ? <p role="alert" className={styles.warning}>{editor.error}</p> : null}
+          {editor.conflict ? <div className={styles.actions}><Button onClick={editor.loadLatest} size="small">载入最新版</Button><Button onClick={editor.rebase} size="small">基于最新版提交</Button></div> : null}
         </section>
       ) : null}
+      {goalNeedsRestart(currentSnapshot) && !currentSnapshot.runtimeUnavailable ? (
+        <Button disabled={mutating || editor.busy} onClick={() => { if (path) void runAction('resume', currentSnapshot, path); }}>开启新批次（保留累计历史）</Button>
+      ) : null}
+      {actionError ? <p role="alert" className={styles.warning}>{actionError}</p> : null}
       {clearable ? (
         <div className={styles.actions}>
           <Button
             aria-label="清除目标"
             danger
-            disabled={mutating}
+            disabled={mutating || editor.busy}
             icon={<Icon icon={Trash2} size={14} />}
             onClick={() => void clearGoal()}
             size="small"
@@ -241,7 +239,8 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
           <dt>sessionId</dt><dd>{currentSnapshot.sessionId}</dd>
           <dt>goalId</dt><dd>{currentSnapshot.goalId}</dd>
           <dt>revision</dt><dd>{currentSnapshot.revision}</dd>
-          <dt>轮次</dt><dd>{currentSnapshot.roundsStarted} / {currentSnapshot.maxRounds}</dd>
+          <dt>本批次</dt><dd>第 {currentSnapshot.runNumber ?? 1} 批 · 已用 {currentSnapshot.runRoundsStarted ?? currentSnapshot.roundsStarted} / {currentSnapshot.maxRounds} 轮</dd>
+          <dt>累计轮次</dt><dd>{currentSnapshot.roundsStarted} 轮</dd>
           <dt>创建时间</dt><dd>{currentSnapshot.createdAt}</dd>
           <dt>更新时间</dt><dd>{currentSnapshot.updatedAt}</dd>
         </dl>
@@ -267,7 +266,7 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
                   </>
                 ) : (
                   <>
-                    <div>第 {item.round} 轮</div>
+                    <div>{item.runNumber && item.runRound ? `第 ${item.runNumber} 批 · 第 ${item.runRound} 轮` : `第 ${item.round} 轮`}</div>
                     {item.content ? <p className={styles.muted}>{item.content}</p> : null}
                   </>
                 )}

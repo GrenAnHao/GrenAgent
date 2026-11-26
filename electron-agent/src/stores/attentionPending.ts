@@ -17,14 +17,12 @@ export interface PendingSources {
   prompts: UiPromptItem[];
   /** inlineQuestionStore.byWorkspace 的值（live 和 restored 都算）。 */
   inline: InlineQuestionItem[];
-  /** visualStore.entries 的值，只用 pending 为 true 的。 */
+  /** 旧 visualStore 输入保留给过渡调用方；视觉等待只由 inline ask_user 体现。 */
   visual: VisualEntry[];
   stashed: StashedUiRequests[];
   /** 请求没带 sessionPath 时归到该工作区画面上的会话；返回 undefined 就丢掉这条。 */
   ownerOf: (workspace: string) => string | undefined;
 }
-
-const VISUAL_TITLE = '视觉设计等待确认';
 
 function promptTitle(item: UiPromptItem): string | undefined {
   const { title, message } = item.request;
@@ -60,9 +58,6 @@ export function derivePending(src: PendingSources): Record<string, PendingEntry>
   for (const item of src.inline) add(item.sessionPath, item.workspace, 'choice', questionTitle(item));
   for (const found of src.stashed) {
     if (found.inline) add(found.sessionPath, found.inline.workspace, 'choice', questionTitle(found.inline));
-  }
-  for (const entry of src.visual) {
-    if (entry.pending) add(entry.sessionPath, entry.workspace, 'choice', VISUAL_TITLE);
   }
   return out;
 }

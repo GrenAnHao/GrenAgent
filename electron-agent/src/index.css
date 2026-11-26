@@ -1,4 +1,24 @@
+@import './theme/typography.css';
 @import './theme/contentFont.css';
+@import './theme/scrollbars.css';
+
+:root {
+  --gren-master-bg: var(--gren-sidebar-bg);
+  --gren-master-divider: var(--ant-color-border-secondary);
+  --gren-badge-bg: var(--ant-color-fill-tertiary);
+  --gren-status-dot: var(--ant-color-success);
+}
+
+/* Crossfade surfaces. Text and SVG must inherit their final foreground in one frame:
+   transitioning color/currentColor on every descendant would re-start the fade at each level. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-theme-switching],
+  html[data-theme-switching] * {
+    transition-property: background-color, border-color, outline-color;
+    transition-duration: 140ms;
+    transition-timing-function: ease-out;
+  }
+}
 
 * {
   margin: 0;
@@ -9,7 +29,7 @@
 /* Inter 字体的密码掩码圆点(•)字形偏宽，会让 API Key 等密码框的圆点间距过大。
    密码态改用系统字体让圆点紧凑；点“显示”后 type 变为 text，不命中此规则，明文仍用主字体。 */
 input[type='password'] {
-  font-family: system-ui, 'Segoe UI', Tahoma, sans-serif !important;
+  font-family: system-ui !important;
 }
 
 #root {
@@ -17,13 +37,9 @@ input[type='password'] {
   height: 100vh;
 }
 
-/* 暗色主题下，主题色(colorPrimary)多为中高亮度彩色，antd v6 的 Checkbox 选中态默认是
-   主题色底 + 白色对勾(.ant-checkbox-checked::after，由 border 绘制)，白勾叠在亮色底上
-   对比不足、容易看不清。改用深色对勾，叠在亮主题色上高对比、锐利；再加一层极轻浅色描边，
-   兜底主题色本身偏暗的情况。仅暗色生效，亮色模式不受影响。 */
-html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after {
-  border-color: rgba(0, 0, 0, 0.85);
-  filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.5));
+/* A checked mark uses the same contrasting foreground as a filled button. */
+:root .ant-checkbox-checked:not(.ant-checkbox-disabled)::after {
+  border-color: var(--ant-color-text-light-solid);
 }
 
 /* Mermaid 的放大预览使用 Ant Design Image Portal；加深遮罩，避免底层消息与图表重叠。 */

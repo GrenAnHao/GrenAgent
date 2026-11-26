@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { codeIndexPresentation, codeIndexWatcherPending, indexFreshness } from './codeIndexPresentation';
+import { lastSync } from './useIndexDirectory';
 import type { CodeGraphStatus } from '../../lib/agentData';
 
-const base: CodeGraphStatus = { workspace: 'D:/repo', connected: true, indexed: true, state: 'ready', phase: 'idle' };
+const base: CodeGraphStatus = { workspace: 'D:/repo', connected: true, indexed: true, state: 'indexed', phase: 'idle' };
 const at = (patch: Partial<CodeGraphStatus>): CodeGraphStatus => ({ ...base, ...patch });
 
 describe('index availability and freshness are separate', () => {
@@ -45,6 +46,16 @@ describe('index availability and freshness are separate', () => {
     const view = codeIndexPresentation({ checking: true });
     expect(view.canQuery).toBe(false);
     expect(view.freshness).toBe('unknown');
+  });
+});
+
+describe('last completed index time', () => {
+  it('uses committed index data, not a file from an incomplete build or a successful scheduler check', () => {
+    expect(lastSync(at({ lastIndexedAt: 100, lastSuccessAt: 9000 }))).toBe(100);
+    expect(lastSync(at({ lastIndexedAt: 100, syncedAt: 700, lastSuccessAt: 9000 }))).toBe(700);
+    expect(lastSync(at({ lastIndexedAt: 100, syncedAt: null }))).toBeUndefined();
+    expect(lastSync(at({ state: 'partial', lastIndexedAt: 100 }))).toBeUndefined();
+    expect(lastSync(at({ state: 'partial', lastIndexedAt: 8000, syncedAt: 700 }))).toBe(700);
   });
 });
 

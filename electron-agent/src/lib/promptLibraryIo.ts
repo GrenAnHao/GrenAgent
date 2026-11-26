@@ -22,6 +22,10 @@ export interface RuleInfo {
   body: string;
   /** 适用模式；缺省 = 所有模式。 */
   modes?: AgentMode[];
+  globs?: string[];
+  builtinProject?: string;
+  currentProject?: boolean;
+  readOnly?: boolean;
   error?: string;
 }
 
@@ -60,6 +64,7 @@ export function saveContextRule(input: {
   enabled: boolean;
   body: string;
   modes?: AgentMode[];
+  globs?: string[];
 }): Promise<RuleInfo> {
   return invoke<RuleInfo>('save_context_rule', input);
 }
@@ -71,3 +76,11 @@ export function setContextRuleEnabled(workspace: string, ref: RuleRef, enabled: 
 export function deleteContextRule(workspace: string, ref: RuleRef): Promise<void> {
   return invoke<void>('delete_context_rule', { workspace, ...ref });
 }
+
+export const extensionDirectory = (kind: 'commands' | 'rules', workspace = '', open = false) =>
+  invoke<string>('extension_directory', { kind, workspace, open });
+export const saveBuiltinRule = (workspace: string, path: string, original: string, content: string) =>
+  invoke<void>('save_builtin_rule', { workspace, path, original, content });
+
+export const openBuiltinDirectory = (workspace: string, path: string) =>
+  invoke<string>('extension_directory', { kind: 'builtin-rule', workspace, path, open: true });

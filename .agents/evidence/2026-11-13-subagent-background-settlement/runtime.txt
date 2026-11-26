@@ -1,0 +1,84 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+(node:57568) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ multi-agent/adjacent-tools.test.ts (26 tests | 2 failed) 35ms
+     × 父→直接子：deliverToChild 正文带 senderId，回执 delivered 10ms
+     × 无 Activation、registry 有 sessionPath → 调 coldResumeAndDeliver 2ms
+(node:31640) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:36396) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60820) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  multi-agent/adjacent-tools.test.ts > adjacent-tools > 父→直接子：deliverToChild 正文带 senderId，回执 delivered
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'sa-1', …(3) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    "sa-1",
+    "Agent p1 sent a message: hi",
+    "followUp",
+-   {
+-     "registry": undefined,
+-   },
+  ]
+
+
+Number of calls: 1
+
+ ❯ multi-agent/adjacent-tools.test.ts:154:39
+    152|     activation.getActivation.mockImplementation((id: string) => (id ==…
+    153|     const r = await send("t1", { agent_id: "sa-1", message: "hi" }, nu…
+    154|     expect(activation.deliverToChild).toHaveBeenCalledWith(
+       |                                       ^
+    155|       "sa-1",
+    156|       "Agent p1 sent a message: hi",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  multi-agent/adjacent-tools.test.ts > adjacent-tools > 无 Activation、registry 有 sessionPath → 调 coldResumeAndDeliver
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'sa-1', '/ws/child.jsonl', …(2) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    "sa-1",
+    "/ws/child.jsonl",
+    "Agent p1 sent a message: hi",
+    "followUp",
++   {
++     "registry": {
++       "get": [Function get],
++     },
++   },
+  ]
+
+
+Number of calls: 1
+
+ ❯ multi-agent/adjacent-tools.test.ts:352:45
+    350|     stubMeta({ "/ws/child.jsonl": "p1" });
+    351|     const r = await send("t6", { agent_id: "sa-1", message: "hi" }, nu…
+    352|     expect(activation.coldResumeAndDeliver).toHaveBeenCalledWith(
+       |                                             ^
+    353|       "sa-1",
+    354|       "/ws/child.jsonl",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 10 passed (11)
+      Tests  2 failed | 388 passed (390)
+   Start at  18:25:01
+   Duration  21.00s (transform 3.68s, setup 0ms, import 25.70s, tests 35.18s, environment 2ms)
+

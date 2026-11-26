@@ -9,6 +9,8 @@ export interface RouteLinkOptions {
   system: boolean;
   /** 当前会话的工作目录，本地路径链接按它解析；没有就无法打开本地文件。 */
   workspace: string | null;
+  /** 迁移前这条正文的历史目录；省略时新消息使用当前项目根。 */
+  sourceCwd?: string;
   notify: (text: string) => void;
 }
 
@@ -37,7 +39,7 @@ export async function routeAppLink(href: string, options: RouteLinkOptions): Pro
       return;
     }
     case 'path': {
-      const target = options.workspace ? resolveSessionFile(options.workspace, undefined, kind.path) : null;
+      const target = options.workspace ? resolveSessionFile(options.workspace, options.sourceCwd, kind.path) : null;
       if (!target) {
         options.notify('无法解析这个本地链接');
         return;

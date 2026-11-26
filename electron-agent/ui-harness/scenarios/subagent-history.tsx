@@ -17,11 +17,22 @@ const rows: SubAgentItem[] = [
   { id: 'sa-group-a', task: '重复任务', status: 'done', model: 'p/group-a', thinkingLevel: 'medium', createdAt: 1, updatedAt: 1 }
 ]
 const registry = deferred<SubAgentItem[]>()
+const parentSessionPath = '/history.jsonl'
 installBridge({
-  invoke: async (command: string) => {
+  invoke: async (command: string, args?: Record<string, unknown>) => {
     // 供应商显示名：p 有名字，q 没配置（回落到 id）。
     if (command === 'get_provider_config') return { modelsJson: JSON.stringify({ providers: { p: { name: '中转站' } } }), authJson: null }
+    // 缺字段的历史卡按「原父会话 + 稳定 agentId」补查单行（SubAgentInline → subAgentLiveStore.watch）。
+    // 每张卡每轮最多查一次；拿到已结算行后观察即终态，轮询随之释放。
+    if (command === 'subagent_lookup') {
+      const id = String(args?.agentId)
+      track(`registry-lookup:${id}`)
+      if (args?.parentSessionPath !== parentSessionPath) return { kind: 'not-found' }
+      const item = rows.find((row) => row.id === id)
+      return item ? { kind: 'found', item } : { kind: 'not-found' }
+    }
     if (command !== 'subagent_list') throw new Error(`unexpected command: ${command}`)
+    // 全量列表是另一条路径（无 ID 的卡片）：这里保持挂起，确认卡片的补查不依赖它。
     track('registry-list')
     return registry.promise
   }
@@ -92,7 +103,7 @@ function RegressionCards(): ReactElement {
 
 const context = {
   workspace: 'ui-harness-subagent-history',
-  store: { getLoadedSessionPath: () => '/history.jsonl' } as unknown as AgentStoreApi,
+  store: { getLoadedSessionPath: () => parentSessionPath } as unknown as AgentStoreApi,
   workspaceReady: false,
   setWorkspaceReady: () => {},
   appBooted: true

@@ -1,0 +1,80 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { ThemeProvider } from '@lobehub/ui';
+import { afterEach, expect, it, vi } from 'vitest';
+import { PromptLibraryService } from '../../../electron/app/promptLibraryService';
+import { registerIpcHandlers } from '../../../electron/ipc/register';
+import { IPC_CHANNELS } from '../../../electron/ipc/contracts';
+import { RulesPanel } from './RulesPanel';
+
+const os = vi.hoisted(() => ({ handle: vi.fn(), openPath: vi.fn(async () => '') }));
+vi.mock('electron', () => ({ ipcMain: { handle: os.handle }, shell: { openPath: os.openPath }, BrowserWindow: {}, dialog: {} }));
+
+let temporary: string;
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  if (temporary) await rm(temporary, { recursive: true, force: true });
+});
+
+it('从详情经生产 IPC 保存、定位并刷新两类原文件，不改另一仓库的同名文件', async () => {
+  temporary = await mkdtemp(join(tmpdir(), 'pi-rule-detail-'));
+  const a = join(temporary, 'core', 'app'), b = join(temporary, 'web', 'app');
+  await Promise.all([a, b].map(path => mkdir(path, { recursive: true })));
+  const file = join(b, 'AGENTS.md'), other = join(a, 'AGENTS.md');
+  await writeFile(file, '# Web\r\n'); await writeFile(other, '# Core\n');
+  const service = new PromptLibraryService(join(temporary, 'global'), async () => [a, b]);
+  const custom = await service.saveRule({ scope:'global', enabled:true, title:'Reply', body:'English', modes:['plan'] });
+  registerIpcHandlers({ promptLibrary: service });
+  const dispatch = os.handle.mock.calls.find(([channel]) => channel === IPC_CHANNELS.invoke)![1];
+  vi.stubGlobal('gren', { invoke: (command: string, args: unknown) => dispatch({}, { command, args }) });
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', { configurable:true, value:{writeText} });
+
+  render(<ThemeProvider><RulesPanel workspace={a} /></ThemeProvider>);
+  const row = await screen.findByTestId('rule-open-project-' + file);
+  expect(row).toHaveTextContent('web / app');
+  expect(screen.getByTestId('rule-open-project-' + other)).toHaveTextContent('core / app');
+  fireEvent.change(screen.getByTestId('rule-search'), {target:{value:'# Web'}});
+  fireEvent.click(row);
+  fireEvent.click(screen.getByRole('button', { name:'定位文件' }));
+  await waitFor(() => expect(os.openPath).toHaveBeenCalledWith(b));
+  fireEvent.click(screen.getByRole('button', { name:'复制文件路径' }));
+  expect(writeText).toHaveBeenLastCalledWith(file);
+  fireEvent.click(screen.getByTestId('builtin-edit'));
+  const editor = screen.getByTestId('builtin-body');
+  fireEvent.change(editor, {target:{value:'# 新约定\nUse pnpm.\n'}});
+  fireEvent.click(screen.getByRole('button', { name:'复制全文' }));
+  expect(writeText).toHaveBeenLastCalledWith('# 新约定\nUse pnpm.\n');
+  fireEvent.keyDown(editor, {key:'s', ctrlKey:true});
+  await waitFor(() => expect(screen.getByTestId('builtin-preview')).toHaveTextContent('Use pnpm.'));
+  expect(screen.getByTestId('rule-search')).toHaveValue('');
+  expect(screen.getByTestId('rule-open-project-' + file)).toHaveAttribute('aria-pressed', 'true');
+  expect(await readFile(file,'utf8')).toBe('# 新约定\r\nUse pnpm.\r\n');
+  expect(await readFile(other,'utf8')).toBe('# Core\n');
+  await writeFile(file, '# Refreshed externally\r\n');
+  fireEvent.click(screen.getByTestId('rule-refresh'));
+  await waitFor(() => expect(screen.getByTestId('builtin-preview')).toHaveTextContent('Refreshed externally'));
+
+  fireEvent.click(screen.getByTestId('rule-open-global-' + custom.id));
+  fireEvent.click(screen.getByTestId('rule-edit'));
+  fireEvent.change(screen.getByTestId('rule-body-input'), { target:{value:'中文'} });
+  expect(screen.getByTestId('rule-file-budget')).toHaveTextContent('2 字 · ≈ 2 tokens');
+  expect(screen.getByTestId('rule-global-budget')).toHaveTextContent('7 字');
+  fireEvent.click(screen.getByTestId('rule-save'));
+  await waitFor(() => expect(screen.getByTestId('rule-preview')).toHaveTextContent('中文'));
+  expect(await readFile(custom.path, 'utf8')).toContain('modes: [plan]');
+  expect(await readFile(custom.path, 'utf8')).toContain('中文');
+  expect(screen.getByTestId('rule-global-budget')).toHaveTextContent('2 字');
+  fireEvent.click(screen.getByTestId('rule-detail-toggle'));
+  await waitFor(() => expect(screen.getByTestId('rule-global-budget')).toHaveTextContent('0 字'));
+  const del = screen.getByTestId('rule-delete');
+  fireEvent.click(del);
+  const confirmation = await screen.findByText('删除「Reply」？');
+  const popup = confirmation.closest('.ant-popconfirm') as HTMLElement;
+  expect(await readFile(custom.path, 'utf8')).toContain('中文');
+  fireEvent.click(within(popup).getByRole('button', {name:'删除'}));
+  await waitFor(() => expect(screen.queryByTestId('rule-open-global-' + custom.id)).toBeNull());
+  await expect(readFile(custom.path, 'utf8')).rejects.toMatchObject({code:'ENOENT'});
+});

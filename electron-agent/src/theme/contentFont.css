@@ -3,10 +3,8 @@
    选择器必须是 html body：antd v6 hashed:false 会注入无哈希 body { font-size; font-family }，
    晚于 Vite 的 index.css，同为 (0,0,1) 时会盖掉本文件。 */
 html {
-  --pi-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --pi-font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
-    "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
+  --pi-font-sans: var(--font-sans);
+  --pi-font-mono: var(--font-mono);
 
   --pi-font-delta: calc(var(--pi-font-size, 14px) - 14px);
   --pi-font-size-secondary: min(
@@ -15,15 +13,21 @@ html {
   );
   --pi-font-delta-secondary: calc(var(--pi-font-size-secondary) - 13px);
 
-  --pi-md-h1: 700 calc(21px + var(--pi-font-delta)) / calc(30px + var(--pi-font-delta)) var(--pi-font-sans);
-  --pi-md-h2: 700 calc(19px + var(--pi-font-delta)) / calc(28px + var(--pi-font-delta)) var(--pi-font-sans);
-  --pi-md-h3: 700 calc(18px + var(--pi-font-delta)) / calc(26px + var(--pi-font-delta)) var(--pi-font-sans);
+  --pi-md-h1: 600 calc(21px + var(--pi-font-delta)) / calc(30px + var(--pi-font-delta)) var(--pi-font-sans);
+  --pi-md-h2: 600 calc(19px + var(--pi-font-delta)) / calc(28px + var(--pi-font-delta)) var(--pi-font-sans);
+  --pi-md-h3: 600 calc(18px + var(--pi-font-delta)) / calc(26px + var(--pi-font-delta)) var(--pi-font-sans);
   --pi-md-h4: 600 var(--pi-font-size, 14px) / calc(24px + var(--pi-font-delta)) var(--pi-font-sans);
   --pi-md-base: var(--pi-font-size, 14px) / calc(24px + var(--pi-font-delta)) var(--pi-font-sans);
 }
 
 html body {
   font-family: var(--pi-font-sans);
+  font-size: var(--gren-font-body);
+  line-height: 1.5;
+}
+
+/* The preference is a conversation reading size, not the workbench control size. */
+[data-find-scope='chat'] {
   font-size: var(--pi-font-size, 14px);
   line-height: calc(24px + var(--pi-font-delta, 0px));
 }
@@ -156,6 +160,7 @@ html body {
   align-items: center;
   box-sizing: border-box;
   font: 12px/19px var(--pi-font-mono);
+  font-variant-ligatures: none;
   background-color: var(--gren-bg-2, rgba(127, 127, 127, 0.1));
   border: 0.5px solid var(--gren-border, rgba(127, 127, 127, 0.22));
   border-radius: 6px;

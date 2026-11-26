@@ -45,18 +45,20 @@ export function codeIndexPresentation({ status, checking, error, now = Date.now(
   if (checking || !status) return { label: '检查中', freshness, color: 'default', canQuery: false, primary: 'none' };
   const state = status.state?.toLowerCase().replace(/-/g, '_');
   if (status.sdkAvailable === false || state === 'sdk_unavailable') return { label: 'SDK 不可用', freshness, color: 'error', banner: { type: 'error', message: `内置 CodeGraph SDK 不可用，请检查安装包${status.message ? `：${status.message}` : ''}`, sync: false }, canQuery: false, primary: 'none' };
-  if (state === 'indexing') return { label: '索引中', freshness, color: 'processing', banner: { type: 'info', message: '正在重建索引，完成前暂不能查询', sync: false }, canQuery: false, primary: 'none' };
+  if (state === 'indexing') return { label: '同步中', freshness, color: 'processing', banner: { type: 'info', message: '正在重建索引，完成前暂不能查询', sync: false }, canQuery: false, primary: 'none' };
+  if (state === 'failed' && !status.connected) return { label: '索引失败', freshness, color: 'error', banner: { type: 'error', message: status.message || '索引无法读取，请重新同步。', sync: true }, canQuery: false, primary: status.indexed ? 'sync' : 'build' };
   if (!status.indexed || state === 'unavailable') return { label: '未索引', freshness, color: 'default', canQuery: false, primary: 'build' };
   if (status.phase === 'syncing' || status.phase === 'queued') return { label: '同步中', freshness, color: 'processing', canQuery: true, primary: 'sync' };
   if (status.phase === 'backoff' && status.lastError?.code === LOCKED) {
     return { label: '等待重试', freshness, color: 'warning', banner: { type: 'warning', message: `另一个程序正在写这个项目的索引（codegraph.lock）${retryText(status.nextRetryAt, now)}`, sync: false }, canQuery: true, primary: 'sync' };
   }
-  if (state === 'stale') return { label: '索引过期', freshness, color: 'warning', banner: { type: 'warning', message: '索引由旧版本建立，结果可能不准；手动同步会全量重建', sync: true }, canQuery: true, primary: 'sync' };
-  if (state === 'partial') return { label: '索引不完整', freshness, color: 'warning', banner: { type: 'warning', message: '上次索引未完成，手动同步会全量重建', sync: true }, canQuery: true, primary: 'sync' };
+  if (state === 'stale') return { label: '需更新', freshness, color: 'warning', banner: { type: 'warning', message: '索引由旧版本建立，结果可能不准；手动同步会全量重建', sync: true }, canQuery: true, primary: 'sync' };
+  if (state === 'partial') return { label: '需更新', freshness, color: 'warning', banner: { type: 'warning', message: '上次索引未完成，手动同步会全量重建', sync: true }, canQuery: true, primary: 'sync' };
   if (state === 'failed') return { label: '索引失败', freshness, color: 'error', banner: { type: 'error', message: `${status.message ?? '上次索引失败'}${failureText(status, now)}`, sync: true }, canQuery: true, primary: 'sync' };
   if (status.autoSync !== false && status.watcher?.degraded) {
-    return { label: '已索引', freshness, color: 'success', banner: { type: 'warning', message: `文件监听不可用${status.watcher.reason ? `（${status.watcher.reason}）` : ''}，索引不会自动跟上改动，需要时请手动同步`, sync: true }, canQuery: true, primary: 'sync' };
+    return { label: '需更新', freshness, color: 'warning', banner: { type: 'warning', message: `文件监听不可用${status.watcher.reason ? `（${status.watcher.reason}）` : ''}，索引不会自动跟上改动，需要时请手动同步`, sync: true }, canQuery: true, primary: 'sync' };
   }
+  if (freshness === 'stale') return { label: '需更新', freshness, color: 'warning', canQuery: true, primary: 'sync' };
   return { label: '已索引', freshness, color: 'success', canQuery: true, primary: 'sync' };
 }
 

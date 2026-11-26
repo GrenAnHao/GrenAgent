@@ -1,4 +1,5 @@
-import { Button, Icon } from '@lobehub/ui';
+import { Icon } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../components/WorkbenchButton';
 import { Input, Select, Switch } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Activity, ChevronDown, ChevronRight, ChevronUp, Square } from 'lucide-react';
@@ -167,6 +168,7 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: ${cssVar.borderRadius};
     background: ${cssVar.colorFillQuaternary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;

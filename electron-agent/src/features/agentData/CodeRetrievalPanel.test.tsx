@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./useProjectOptions', () => ({ useProjectOptions: () => [{ cwd: 'D:/proj/alpha', name: 'alpha' }, { cwd: 'D:/proj/beta', name: 'beta' }] }));
-vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { projects: vi.fn(), status: vi.fn(), search: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
+vi.mock('../../lib/agentData', () => ({ agentDataApi: { code: { overview: vi.fn(), projects: vi.fn(), status: vi.fn(), search: vi.fn(), call: vi.fn() }, jobs: { create: vi.fn() } } }));
 vi.mock('../../lib/files', () => ({ files: { read: vi.fn() } }));
 vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
 import { agentDataApi, type CodeGraphStatus } from '../../lib/agentData';
@@ -16,6 +16,7 @@ function deferred<T>() {
 describe('CodeRetrievalPanel project and status', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(agentDataApi.code.overview).mockResolvedValue({ structuredContent: {schemaVersion:1, rows:[], extra:{languages:{}}} });
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([]);
     vi.mocked(agentDataApi.code.status).mockImplementation(async (workspace) => ({ workspace, indexed: true, connected: true }));
     vi.mocked(agentDataApi.code.call).mockImplementation(async (request) => request.tool === 'codegraph_search'
@@ -24,22 +25,21 @@ describe('CodeRetrievalPanel project and status', () => {
   });
   afterEach(cleanup);
 
-  it('requires an explicit real project before querying or creating jobs', async () => {
+  it('checks known projects automatically without querying files or creating jobs', async () => {
     render(<CodeRetrievalPanel />);
-    expect(screen.getByText('请选择一个项目')).toBeTruthy();
-    await waitFor(() => expect(agentDataApi.code.projects).toHaveBeenCalled());
-    expect(agentDataApi.code.status).not.toHaveBeenCalled();
+    expect(screen.getByRole('region',{name:'最近项目'})).toBeTruthy();
+    await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledTimes(2));
     expect(agentDataApi.code.call).not.toHaveBeenCalled();
     expect(agentDataApi.jobs.create).not.toHaveBeenCalled();
   });
 
   it('queries the selected indexed project without using the legacy search adapter', async () => {
     render(<CodeRetrievalPanel />);
-    await pickSelectOption('项目', /^alpha ·/);
+    fireEvent.click(screen.getByRole('button', { name: '打开项目 alpha' }));
     await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledWith('D:/proj/alpha'));
     fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
     await screen.findByText('src/a.ts');
-    expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/proj/alpha', tool: 'codegraph_search', args: { query: 'parse', limit: 20 } });
+    expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/proj/alpha', tool: 'codegraph_search', args: { query: 'parse', limit: 20, hideIgnored: true } });
     expect(agentDataApi.code.search).not.toHaveBeenCalled();
   });
 
@@ -56,7 +56,7 @@ describe('CodeRetrievalPanel project and status', () => {
     const { rerender } = render(<CodeRetrievalPanel initialProject="D:/proj/alpha" />);
     await waitFor(() => expect(agentDataApi.code.status).toHaveBeenCalledWith('D:/proj/alpha'));
     await pickSelectOption('项目', /^beta ·/);
-    await waitFor(() => expect(agentDataApi.code.status).toHaveBeenLastCalledWith('D:/proj/beta'));
+    await waitFor(() => expectSelectDisplay('项目', /^beta ·/));
     rerender(<CodeRetrievalPanel initialProject="D:/proj/alpha" />);
     expectSelectDisplay('项目', /^beta ·/);
   });
@@ -75,7 +75,7 @@ describe('CodeRetrievalPanel project and status', () => {
     vi.mocked(agentDataApi.code.status).mockReturnValue(pending.promise);
     render(<CodeRetrievalPanel initialProject="D:/proj/alpha" />);
     await openSelect('项目');
-    expect(screen.getByRole('option', { name: /alpha.*未检查/ })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /alpha.*检查中/ })).toBeTruthy();
     expect(screen.queryByText('该项目尚未建立 CodeGraph 索引')).toBeNull();
     await act(async () => { pending.resolve({ workspace: 'D:/proj/alpha', connected: true, indexed: true }); });
     expect(screen.getByText('未提供 文件')).toBeTruthy();
@@ -128,7 +128,7 @@ describe('CodeRetrievalPanel project and status', () => {
     await act(async () => { oldStatus.resolve({ workspace: 'D:/proj/alpha', connected: true, indexed: true, files: 99 }); });
     expect(screen.queryByText(/^99 文件/)).toBeNull();
     expect(agentDataApi.code.call).toHaveBeenCalledTimes(1);
-    expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/proj/beta', tool: 'codegraph_files', args: { format: 'flat', limit: 100 } });
+    expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/proj/beta', tool: 'codegraph_files', args: { format: 'children', hideIgnored: true, limit: 100 } });
   });
 
   it('retains previous readable results when an MCP refresh returns an explicit error and no rows', async () => {

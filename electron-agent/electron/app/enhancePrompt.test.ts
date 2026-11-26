@@ -325,8 +325,10 @@ describe('createEnhancePrompt 默认路径', () => {
 });
 
 describe('createEnhancePrompt 实验路径', () => {
-  function projectSetup(streamImpl: (context: { tools?: unknown[] }) => AsyncGenerator<unknown>, request = vi.fn()) {
-    const stream = vi.fn(async function* (model: unknown, context: { tools?: unknown[] }, options?: unknown) {
+  type ProjectStreamContext = { tools?: unknown[]; messages: Array<{ role?: string; content?: Array<{ text?: string }> }> };
+
+function projectSetup(streamImpl: (context: ProjectStreamContext) => AsyncGenerator<unknown>, request = vi.fn()) {
+    const stream = vi.fn(async function* (model: unknown, context: ProjectStreamContext, options?: unknown) {
       yield* streamImpl(context);
     });
     const getModel = vi.fn(() => model);

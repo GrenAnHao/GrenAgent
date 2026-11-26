@@ -14,9 +14,9 @@ const { respond, completeAskUser, writeAskUserDraft, deleteAskUserDraft, getStat
   return {
     respond: vi.fn(() => Promise.resolve()),
     completeAskUser: vi.fn(() => Promise.resolve('ok' as const)),
-    writeAskUserDraft: vi.fn(() => Promise.resolve()),
+    writeAskUserDraft: vi.fn((_workspace: string, _draft: { selected: Record<string, string[]>; toolCallId: string }, _path?: string, _requestId?: string) => Promise.resolve()),
     deleteAskUserDraft: vi.fn(() => Promise.resolve()),
-    getState: vi.fn(() => Promise.resolve({ sessionFile: '/tmp/live.jsonl' })),
+    getState: vi.fn<() => Promise<{ sessionFile: string | null }>>(() => Promise.resolve({ sessionFile: '/tmp/live.jsonl' })),
     mockMessages,
   };
 });
@@ -76,6 +76,23 @@ describe('InlineQuestionCard', () => {
     });
   });
 
+  it('waits for the reply, prevents duplicate submits, then closes without a draft RPC', async () => {
+    let acknowledge!: () => void;
+    respond.mockImplementationOnce(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'u1', toolCallId: 'c1', sessionPath: '/tmp/live.jsonl', data, mode: 'live' });
+    render(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('乙'));
+    const confirm = screen.getByTestId('inline-question-continue');
+    fireEvent.click(confirm);
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(respond).toHaveBeenCalledTimes(1);
+    expect(respond).toHaveBeenCalledWith('/ws', expect.objectContaining({ id: 'u1', askUserDraftToolCallId: 'c1' }));
+    acknowledge();
+    await waitFor(() => expect(screen.queryByTestId('inline-question')).toBeNull());
+    expect(deleteAskUserDraft).not.toHaveBeenCalled();
+  });
+
   it('includes extra note in the submitted value', async () => {
     useInlineQuestionStore.getState().setRequest({
       workspace: '/ws',
@@ -133,6 +150,7 @@ describe('InlineQuestionCard', () => {
           toolCallId: 'tc-live',
           selected: { q1: ['a'] },
         }),
+        '/tmp/live.jsonl', 'u-live',
       );
     });
     expect(getState).toHaveBeenCalledWith('/ws');
@@ -150,7 +168,7 @@ describe('InlineQuestionCard', () => {
     });
     render(<InlineQuestionCard />);
     await waitFor(() => {
-      const calls = writeAskUserDraft.mock.calls as Array<[string, { selected: Record<string, string[]> }]>;
+      const calls = writeAskUserDraft.mock.calls;
       expect(calls.every(([, d]) => Boolean(d.selected?.q1?.includes('a')))).toBe(true);
       if (calls.length > 0) {
         const last = calls[calls.length - 1]![1];
@@ -201,6 +219,7 @@ describe('InlineQuestionCard', () => {
           toolCallId: 'tc-2',
           selected: { q1: ['b'] },
         }),
+        '/tmp/second.jsonl', 'live-2',
       );
     });
     expect(getState).toHaveBeenCalledWith('/ws');
@@ -237,12 +256,13 @@ describe('InlineQuestionCard', () => {
           toolCallId: 'tc-retry',
           selected: { q1: ['b'] },
         }),
+        '/tmp/retry.jsonl', 'live-retry',
       );
     });
   });
 
   it('ignores a stale getState result after the request changes', async () => {
-    let resolveFirst!: (value: unknown) => void;
+    let resolveFirst!: (value: { sessionFile: string | null }) => void;
     getState.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -284,6 +304,7 @@ describe('InlineQuestionCard', () => {
       expect(writeAskUserDraft).toHaveBeenCalledWith(
         '/ws',
         expect.objectContaining({ toolCallId: 'tc-2', selected: { q1: ['b'] } }),
+        '/tmp/new.jsonl', 'live-2',
       );
     });
 

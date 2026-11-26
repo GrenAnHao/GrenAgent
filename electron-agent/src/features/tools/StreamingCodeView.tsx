@@ -3,12 +3,14 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { CodeCard } from './CodeCard';
 import { languageFromPath } from './codeLanguage';
 import { lineCount } from './streamingFileModel';
+import scrollbarCSS from '../../theme/scrollbars.css?inline';
 
 /**
- * 与最终 diff 卡片同一套壳子：容器自己滚，滚动条 hover 渐显。
+ * 与最终 diff 卡片同一套壳子：容器自己滚，滚动条继承工作台配色。
  * FileStream 不读 options.unsafeCSS，所以这段样式由我们自己塞进 shadow root。
  */
 const streamCSS = `
+  ${scrollbarCSS}
   :host {
     display: block !important;
     width: 100% !important;
@@ -26,13 +28,6 @@ const streamCSS = `
     padding-top: 0 !important;
     padding-bottom: 0 !important;
     overflow: auto !important;
-    scrollbar-width: thin !important;
-    scrollbar-color: transparent transparent !important;
-    transition: scrollbar-color 180ms ease !important;
-  }
-
-  :host(:hover) [data-code] {
-    scrollbar-color: color-mix(in srgb, CanvasText 42%, transparent) transparent !important;
   }
 
   [data-gutter] {
@@ -53,6 +48,7 @@ const styles = createStaticStyles(({ css }) => ({
     overflow: auto;
     white-space: pre;
     font-family: var(--pi-font-mono);
+    font-variant-ligatures: none;
     font-size: 13px;
   `,
 }));
@@ -78,7 +74,9 @@ async function ensureLobeTheme(pierre: typeof import('@pierre/diffs')): Promise<
     // 这份副本上没注册过，往下补。
   }
   const theme = (await import('@lobehub/ui/es/Highlighter/theme/lobe-theme')).default;
-  pierre.registerCustomTheme(LOBE_THEME, () => Promise.resolve(theme));
+  const { type } = theme;
+  if (type !== 'dark' && type !== 'light') throw new Error('Invalid lobe-theme color scheme');
+  pierre.registerCustomTheme(LOBE_THEME, () => Promise.resolve({ ...theme, type }));
   await pierre.resolveTheme(LOBE_THEME);
 }
 

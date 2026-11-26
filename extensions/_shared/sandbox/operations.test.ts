@@ -7,6 +7,7 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxUnavailableError } from "./errors.js";
 import { BASH_COMMAND_ENV, BASH_PID_FILE_ENV, CONFINED_BASH_BOOTSTRAP, createSandboxedBashOperations, msysGroupKillScript, SANDBOX_CWD_ENV } from "./operations.js";
+import type { SpawnImpl, SandboxedBashOperationsDeps } from "./operations.js";
 import type { BashShell } from "./shellPath.js";
 import type { ConfinedArgv, FileSandboxMode, SandboxExecutionPolicy } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
@@ -50,7 +51,7 @@ function fakeChild(opts: {
     stdin: PassThrough;
     stdout: PassThrough;
     stderr: PassThrough;
-    kill: (signal?: NodeJS.Signals) => boolean;
+    kill: (signal?: NodeJS.Signals | 0) => boolean;
   };
   if (!opts.unsetPid) child.pid = opts.pid ?? 4242;
   child.stdin = new PassThrough();
@@ -88,16 +89,16 @@ function collectOnData() {
 function makeOps(opts: {
   mode?: FileSandboxMode;
   sessionId?: string;
-  confine?: ReturnType<typeof vi.fn>;
-  spawnImpl?: ReturnType<typeof vi.fn>;
+  confine?: SandboxedBashOperationsDeps["confine"];
+  spawnImpl?: ReturnType<typeof vi.fn<(...args: Parameters<SpawnImpl>) => ReturnType<typeof fakeChild>>>;
   platform?: NodeJS.Platform;
-  kill?: (pid: number, signal?: NodeJS.Signals) => void;
+  kill?: SandboxedBashOperationsDeps["kill"];
   resolveShell?: (shellPath: string | undefined) => Promise<BashShell | string> | BashShell | string;
   shellPath?: () => string | undefined;
   fullAccessBlocked?: boolean;
 }) {
   const spawnCalls: Array<{ file: string; args: readonly string[] }> = [];
-  const spawnImpl = opts.spawnImpl ?? vi.fn((file: string, args: readonly string[]) => {
+  const spawnImpl = opts.spawnImpl ?? vi.fn((file: string, args: readonly string[], _options?: Parameters<SpawnImpl>[2]) => {
     spawnCalls.push({ file, args });
     return fakeChild({ exitCode: 0 });
   });
@@ -242,7 +243,7 @@ describe("createSandboxedBashOperations", () => {
   });
 
   it("kills the process group on POSIX abort and throws aborted", async () => {
-    const kills: Array<{ pid: number; signal?: NodeJS.Signals }> = [];
+    const kills: Array<{ pid: number; signal?: NodeJS.Signals | 0 }> = [];
     let hung: ReturnType<typeof fakeChild> | undefined;
     const spawnImpl = vi.fn(() => {
       hung = fakeChild({ hang: true, pid: 4242 });
@@ -267,7 +268,7 @@ describe("createSandboxedBashOperations", () => {
 
   it("uses taskkill /t on Windows abort and throws aborted", async () => {
     let hung: ReturnType<typeof fakeChild> | undefined;
-    const spawnImpl = vi.fn((file: string, args: readonly string[]) => {
+    const spawnImpl = vi.fn((file: string, args: readonly string[], _options?: Parameters<SpawnImpl>[2]) => {
       if (/taskkill/i.test(file)) {
         queueMicrotask(() => hung?.emit("close", 1));
         return fakeChild({ exitCode: 0 });
@@ -352,7 +353,7 @@ describe("createSandboxedBashOperations", () => {
   });
 
   it("terminates once pid appears after a pending abort", async () => {
-    const kills: Array<{ pid: number; signal?: NodeJS.Signals }> = [];
+    const kills: Array<{ pid: number; signal?: NodeJS.Signals | 0 }> = [];
     const child = fakeChild({ hang: true, unsetPid: true });
     const spawnImpl = vi.fn(() => child);
     const { ops } = makeOps({

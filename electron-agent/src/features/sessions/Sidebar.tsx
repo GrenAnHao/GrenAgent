@@ -81,6 +81,11 @@ export interface SidebarProps {
   onUnarchiveSession?: (session: SessionInfo) => void;
   /** 按第一条用户消息重新生成标题并写回，返回新标题（生成不出时为空串）。不给就没有这个菜单项。 */
   onRegenerateTitle?: (cwd: string, path: string) => Promise<string>;
+  /**
+   * 移动到项目…：两种会话行（项目里的会话 / 对话行）共用。
+   * 已归档的会话不给入口；对话行只移动被点的那一份明确 path，不批量搬同目录其他会话。
+   */
+  onTransferSession?: (cwd: string, path: string, title: string) => void;
 }
 
 export const Sidebar = memo(function Sidebar(props: SidebarProps) {
@@ -141,6 +146,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   const handleRequestRename = useCallback((path: string) => setRenamingPath(path), []);
   const { message } = App.useApp();
   const regenerateTitle = props.onRegenerateTitle;
+  const transferSession = props.onTransferSession;
   const handleRegenerateTitle = useCallback(
     async (cwd: string, path: string) => {
       if (!regenerateTitle) return;
@@ -247,6 +253,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               onReveal={handleRevealProject}
               onArchive={props.onArchiveConversation}
               onRegenerateTitle={props.onRegenerateTitle ? handleRegenerateTitle : undefined}
+              onTransfer={transferSession}
             />
           );
         case 'project':
@@ -282,6 +289,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               onReveal={handleRevealProject}
               onArchive={props.onArchiveSession}
               onRegenerateTitle={props.onRegenerateTitle ? handleRegenerateTitle : undefined}
+              onTransfer={transferSession}
             />
           );
         case 'more':
@@ -310,6 +318,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
       props.onArchiveSession,
       props.onArchiveConversation,
       props.onRegenerateTitle,
+      transferSession,
       handleRegenerateTitle,
       handleSubmitRename,
       handleRequestRename,

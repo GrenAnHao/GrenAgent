@@ -9,6 +9,15 @@ function ev(event: GoalEvent) {
 }
 
 describe("listGoalHistory", () => {
+  it("keeps new batch identity alongside legacy hidden round bodies", () => {
+    const items = listGoalHistory([
+      { type: "custom_message", customType: "goal-round", display: false, content: "old", details: { goalId: "g", revision: 2, round: 1 } },
+      { type: "custom_message", customType: "goal-round", display: false, content: "new", details: { goalId: "g", revision: 8, round: 3, runNumber: 2, runRound: 1, roundId: "r3" } },
+    ]);
+    expect(items[0]).toEqual({ source: "round", goalId: "g", revision: 2, round: 1, content: "old" });
+    expect(items[1]).toMatchObject({ source: "round", round: 3, runNumber: 2, runRound: 1, roundId: "r3", content: "new" });
+  });
+
   it("maps valid goal events to source=event items", () => {
     const items = listGoalHistory([
       ev({ kind: "create", goalId: "g1", revision: 1, at, payload: { condition: "写完" } }),

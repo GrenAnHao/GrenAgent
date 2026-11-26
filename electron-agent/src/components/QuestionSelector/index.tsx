@@ -1,4 +1,4 @@
-import { Button } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../WorkbenchButton';
 import { MessageCircleQuestion } from 'lucide-react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { memo, useState } from 'react';
@@ -31,6 +31,7 @@ export interface QuestionSelectorProps {
   onContinue?: () => void;
   onSkip?: () => void;
   disabled?: boolean;
+  submitting?: boolean;
   doneLabel?: string;
   allowExtra?: boolean;
   allowExtraImages?: boolean;
@@ -151,6 +152,7 @@ export const QuestionSelector = memo(function QuestionSelector({
   onContinue,
   onSkip,
   disabled = false,
+  submitting = false,
   doneLabel,
   allowExtra = false,
   allowExtraImages = true,
@@ -192,11 +194,12 @@ export const QuestionSelector = memo(function QuestionSelector({
           <Button data-testid={`${testId}-prev`} disabled={idx === 0} onClick={() => setStep(idx - 1)} size="small">
             上一题
           </Button>
+          {onSkip ? <Button data-testid={`${testId}-skip`} disabled={submitting} onClick={onSkip} size="small">{skipLabel}</Button> : null}
           <span className={styles.footMid}>
             已答 {answeredCount} / {questions.length}
           </span>
           {isLast ? (
-            <Button data-testid={`${testId}-submit`} disabled={!allOk} onClick={onContinue} size="small" type="primary">
+            <Button data-testid={`${testId}-submit`} disabled={!allOk || submitting} onClick={onContinue} size="small" type="primary">
               提交
             </Button>
           ) : (
@@ -208,14 +211,14 @@ export const QuestionSelector = memo(function QuestionSelector({
       ) : (
         <>
           {onSkip ? (
-            <Button data-testid={`${testId}-skip`} onClick={onSkip} size="small">
+            <Button data-testid={`${testId}-skip`} disabled={submitting} onClick={onSkip} size="small">
               {skipLabel}
             </Button>
           ) : (
             <span />
           )}
           {onContinue ? (
-            <Button data-testid={`${testId}-continue`} disabled={!allOk} onClick={onContinue} size="small" type="primary">
+            <Button data-testid={`${testId}-continue`} disabled={!allOk || submitting} onClick={onContinue} size="small" type="primary">
               {continueLabel}
             </Button>
           ) : null}
@@ -225,6 +228,7 @@ export const QuestionSelector = memo(function QuestionSelector({
 
   return (
     <div
+      aria-busy={submitting || undefined}
       className={cx(styles.wrap, fullWidth && styles.wrapFull, className)}
       data-full-width={fullWidth ? 'true' : undefined}
       data-testid={testId}

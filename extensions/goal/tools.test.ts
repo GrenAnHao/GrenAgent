@@ -3,11 +3,13 @@ import { runInWorkspace } from "../_shared/workspace-context.js";
 import {
   __resetGoalAuthForTest,
   clearGoalTurnMarks,
-  hasGoalRound,
+  captureGoalToolCall,
+  occupiedGoalRound,
   setGoalHumanInput,
-  setGoalRoundPending,
+  occupyGoalRound,
 } from "./auth.js";
 import { readSnapshot, writeEvent } from "./session.js";
+import { __resetGoalContinueForTest, recordGoalRunStart } from "./continue.js";
 import { registerGoalTools } from "./tools.js";
 
 type Def = { name: string; execute: (...args: unknown[]) => Promise<{ details?: unknown }> };
@@ -54,11 +56,20 @@ function setup(sessionId = "session-a") {
 }
 
 function exec(def: Def, ctx: unknown, params: Record<string, unknown> = {}) {
+  const sessionId = (ctx as { sessionManager: { getSessionId(): string } }).sessionManager.getSessionId();
+  captureGoalToolCall(sessionId, "id");
   return def.execute("id", params, undefined, undefined, ctx);
+}
+function arm(sessionId: string, snapshot: NonNullable<ReturnType<typeof readSnapshot>>) {
+  return occupyGoalRound(sessionId, {
+    goalId: snapshot.goalId, runNumber: snapshot.runNumber,
+    conditionRevision: snapshot.conditionRevision, round: snapshot.roundsStarted,
+  });
 }
 
 afterEach(() => {
   __resetGoalAuthForTest();
+  __resetGoalContinueForTest();
   delete process.env.PI_GOAL_WORKER;
   delete process.env.PI_IS_SUBAGENT;
 });
@@ -94,6 +105,19 @@ describe("goal tools", () => {
     });
   });
 
+  it("registers the initial condition when a human-authorized model creates a goal mid-run", async () => {
+    const { byName, ctx } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput(ctx.sessionManager.getSessionId());
+      recordGoalRunStart(ctx.sessionManager.getSessionId());
+      const created = await exec(byName.create_goal, ctx, { condition: "new condition" });
+      const snapshot = created.details as { goalId: string; revision: number };
+      expect(occupiedGoalRound(ctx.sessionManager.getSessionId())).toMatchObject({ goalId: snapshot.goalId, conditionRevision: 1, round: 0 });
+      const completed = await exec(byName.update_goal, ctx, { goalId: snapshot.goalId, revision: snapshot.revision, action: "complete" });
+      expect(completed.details).toMatchObject({ status: "complete" });
+    });
+  });
+
   it("rejects model resume on a paused goal even with a human mark", async () => {
     const { byName, ctx } = setup();
     await runInWorkspace(ws, async () => {
@@ -108,6 +132,21 @@ describe("goal tools", () => {
     });
   });
 
+  it("never lets a model restart exhausted budget with a human mark", async () => {
+    const { byName, ctx, pi } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput(ctx.sessionManager.getSessionId());
+      const created = await exec(byName.create_goal, ctx, { condition: "work", maxRounds: 1 });
+      const first = created.details as { goalId: string; revision: number };
+      writeEvent(pi as never, ctx as never, { kind: "round", goalId: first.goalId,
+        revision: first.revision + 1, at: "2026-09-13T00:00:00.000Z", payload: { round: 1, runNumber: 1, runRound: 1 } });
+      const current = readSnapshot(ctx as never)!;
+      await expect(exec(byName.update_goal, ctx, { goalId: current.goalId, revision: current.revision, action: "resume" }))
+        .rejects.toThrow("GOAL_TOOL_RESUME_PAUSED");
+      expect(readSnapshot(ctx as never)).toMatchObject({ runNumber: 1, runRoundsStarted: 1 });
+    });
+  });
+
   it("allows complete only when a matching Goal Round is pending", async () => {
     const { byName, ctx, pi } = setup();
     await runInWorkspace(ws, async () => {
@@ -118,7 +157,7 @@ describe("goal tools", () => {
 
       await expect(
         exec(byName.update_goal, ctx, { goalId: createdDetails.goalId, revision: createdDetails.revision, action: "complete" }),
-      ).rejects.toThrow("GOAL_TOOL_ROUND");
+      ).rejects.toThrow("GOAL_TOOL_ROUND_STALE");
 
       writeEvent(pi as never, ctx as never, {
         kind: "round",
@@ -129,7 +168,7 @@ describe("goal tools", () => {
       });
       const snapshot = readSnapshot(ctx as never);
       expect(snapshot?.roundsStarted).toBe(1);
-      setGoalRoundPending(ctx.sessionManager.getSessionId(), { goalId: snapshot!.goalId, revision: snapshot!.revision, round: snapshot!.roundsStarted });
+      arm(ctx.sessionManager.getSessionId(), snapshot!);
       const completed = await exec(byName.update_goal, ctx, {
         goalId: snapshot!.goalId,
         revision: snapshot!.revision,
@@ -153,11 +192,11 @@ describe("goal tools", () => {
         payload: { round: 3 },
       });
       const snapshot = readSnapshot(ctx as never);
-      setGoalRoundPending(ctx.sessionManager.getSessionId(), { goalId: snapshot!.goalId, revision: snapshot!.revision, round: snapshot!.roundsStarted });
-      clearGoalTurnMarks(ctx.sessionManager.getSessionId());
+      const ref = arm(ctx.sessionManager.getSessionId(), snapshot!);
+      clearGoalTurnMarks(ctx.sessionManager.getSessionId(), ref?.roundId);
       await expect(
         exec(byName.update_goal, ctx, { goalId: snapshot!.goalId, revision: snapshot!.revision, action: "complete" }),
-      ).rejects.toThrow("GOAL_TOOL_ROUND");
+      ).rejects.toThrow("GOAL_TOOL_ROUND_STALE");
       await expect(
         exec(byName.update_goal, ctx, {
           goalId: snapshot!.goalId,
@@ -165,7 +204,7 @@ describe("goal tools", () => {
           action: "blocked",
           blockedReason: { message: "缺密钥" },
         }),
-      ).rejects.toThrow("GOAL_TOOL_ROUND");
+      ).rejects.toThrow("GOAL_TOOL_ROUND_STALE");
     });
   });
 
@@ -182,7 +221,7 @@ describe("goal tools", () => {
           action: "blocked",
           blockedReason: { message: "太早" },
         }),
-      ).rejects.toThrow("GOAL_TOOL_BLOCKED");
+      ).rejects.toThrow("GOAL_TOOL_ROUND_STALE");
 
       writeEvent(pi as never, ctx as never, {
         kind: "round",
@@ -193,7 +232,7 @@ describe("goal tools", () => {
       });
       const snapshot = readSnapshot(ctx as never);
       expect(snapshot?.roundsStarted).toBe(3);
-      setGoalRoundPending(ctx.sessionManager.getSessionId(), { goalId: snapshot!.goalId, revision: snapshot!.revision, round: snapshot!.roundsStarted });
+      arm(ctx.sessionManager.getSessionId(), snapshot!);
       await expect(
         exec(byName.update_goal, ctx, {
           goalId: snapshot!.goalId,
@@ -240,10 +279,10 @@ describe("goal tools", () => {
 
   it("does not let session B settle clear session A's pending round", async () => {
     const a = setup("session-a");
-    const snapshot = { goalId: "g-a", revision: 2, round: 1 };
-    setGoalRoundPending(a.sessionId, snapshot);
+    const snapshot = { goalId: "g-a", runNumber: 1, conditionRevision: 1, round: 1 };
+    const ref = occupyGoalRound(a.sessionId, snapshot);
     clearGoalTurnMarks("session-b");
-    expect(hasGoalRound(a.sessionId, snapshot)).toBe(true);
+    expect(occupiedGoalRound(a.sessionId)).toEqual(ref);
   });
 
   it("rejects update_goal when revision does not match the current snapshot", async () => {

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+当前补充边界见[视觉评审与生命周期修复](../bug-fix/2026-11-17-visual-review-and-goal-lifecycle.md)：旧页面回传不再产生 choice，只有真正 ask_user 等待；回复与压缩作为独立活动参与运行并集，不改变本篇通知路由和优先级。
+
 ## Problem
 
 侧栏会话行的行尾格（`SessionItem.tsx`）只会画运行中的黄色转圈。离开画面的会话出了什么事，用户只能一个个点进去看：
@@ -20,8 +22,8 @@ Status: implemented
 | 状态 | 样式 | 出现 | 消失 |
 | --- | --- | --- | --- |
 | 等待批准 `approval` | 橙色 `Hand`（`cssVar.orange`） | confirm / select / 普通 input 审批卡，含子代理经它发来的 | 答复、宿主 dismiss、回合结束（子代理审批按 `dropStashedUiRequests` 的规则保留） |
-| 需要你选择 `choice` | 蓝色 `MessageCircleQuestion`（`colorInfo`），呼吸动画 | ask_user 富卡（live 和 restored）；`read_visual_choice` 等待中 | 答复；视觉设计另在宿主 dismiss 或该会话回合结束时清 |
-| 运行中 `running` | 黄色转圈（`colorWarning`） | `agent_start` | 结束 |
+| 需要你选择 `choice` | 蓝色 `MessageCircleQuestion`（`colorInfo`），呼吸动画 | ask_user 富卡（live 和 restored，含版本绑定的视觉评审） | 答复、取消或宿主 dismiss；旧 visual-choice 哨兵定向取消，不产生等待 |
+| 运行中 `running` | 黄色转圈（`colorWarning`） | 回复或独立压缩活动 | 所属活动全部结束；普通 agent_end 不提前清压缩 |
 | 失败 `failed` | 红色 `CircleX`（`colorError`） | 回合结束且最后一条助手消息 `stopReason: 'error'` | 打开这个会话；下一轮结束时被新结果替换 |
 | 任务受阻 `blocked` | 紫色 `OctagonPause`（`cssVar.purple`） | 该会话的 Goal 快照变成 `blocked` | 打开这个会话；Goal 离开 `blocked` |
 | 完成未读 `done` | 8px 绿色实心圆点（`colorSuccess`） | 回合结束后 1.5 秒内没有新一轮 `agent_start` | 打开这个会话；新一轮开始 |

@@ -1,8 +1,10 @@
+import type { ManualSyncOptions } from './codeGraphEngine';
+import { indexStageProgress } from './codeGraphProgress';
 import type { IndexProgress } from '@colbymchenry/codegraph';
 
 /** CodeGraphHostClient / CodeGraphThreads / CodeGraphEngine 都满足；同步结果这里不用。 */
 interface SyncRunner {
-  runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void): Promise<unknown>;
+  runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void, options?: ManualSyncOptions): Promise<unknown>;
   cancelSync(jobId: string): Promise<void>;
   close(): Promise<void>;
 }
@@ -14,8 +16,6 @@ interface JobCallbacks {
   cancelled(id: string): Promise<unknown>;
   stage(id: string, stage: string, processed?: number, total?: number): void;
 }
-// queued：同一工作区还有一次同步（常是自动同步）在跑，这个任务排在它后面，见 syncScheduler.ts。
-const stages: Record<string, string> = { queued: '排队等待', scanning: '扫描文件', parsing: '解析代码', resolving: '解析引用', linking: '关联符号' };
 
 /** Keep terminal job persistence alive until the embedded SDK has finished using its DB. */
 export class CodeGraphJobs {
@@ -26,9 +26,17 @@ export class CodeGraphJobs {
 
   constructor(private readonly engine: SyncRunner, private readonly callbacks: JobCallbacks) {}
 
+  rebuild(id: string, workspace: string): Promise<void> {
+    return this.startJob(id, workspace, { mode: 'full' });
+  }
+
   run(id: string, workspace: string): Promise<void> {
+    return this.startJob(id, workspace);
+  }
+
+  private startJob(id: string, workspace: string, options?: ManualSyncOptions): Promise<void> {
     if (this.closed) return Promise.reject(new Error('CodeGraph jobs are closed'));
-    const task = this.execute(id, workspace).finally(() => { this.active.delete(id); this.cancelling.delete(id); });
+    const task = this.execute(id, workspace, options).finally(() => { this.active.delete(id); this.cancelling.delete(id); });
     this.active.set(id, task);
     return task;
   }
@@ -53,19 +61,16 @@ export class CodeGraphJobs {
     return this.shutdown;
   }
 
-  private async execute(id: string, workspace: string): Promise<void> {
+  private async execute(id: string, workspace: string, options?: ManualSyncOptions): Promise<void> {
     try {
       await this.callbacks.start(id);
       if (!this.cancelling.has(id)) {
         await this.engine.runSync(id, workspace, (progress: IndexProgress) => {
-          const stage = stages[progress.phase] ?? progress.phase;
-          if (Number.isSafeInteger(progress.current) && Number.isSafeInteger(progress.total)
-            && progress.current >= 0 && progress.total > 0 && progress.current <= progress.total) {
-            this.callbacks.stage(id, stage, progress.current, progress.total);
-          } else {
-            this.callbacks.stage(id, stage);
-          }
-        });
+          const {stage, processed, total} = indexStageProgress(progress);
+          if (processed === undefined) this.callbacks.stage(id, stage);
+          else if (total === undefined) this.callbacks.stage(id, stage, processed);
+          else this.callbacks.stage(id, stage, processed, total);
+        }, options);
       }
       if (this.cancelling.has(id)) await this.callbacks.cancelled(id);
       else await this.callbacks.complete(id);

@@ -18,7 +18,33 @@ const snapshot = (sessionId: string, revision: number, status: GoalSnapshot['sta
 
 describe('goalStore session projection', () => {
   beforeEach(() => {
-    useGoalStore.setState({ bySession: {}, goal: undefined });
+    useGoalStore.setState({ bySession: {}, watermarks: {}, mutationFences: {}, goal: undefined });
+  });
+
+  it('retains a clear tombstone and session sequence across newly created goals', () => {
+    const store = useGoalStore.getState();
+    const stamp = (sequence: number) => ({ source: 'live' as const, ownerEpoch: 'owner-a', sequence });
+    expect(store.acceptStatus('session-a', snapshot('session-a', 4), stamp(8))).toBe(true);
+    expect(store.acceptStatus('session-a', undefined, stamp(9))).toBe(true);
+    expect(store.acceptStatus('session-a', snapshot('session-a', 5), stamp(8))).toBe(false);
+    expect(store.getSnapshot('session-a')).toBeUndefined();
+    expect(store.acceptStatus('session-a', { ...snapshot('session-a', 1), goalId: 'new' }, stamp(10))).toBe(true);
+    expect(store.acceptStatus('session-a', snapshot('session-a', 20), stamp(9))).toBe(false);
+    expect(store.getSnapshot('session-a')?.goalId).toBe('new');
+  });
+
+  it('uses sequence for activation-only changes, rejects offline and retired owners', () => {
+    const store = useGoalStore.getState();
+    const first = snapshot('session-a', 2);
+    expect(store.acceptStatus('session-a', first, { source: 'live', ownerEpoch: 'a', sequence: 2 })).toBe(true);
+    expect(store.acceptStatus('session-a', { ...first, activation: 'armed' }, { source: 'live', ownerEpoch: 'a', sequence: 3 })).toBe(true);
+    expect(store.acceptStatus('session-a', first, { source: 'live', ownerEpoch: 'a', sequence: 2 })).toBe(false);
+    expect(store.acceptStatus('session-a', first, { source: 'offline' })).toBe(false);
+    expect(store.acceptStatus('session-a', first, { source: 'live', ownerEpoch: 'b', sequence: 1 })).toBe(false);
+    expect(store.acceptStatus('session-a', first, { source: 'live', ownerEpoch: 'b', sequence: 1 }, true)).toBe(true);
+    expect(store.acceptStatus('session-a', first, { source: 'live', ownerEpoch: 'a', sequence: 100 }, true)).toBe(false);
+    store.dropSession('session-a');
+    expect(useGoalStore.getState().watermarks['session-a']).toBeUndefined();
   });
 
   it('keeps snapshots for two sessions independent', () => {

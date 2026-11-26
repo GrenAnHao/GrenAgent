@@ -28,7 +28,6 @@ const styles = createStaticStyles(({ css }) => ({
     height: 100%;
     overflow-y: auto;
     border-inline-end: 1px solid ${cssVar.colorBorderSecondary};
-    scrollbar-width: thin;
   `,
   detail: css`
     flex: 1;

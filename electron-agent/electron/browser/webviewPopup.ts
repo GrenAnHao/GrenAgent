@@ -20,11 +20,7 @@ export function decideWindowOpen(params: {
   return { kind: 'internal', url };
 }
 
-export function shouldClearModifierOnKeyUp(input: {
-  type: string;
-  key?: string;
-  code?: string;
-}): boolean {
+export function shouldClearModifierOnKeyUp(input: InputEventLike): boolean {
   if (input.type !== 'keyUp') {
     return false;
   }
@@ -72,14 +68,15 @@ interface InputEventLike {
 
 interface GuestLike {
   id: number;
-  on(event: string, handler: (...args: unknown[]) => void): void;
+  on(event: 'before-input-event', handler: (event: unknown, input: InputEventLike) => void): void;
+  on(event: 'blur', handler: () => void): void;
   setWindowOpenHandler(
     handler: (details: { url: string; disposition: string }) => { action: 'deny' },
   ): void;
 }
 
 interface EmbedderLike {
-  on(event: string, handler: (...args: unknown[]) => void): void;
+  on(event: 'blur', handler: () => void): void;
 }
 
 export function attachGuestWindowOpenHandler(options: {

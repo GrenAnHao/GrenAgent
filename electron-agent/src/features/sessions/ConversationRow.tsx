@@ -18,6 +18,8 @@ interface ConversationRowProps {
   /** 归档整个对话目录（下面的会话一起归档，否则次新的那份会顶上来）。 */
   onArchive?: (cwd: string) => void;
   onRegenerateTitle?: (cwd: string, path: string) => void;
+  /** 移动到项目…；未提供则菜单不出现该项。 */
+  onTransfer?: (cwd: string, path: string, title: string) => void;
 }
 
 export const ConversationRow = memo(function ConversationRow({
@@ -34,6 +36,7 @@ export const ConversationRow = memo(function ConversationRow({
   onReveal,
   onArchive,
   onRegenerateTitle,
+  onTransfer,
 }: ConversationRowProps) {
   const handleClick = useCallback(() => onOpen(item.cwd, item.sessionPath), [onOpen, item.cwd, item.sessionPath]);
   const handleDelete = useCallback(() => onDelete(item.cwd), [onDelete, item.cwd]);
@@ -43,6 +46,10 @@ export const ConversationRow = memo(function ConversationRow({
   const handleRegenerateTitle = useCallback(
     () => onRegenerateTitle?.(item.cwd, item.sessionPath),
     [onRegenerateTitle, item.cwd, item.sessionPath],
+  );
+  const handleTransfer = useCallback(
+    () => onTransfer?.(item.cwd, item.sessionPath, item.name),
+    [onTransfer, item.cwd, item.sessionPath, item.name],
   );
   const handleRename = useCallback(
     (name: string) => onSubmitRename(item.cwd, item.sessionPath, name),
@@ -67,6 +74,7 @@ export const ConversationRow = memo(function ConversationRow({
       onReveal={handleReveal}
       onArchive={onArchive ? handleArchive : undefined}
       onRegenerateTitle={onRegenerateTitle ? handleRegenerateTitle : undefined}
+      onTransfer={onTransfer ? handleTransfer : undefined}
     />
   );
 });

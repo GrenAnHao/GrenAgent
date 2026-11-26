@@ -41,13 +41,13 @@ const sources = (over: Partial<PendingSources>): PendingSources => ({
 });
 
 describe('derivePending', () => {
-  it('maps prompts to approval and ask_user / visual to choice', () => {
+  it('maps prompts to approval and ask_user to choice, never old visual pending', () => {
     const out = derivePending(
       sources({ prompts: [prompt('p1', A)], inline: [inline(B)], visual: [visual('D:/repo/.pi/c.jsonl', true)] }),
     );
     expect(out[key(A)]).toEqual({ path: A, workspace: WS, kind: 'approval', title: '标题 p1' });
     expect(out[key(B)]).toEqual({ path: B, workspace: WS, kind: 'choice', title: '用哪个方案？' });
-    expect(out[key('D:/repo/.pi/c.jsonl')]).toMatchObject({ kind: 'choice', title: '视觉设计等待确认' });
+    expect(out[key('D:/repo/.pi/c.jsonl')]).toBeUndefined();
   });
 
   it('falls back to the request message when there is no title', () => {
@@ -85,8 +85,8 @@ describe('derivePending', () => {
     expect(out[key(B)]).toMatchObject({ kind: 'choice', title: '用哪个方案？', workspace: WS });
   });
 
-  it('ignores visual entries that are not pending', () => {
-    expect(derivePending(sources({ visual: [visual(A, false)] }))).toEqual({});
+  it('ignores legacy visual entries whether pending or not', () => {
+    expect(derivePending(sources({ visual: [visual(A, false), visual(B, true)] }))).toEqual({});
   });
 
   it('keys differently spelled paths as one session', () => {

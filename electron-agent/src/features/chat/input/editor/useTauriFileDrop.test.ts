@@ -244,10 +244,7 @@ describe('Electron input drag and drop through preload', () => {
   it('leaves dragging existing editor text to the editor', () => {
     const input = mountInput();
     const lexical = input.editor.getLexicalEditor();
-    vi.spyOn(input.editor, 'getLexicalEditor').mockReturnValue({
-      getRootElement: () => input.target,
-      update: lexical.update.bind(lexical),
-    } as typeof lexical);
+    vi.spyOn(lexical, 'getRootElement').mockReturnValue(input.target);
     input.target.textContent = 'move these words';
     const range = document.createRange();
     range.selectNodeContents(input.target);

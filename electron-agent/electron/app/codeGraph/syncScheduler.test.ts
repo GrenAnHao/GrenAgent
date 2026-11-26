@@ -45,6 +45,19 @@ function harness(options: { plan?: (workspace: string) => SyncPlan; maxFailures?
 const ok = (filesChanged = 1): SyncOutcome => ({ mode: 'incremental', filesChanged });
 
 describe('SyncScheduler', () => {
+  it('forces a complete healthy index to rebuild only for the waiting manual job', async () => {
+    const h = harness();
+    const finish = h.scheduler.request('a', 'A', { trigger: 'manual', jobId: 'rebuild', rebuild: true });
+    await flush();
+    expect(h.runs[0].mode).toBe('full');
+    const next = h.scheduler.request('a', 'A', { trigger: 'manual', jobId: 'sync' });
+    h.runs[0].done.resolve({mode:'full'});
+    await finish; await flush();
+    expect(h.runs[1].mode).toBe('incremental');
+    h.runs[1].done.resolve(ok(0));
+    await next;
+  });
+
   it('merges watcher paths into one pending batch while a sync runs, then runs it once with the union', async () => {
     const h = harness();
     h.scheduler.request('a', 'A', { trigger: 'watch', paths: ['x.ts'] });

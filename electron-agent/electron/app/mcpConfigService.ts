@@ -65,19 +65,53 @@ export class McpConfigService {
     return (await this.list(workspace)).filter((entry) => entry.enabled).map(({ name, config }) => ({ name, config }));
   }
 
+  private mutations: Promise<unknown> = Promise.resolve();
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.mutations.then(operation);
+    this.mutations = next.catch(() => {});
+    return next;
+  }
+
+  /** 隐藏的同名配置也算冲突。先写目标、再移除原项，源项写失败则撤回目标。 */
+  move(workspace: string, from: string, original: string, to: string, name: string, config: unknown, enabled: boolean) {
+    return this.serialize(async () => {
+      const source = validateScope(from), target = validateScope(to), value = validateConfig(config);
+      if (source === target) throw new Error('来源未改变');
+      if (!workspace.trim() || !name.trim()) throw new Error('缺少工作区或名称');
+      if (target === 'project' && isRecord(value.auth) && value.auth.provider) throw new Error('项目配置不能使用供应商登录凭据');
+      const settings = await this.settings.getAll();
+      const paths = this.paths(workspace);
+      const layers = { settings: { mcpServers: parseCollection(settings.MCP_SERVERS), disabledMcpServers: parseCollection(settings.MCP_SERVERS_DISABLED) },
+        global: await readDocument(paths.globalPath), project: await readDocument(paths.projectPath) };
+      const has = (scope: Scope, key: string) => Object.hasOwn(layers[scope].mcpServers, key) || Object.hasOwn(layers[scope].disabledMcpServers, key);
+      if (!has(source, original)) throw new Error('原配置已移动或删除');
+      for (const scope of ['settings', 'global', 'project'] as const)
+        if ((scope !== source || original !== name) && has(scope, name)) throw new Error('另一配置来源已有同名服务器，未移动');
+      const put = (scope: Scope, key: string, v?: Config) => scope === 'settings' ? this.mutateSettings(key, v, enabled) : this.mutateFile(workspace, scope, key, v, enabled);
+      await put(target, name, value);
+      try { await put(source, original); }
+      catch (error) { await put(target, name); throw error; }
+      await this.hotReload(workspace);
+    });
+  }
+
   async upsert(workspace: string, scope: string, name: string, config: unknown, enabled: boolean): Promise<void> {
     const validScope = validateScope(scope);
     const validConfig = validateConfig(config);
-    if (validScope === 'settings') await this.mutateSettings(name, validConfig, enabled);
-    else await this.mutateFile(workspace, validScope, name, validConfig, enabled);
-    await this.hotReload(workspace);
+    return this.serialize(async () => {
+      if (validScope === 'settings') await this.mutateSettings(name, validConfig, enabled);
+      else await this.mutateFile(workspace, validScope, name, validConfig, enabled);
+      await this.hotReload(workspace);
+    });
   }
 
   async remove(workspace: string, scope: string, name: string): Promise<void> {
     const validScope = validateScope(scope);
-    if (validScope === 'settings') await this.mutateSettings(name, undefined, true);
-    else await this.mutateFile(workspace, validScope, name, undefined, true);
-    await this.hotReload(workspace);
+    return this.serialize(async () => {
+      if (validScope === 'settings') await this.mutateSettings(name, undefined, true);
+      else await this.mutateFile(workspace, validScope, name, undefined, true);
+      await this.hotReload(workspace);
+    });
   }
 
   private async hotReload(workspace: string): Promise<void> {
@@ -105,6 +139,12 @@ export class McpConfigService {
     delete document.disabledMcpServers[name];
     if (config) (enabled ? document.mcpServers : document.disabledMcpServers)[name] = config;
     await writeDocument(path, document);
+  }
+
+  async openGlobalDirectory(): Promise<string> {
+    const dir = dirname(this.paths('').globalPath);
+    await mkdir(dir, { recursive: true });
+    return dir;
   }
 
   private paths(workspace: string): { globalPath: string; projectPath: string } {
@@ -201,6 +241,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function redactSecrets(value: Config, path: string): Config;
+function redactSecrets(value: unknown, path: string): unknown;
 function redactSecrets(value: unknown, path: string): unknown {
   if (Array.isArray(value)) return value.map((item, index) => redactSecrets(item, `${path}/${index}`));
   if (!isRecord(value)) return value;

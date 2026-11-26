@@ -10,6 +10,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { shotDir } from './distDir.mjs'
+import { createClickReady } from './clickReady.mjs'
+import { createProbeClock } from './probeClock.mjs'
 
 /** 点击 / 按键后的等待：弹层动画 + 框架 commit */
 const SETTLE = 350
@@ -50,7 +52,7 @@ export async function fitViewport(win, width, height) {
   }
 }
 
-export function createProbe(win, scenario, config = {}) {
+export function createProbe(win, scenario, config = {}, recorder) {
   const wc = win.webContents
   /** --show 显示窗口跑时为 true；默认静默（离屏渲染）为 false */
   const visible = process.env.UI_SHOW === '1'
@@ -195,6 +197,7 @@ export function createProbe(win, scenario, config = {}) {
    */
   async function click(selOrPoint, dx = 6, modifiers = []) {
     const p = await resolvePoint(selOrPoint, dx, 'click')
+    recorder?.step('click', p)
     if (!p) return null
     wc.sendInputEvent({
       type: 'mouseDown',
@@ -214,6 +217,7 @@ export function createProbe(win, scenario, config = {}) {
   /** 双击（两次按下/抬起，第二次 clickCount 2，浏览器才会发 dblclick） */
   async function dblclick(selOrPoint, dx = 6) {
     const p = await resolvePoint(selOrPoint, dx, 'dblclick')
+    recorder?.step('dblclick', p)
     if (!p) return null
     for (const clickCount of [1, 2]) {
       wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount })
@@ -228,6 +232,7 @@ export function createProbe(win, scenario, config = {}) {
   /** 右键（打开上下文菜单） */
   async function rightClick(selOrPoint, dx = 6) {
     const p = await resolvePoint(selOrPoint, dx, 'rightClick')
+    recorder?.step('rightClick', p)
     if (!p) return null
     wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: 'right', clickCount: 1 })
     wc.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, button: 'right', clickCount: 1 })
@@ -238,6 +243,7 @@ export function createProbe(win, scenario, config = {}) {
   /** 移上去停住（量 hover 态 / 触发悬停弹层）。不点，也不挪开 */
   async function hover(selOrPoint, dx = 6) {
     const p = await resolvePoint(selOrPoint, dx, 'hover')
+    recorder?.step('hover', p)
     if (!p) return null
     wc.sendInputEvent({ type: 'mouseMove', x: p.x, y: p.y })
     await sleep(240)
@@ -246,6 +252,7 @@ export function createProbe(win, scenario, config = {}) {
 
   /** 把鼠标挪到视口坐标；mouse(2, 2) 就是挪开、清掉 hover 态 */
   async function mouse(x, y) {
+    recorder?.step('mouse', { x, y })
     wc.sendInputEvent({ type: 'mouseMove', x, y })
     await sleep(220)
   }
@@ -256,6 +263,7 @@ export function createProbe(win, scenario, config = {}) {
    * Chromium 在第一个 move 后就释放 setPointerCapture，后面的 move 落到别的元素上。
    */
   async function drag(from, to, steps = 8) {
+    recorder?.step('dragStart', from)
     wc.sendInputEvent({ type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1 })
     for (let i = 1; i <= steps; i++) {
       wc.sendInputEvent({
@@ -267,6 +275,7 @@ export function createProbe(win, scenario, config = {}) {
       })
       await sleep(30)
     }
+    recorder?.step('dragEnd', to)
     wc.sendInputEvent({ type: 'mouseUp', x: to.x, y: to.y, button: 'left', clickCount: 1 })
     await sleep(400)
   }
@@ -274,6 +283,7 @@ export function createProbe(win, scenario, config = {}) {
   /** 在元素上滚滚轮。deltaY > 0 向下滚（像素） */
   async function wheel(selOrPoint, deltaY, deltaX = 0) {
     const p = typeof selOrPoint === 'string' ? await center(selOrPoint) : selOrPoint
+    recorder?.step('wheel', p)
     if (!p) {
       console.log(`  MISS wheel ${typeof selOrPoint === 'string' ? selOrPoint : q(selOrPoint)}`)
       return null
@@ -297,6 +307,7 @@ export function createProbe(win, scenario, config = {}) {
    * 'Left'、'Right'、'Backspace'、'Delete'、'Space'、'a'……；modifiers 如 ['shift']、['control']。
    */
   async function key(keyCode, modifiers = []) {
+    recorder?.step('key')
     wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
     if (keyCode.length === 1 && modifiers.length === 0) wc.sendInputEvent({ type: 'char', keyCode })
     wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
@@ -305,6 +316,7 @@ export function createProbe(win, scenario, config = {}) {
 
   /** 逐字敲 ASCII（每个字符一次 char 事件，触发 keypress / input） */
   async function type(chars) {
+    recorder?.step('type')
     for (const ch of chars) {
       wc.sendInputEvent({ type: 'char', keyCode: ch })
       await sleep(50)
@@ -314,6 +326,7 @@ export function createProbe(win, scenario, config = {}) {
 
   /** 往焦点元素里插入一段文字（中文、长文本用这个，走真实的 beforeinput / input） */
   async function insertText(value) {
+    recorder?.step('insertText')
     await wc.insertText(value)
     await sleep(SETTLE)
   }
@@ -339,12 +352,14 @@ export function createProbe(win, scenario, config = {}) {
 
   /** 切主题：只改 <html> 上的属性（默认 data-theme）。等 450ms，带 transition 的颜色等短了会读到中间色 */
   async function setTheme(theme, attribute = 'data-theme') {
+    recorder?.step('setTheme')
     await js(`document.documentElement.setAttribute(${q(attribute)}, ${q(theme)})`)
     await sleep(450)
   }
 
   /** 把视口改成正好 width × height（量窄窗口布局），返回原视口 [w, h]，用完记得改回去 */
   async function resize(width, height) {
+    recorder?.step('resize')
     const before = await js('[innerWidth, innerHeight]')
     await fitViewport(win, width, height ?? before[1])
     await sleep(200)
@@ -415,12 +430,13 @@ export function createProbe(win, scenario, config = {}) {
 
   // ——— 断言 ———
 
-  function record(pass, label, detail) {
+  function record(pass, label, detail, actual, expected, tolerance) {
     if (pass) {
       passed++
       console.log(`  PASS ${label}`)
     } else {
       failed++
+      recorder?.fail('assertion', { label, actual, expected, tolerance })
       console.log(`  FAIL ${label}  ${detail}`)
     }
     return pass
@@ -432,23 +448,23 @@ export function createProbe(win, scenario, config = {}) {
       typeof expected === 'object' && expected !== null
         ? JSON.stringify(actual) === JSON.stringify(expected)
         : actual === expected
-    return record(same, label, `got ${q(actual)}  want ${q(expected)}`)
+    return record(same, label, `got ${q(actual)}  want ${q(expected)}`, actual, expected)
   }
 
   /** 真值断言 */
   function ok(label, value) {
-    return record(!!value, label, `got ${q(value)}`)
+    return record(!!value, label, `got ${q(value)}`, value, true)
   }
 
   /** 数值近似断言（高分屏下 28px 可能量成 27.33） */
   function checkNear(label, actual, expected, tolerance = 1) {
     const pass = typeof actual === 'number' && Math.abs(actual - expected) <= tolerance
-    return record(pass, label, `got ${q(actual)}  want ${expected}±${tolerance}`)
+    return record(pass, label, `got ${q(actual)}  want ${expected}±${tolerance}`, actual, expected, tolerance)
   }
 
   /** 颜色断言：按通道容差比 */
   function checkColor(label, actual, expected, tolerance = 4) {
-    return record(colorNear(actual, expected, tolerance), label, `got ${actual}  want≈${expected}`)
+    return record(colorNear(actual, expected, tolerance), label, `got ${actual}  want≈${expected}`, actual, expected, tolerance)
   }
 
   /** 只记录不判定（fps、尺寸链、调试信息） */
@@ -461,7 +477,7 @@ export function createProbe(win, scenario, config = {}) {
     win,
     config,
     visible,
-    js,
+    js: (code) => { recorder?.step('js'); return js(code) },
     sleep,
     waitFor,
     waitUntil,
@@ -478,6 +494,8 @@ export function createProbe(win, scenario, config = {}) {
     atStable,
     hitTest,
     click,
+    clickReady: createClickReady({ js, click }),
+    clock: createProbeClock(js),
     dblclick,
     rightClick,
     hover,
@@ -489,7 +507,7 @@ export function createProbe(win, scenario, config = {}) {
     insertText,
     data,
     events,
-    act,
+    act: (...args) => { recorder?.step('act'); return act(...args) },
     setTheme,
     resize,
     shot,

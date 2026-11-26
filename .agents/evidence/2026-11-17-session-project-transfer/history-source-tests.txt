@@ -1,0 +1,21 @@
+2026-11-17 history/source worker, focused verification (no remote requests)
+
+cd extensions && npx vitest run _shared/session-transfer-source.test.ts _shared/session-cwd.test.ts
+PASS: 2 files, 10 tests (branch-specific cwd, transfer boundary, round-trip, legacy cwd).
+
+cd electron-agent && npx vitest run electron/app/sessionProjectTransferHistory.test.ts
+PASS: 1 file, 15 tests (history builder tests owned by original history worker).
+
+cd electron-agent && npx vitest run src/features/chat/transferSource.test.ts src/features/chat/groupMessages.test.ts src/features/chat/sessionCwd.test.ts src/features/chat/turnDeliverables.test.ts src/features/tools/extensionCards.test.tsx
+PASS: 5 files, 42 tests (history source projection, per-field deliverables, old image/audio paths).
+
+cd electron-agent && npx vitest run src/features/links/transferSourceLink.test.ts
+PASS: 1 file, 2 tests (old Markdown relative links and missing-source no-target-fallback).
+
+cd electron-agent && npx vitest run src/features/chat/transferSource.test.ts src/features/links/transferSourceLink.test.ts src/features/tools/extensionCards.test.tsx
+PASS: 3 files, 16 tests (final renderer source wrapper/memo diff recheck).
+
+cd electron-agent && npx tsc -p transfer-source.tsconfig.tmp.json
+FAIL (temporary tsconfig was deleted): existing/unrelated diagnostics: electron/app/providerService.ts AuthPrompt.placeholder; src/features/chat/messageActions/types.ts missing ../../stores/agentReducer; src/features/tools/StreamingCodeView.tsx theme typing; src/lib/pi.ts missing ProviderCredentialStatus/ProviderOAuthCapability/ProviderLoginUiEvent types. No diagnostics in this worker's changed files. This scoped check cannot claim overall typecheck pass.
+
+No full UI-harness or production IPC path run by this worker. Parent agent owns production sourceCwd projection, UI scenario and end-to-end acceptance.

@@ -46,7 +46,7 @@ export function assembleAgentData(options: AssembleOptions): AssembledAgentData 
     complete: async (id) => indexTasks.complete(id),
     fail: async (id, error) => indexTasks.fail(id, error),
     cancelled: async (id) => indexTasks.cancel(id),
-    stage: (id, stage, processed, total) => { indexTasks.stage(id, stage, processed !== undefined && total !== undefined ? { processed, total } : undefined); },
+    stage: (id, stage, processed, total) => { indexTasks.stage(id, stage, processed !== undefined ? { processed, total } : undefined); },
   } : {
     start: (id) => admin('admin.jobs.start', { id }),
     complete: (id) => admin('admin.jobs.complete', { id }),

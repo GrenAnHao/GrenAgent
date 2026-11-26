@@ -60,13 +60,13 @@ function fakeProjectPi() {
   };
 }
 
-const fakeMgr = () => ({ callTool: async () => ({ text: "x" }) });
+const fakeMgr = () => ({ callTool: async () => ({ content: [{ type: "text", text: "x" }] }) });
 
 describe("summary", () => {
   it("builds prefixed tool names per server", () => {
     const out = summary(snap({ a: { status: "connected", tools: ["x", "y"] }, b: { status: "failed", tools: [] } }));
     expect(out).toEqual([
-      { name: "a", status: "connected", tools: 2, toolNames: ["mcp__a__x", "mcp__a__y"], exposure: "codemode", auth: "none" },
+      { name: "a", status: "connected", tools: 2, toolNames: ["mcp__a__x", "mcp__a__y"], footprints: [[20, "codemode"], [20, "codemode"]], exposure: "codemode", auth: "none" },
       { name: "b", status: "failed", tools: 0, toolNames: [], exposure: "codemode", auth: "none" },
     ]);
   });
@@ -77,7 +77,7 @@ describe("summary", () => {
       vendor: { status: "failed", tools: [], auth: "provider" },
     }));
     expect(out).toEqual([
-      { name: "direct", status: "connected", tools: 1, toolNames: ["mcp__direct__x"], exposure: "direct", auth: "oauth" },
+      { name: "direct", status: "connected", tools: 1, toolNames: ["mcp__direct__x"], footprints: [[25, "direct"]], exposure: "direct", auth: "oauth" },
       { name: "vendor", status: "failed", tools: 0, toolNames: [], exposure: "codemode", auth: "provider" },
     ]);
   });
@@ -279,7 +279,7 @@ describe("project", () => {
     };
     project(pi as never, snap({
       docs: { status: "connected", tools: ["x"], exposure: "direct", resources: true },
-    }), { callTool: async () => ({ text: "x" }), listResources, listResourceTemplates, readResource } as never);
+    }), { callTool: async () => ({ content: [{ type: "text", text: "x" }] }), listResources, listResourceTemplates, readResource } as never);
 
     const list = definitions.find((tool) => tool.name === "list_mcp_resources");
     const templates = definitions.find((tool) => tool.name === "list_mcp_resource_templates");
@@ -504,11 +504,12 @@ function fakeBindMgr(s: McpSnapshot) {
   let listener: ((s: McpSnapshot) => void) | undefined;
   const calls = { init: 0, unsub: 0 };
   return {
+    getProviderToken: undefined as ReturnType<typeof createManager>["getProviderToken"],
     init: () => {
       calls.init += 1;
     },
     snapshot: () => s,
-    callTool: async () => ({ text: "x" }),
+    callTool: async () => ({ content: [{ type: "text", text: "x" }] }),
     subscribe: (l: (s: McpSnapshot) => void) => {
       listener = l;
       return () => {
@@ -574,7 +575,7 @@ describe("bind", () => {
 
     pi.fire('session_start', {}, { cwd: 'C:/work', hasUI: true, ui: { setStatus: vi.fn() } });
 
-    expect(control.request).toHaveBeenCalledWith('mcp.state.publish', { workspace: 'C:/work', servers: [{ name: 'a', status: 'connected', tools: 1, toolNames: ['mcp__a__x'], exposure: 'codemode', auth: 'none' }] });
+    expect(control.request).toHaveBeenCalledWith('mcp.state.publish', { workspace: 'C:/work', servers: [{ name: 'a', status: 'connected', tools: 1, toolNames: ['mcp__a__x'], footprints: [[20, 'codemode']], exposure: 'codemode', auth: 'none' }] });
   });
 
   it("reads the provider token from the shared runtime and does not replace that callback", async () => {
@@ -735,7 +736,7 @@ describe("bind", () => {
   });
 
   it("rejects an extension server whose name only differs by dash versus underscore", async () => {
-    const connect = vi.fn(async () => ({
+    const connect = vi.fn(async (_server: McpServerConfig) => ({
       listTools: async () => ({ tools: [{ name: "x" }] }),
       callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
       close: async () => {},

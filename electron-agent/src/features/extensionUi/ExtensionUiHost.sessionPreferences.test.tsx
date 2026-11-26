@@ -1,3 +1,4 @@
+import type { SessionPreferences } from '../../lib/sessionPreferences';
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from '@testing-library/react';
@@ -23,7 +24,7 @@ import { resetSessionPreferencesForTests, useSessionPreferencesStore } from '../
 
 const OWNER = '/ws/a.jsonl';
 
-function prefs(patch: Record<string, unknown> = {}) {
+function prefs(patch: Partial<SessionPreferences> = {}): SessionPreferences {
   return {
     model: { provider: 'anthropic', id: 'm' },
     thinkingLevel: 'medium',

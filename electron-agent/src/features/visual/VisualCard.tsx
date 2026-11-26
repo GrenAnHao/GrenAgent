@@ -5,7 +5,6 @@ import { ExternalLink, Minimize2 } from 'lucide-react';
 import { ActionIcon, HtmlPreview } from '@lobehub/ui';
 import { useVisualStore, visualKeyOf } from '../../stores/visualStore';
 import { buildSrcDoc } from './frameAssets';
-import { parseVisualChoiceMessage, submitVisualChoice } from './submitVisualChoice';
 import { invoke, openUrl } from '../../platform/runtime';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 
@@ -27,8 +26,8 @@ const styles = createStaticStyles(({ css }) => ({
     gap: 6px;
     padding: 5px 8px 5px 12px;
     font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     color: ${cssVar.colorPrimary};
     text-transform: uppercase;
     opacity: 0.85;
@@ -65,8 +64,8 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   overlayTitle: css`
     font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.07em;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     color: ${cssVar.colorPrimary};
     text-transform: uppercase;
     flex: 1;
@@ -83,26 +82,13 @@ const styles = createStaticStyles(({ css }) => ({
 
 export const VisualCard = memo(function VisualCard({ content }: { content: string }) {
   const { workspace, store } = useAgentStoreContext();
-  // 卡片属于渲染它的这个会话：等待状态 / 请求 id 只读这个会话名下的条目，不读别的会话的。
+  // 历史卡使用保存的 HTML；当前会话卡按 owner 读取最新预览。
   const loadedPath = store?.getLoadedSessionPath?.() ?? null;
   const visualKey = visualKeyOf({ sessionPath: loadedPath || null, workspace });
   const entry = useVisualStore((s) => s.entries[visualKey]);
   const html = content && content !== 'visual-inline' ? content : (entry?.html ?? '');
   const sessionId = entry?.rev ?? 0;
-  const pending = entry?.pending ?? false;
-  const submittedIds = useVisualStore((s) => s.submittedIds);
-  const cardKey = sessionId;
-  const isSubmitted = submittedIds.has(cardKey);
-  const [choiceLabel, setChoiceLabel] = useState('');
   const [showOverlay, setShowOverlay] = useState(false);
-
-  const doSubmit = useCallback((message: { choice: string; text: string; supplement?: string }) => {
-    const latest = useVisualStore.getState().entries[visualKey];
-    if (!latest || !submitVisualChoice(latest, message)) return false;
-    setChoiceLabel(message.text);
-    setShowOverlay(false);
-    return true;
-  }, [visualKey]);
 
   // 浏览器打开：写临时文件 → file:// URL → openUrl（openPath 走文件默认程序，
   // 开发机上 .html 可能被编辑器覆盖；openUrl 走浏览器 URL handler，更可靠）
@@ -118,20 +104,7 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
     }
   }, [html]);
 
-  const onMessage = useCallback(
-    (e: MessageEvent) => {
-      const message = parseVisualChoiceMessage(e.data);
-      if (message && !isSubmitted) doSubmit(message);
-    },
-    [isSubmitted, doSubmit],
-  );
-
-  useEffect(() => {
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, [onMessage]);
-
-  useEffect(() => { setChoiceLabel(''); setShowOverlay(false); }, [sessionId]);
+  useEffect(() => { setShowOverlay(false); }, [sessionId]);
 
   useEffect(() => {
     if (!showOverlay) return;
@@ -144,7 +117,6 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
 
   const srcDoc = buildSrcDoc(html);
   const fillSrcDoc = buildSrcDoc(html, { fill: true });
-  const locked = isSubmitted;
 
   const browserAction = (originalNode: ReactNode) => (
     <>
@@ -157,12 +129,7 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
     <div className={styles.overlay}>
       <div className={styles.overlayHeader}>
         <span className={styles.overlayTitle}>视觉设计</span>
-        {isSubmitted
-          ? <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>已选择{choiceLabel ? `：${choiceLabel}` : ''}</span>
-          : pending
-            ? <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontWeight: 400 }}>等待选择</span>
-            : null
-        }
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>评审请在询问卡作答</span>
         <span style={{ flex: 1 }} />
         <ActionIcon icon={Minimize2} size="small" title="关闭全屏（ESC）" onClick={() => setShowOverlay(false)} style={{ opacity: 0.6 }} />
       </div>
@@ -174,7 +141,7 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
         defaultHeight={480}
         defaultMode="preview"
         downloadable={false}
-        styles={{ iframe: { flex: 1, height: 0, minHeight: 0, pointerEvents: locked ? 'none' : 'auto' } }}
+        styles={{ iframe: { flex: 1, height: 0, minHeight: 0 } }}
         theme="dark"
         variant="borderless"
       >
@@ -190,14 +157,7 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
         <div className={styles.header}>
           <span className={styles.dot} />
           视觉设计
-          {isSubmitted
-            ? <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, opacity: 0.6 }}>
-                {' '}· 已选择{choiceLabel ? `：${choiceLabel}` : ''}
-              </span>
-            : pending
-              ? <span style={{ opacity: 0.5, fontWeight: 400 }}>{' '}· 等待选择</span>
-              : null
-          }
+          <span style={{ opacity: 0.5, fontWeight: 400 }}>{' '}· 评审请在询问卡作答</span>
           <span className={styles.spacer} />
         </div>
         <HtmlPreview
@@ -212,8 +172,6 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
           styles={{
             iframe: {
               maxHeight: MAX_CARD_HEIGHT,
-              opacity: locked ? 0.45 : 1,
-              pointerEvents: locked ? 'none' : 'auto',
               transition: 'opacity 0.2s',
             },
           }}

@@ -1,10 +1,11 @@
+import type { SessionPreferences } from '../../../../lib/sessionPreferences';
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { setMode, setSessionDefaults, messageWarning, messageError, sessionState } = vi.hoisted(() => ({
-  setMode: vi.fn(() => Promise.resolve({ ok: true, mode: 'ultra', sessionPath: '/ws/.pi/sessions/a.jsonl' })),
+  setMode: vi.fn<typeof import('../../../../lib/pi').pi.setMode>(() => Promise.resolve({ ok: true, mode: 'ultra', sessionPath: '/ws/.pi/sessions/a.jsonl' })),
   setSessionDefaults: vi.fn(() => Promise.resolve({ revision: 1 })),
   messageWarning: vi.fn(),
   messageError: vi.fn(),
@@ -109,7 +110,7 @@ import { AGENT_MODES, useModeStore } from '../../../../stores/modeStore';
 import { useApprovalStore } from '../../../../stores/approvalStore';
 import { resetSessionPreferencesForTests, useSessionPreferencesStore } from '../../../../stores/sessionPreferencesStore';
 
-const prefs = (patch: Record<string, unknown> = {}) => ({
+const prefs = (patch: Partial<SessionPreferences> = {}): SessionPreferences => ({
   model: { provider: 'anthropic', id: 'm' },
   thinkingLevel: 'medium',
   mode: 'agent',

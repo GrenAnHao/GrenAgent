@@ -20,6 +20,8 @@ const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorFillTertiary};
   `,
   chipLabel: css`
+    font-weight: 500;
+    letter-spacing: 0.01em;
     overflow: hidden;
 
     font-size: 12px;

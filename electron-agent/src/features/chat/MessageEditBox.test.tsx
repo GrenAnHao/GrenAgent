@@ -125,7 +125,7 @@ describe('MessageEditBox', () => {
 
 describe('filterSkillSlashOptions', () => {
   it('只保留 metadata.group === skill，不依赖中文分组标题', () => {
-    const items: ISlashOption[] = [
+    const items: (ISlashOption & { label?: string })[] = [
       { type: 'divider', label: '快捷操作' },
       { key: 'frontend:compact', label: 'compact', metadata: { group: 'frontend' } },
       { type: 'divider', label: 'ANY_LOCALIZED_SKILL_HEADER' },

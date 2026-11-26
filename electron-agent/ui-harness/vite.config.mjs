@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 import config from './harness.config.mjs'
 import { depsGraphPlugin } from './depsGraph.mjs'
 import { distDir } from './distDir.mjs'
+import { rendererAssetAliases } from '../scripts/rendererAssetAliases.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -22,9 +23,9 @@ export default defineConfig({
   // depsGraphPlugin 记下「哪个场景用到哪些源文件」，check.mjs 靠它跳过多余的构建、按改动选场景，别删
   plugins: [react(), depsGraphPlugin()],
   resolve: {
-    alias: Object.fromEntries(
+    alias: { ...rendererAssetAliases, ...Object.fromEntries(
       Object.entries(config.alias).map(([key, value]) => [key, resolve(here, value)])
-    ),
+    ) },
     dedupe: config.dedupe ?? []
   },
   build: {

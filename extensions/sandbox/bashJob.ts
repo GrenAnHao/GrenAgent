@@ -10,6 +10,7 @@ import type { FileSandboxMode, SandboxRunFacts } from "../_shared/sandbox/types.
 import type { JobsService } from "../jobs/service.js";
 import type { JobHooks, JobOutcome } from "../jobs/types.js";
 import type { BashOutput } from "./bashOutput.js";
+import { getActivation } from "../multi-agent/activation.js";
 
 /** 模型每次读取 bash job 的上限，与前台 bash 的 50KB 截断一致。 */
 export const BASH_JOB_OUTPUT_LIMIT_BYTES = 50 * 1024;
@@ -84,17 +85,20 @@ export interface StartedBashJob {
  * 准入之后异步起进程，不暴露半成品（DSH processJob）。done 在进程结算、日志关闭之后才 resolve。
  */
 function processJob(
-  start: (signal: AbortSignal) => Promise<ExecResult>,
+  start: (signal: AbortSignal, onExitConfirmed?: (confirmed: boolean) => void) => Promise<ExecResult>,
   output: BashOutput,
   onExit: (exit: BashExit) => void,
   onCancel: (reason?: string) => void,
   offerEscalation: OfferEscalation,
+  trackExit: boolean,
 ): JobHooks {
   const controller = new AbortController();
+  let confirmExit!: (confirmed: boolean) => void;
+  const exitConfirmed = trackExit ? new Promise<boolean>((resolve) => { confirmExit = resolve; }) : undefined;
   const done: Promise<JobOutcome> = (async () => {
     let exit: BashExit;
     try {
-      const { exitCode, sandbox } = await start(controller.signal);
+      const { exitCode, sandbox } = await start(controller.signal, trackExit ? confirmExit : undefined);
       exit = controller.signal.aborted
         ? { kind: "aborted" }
         : { kind: "exited", exitCode, ...(sandbox ? { sandbox } : {}) };
@@ -103,6 +107,7 @@ function processJob(
       exit = controller.signal.aborted || message === "aborted" ? { kind: "aborted" } : { kind: "error", error };
       if (exit.kind === "error") output.append(Buffer.from(`${message}\n`));
     }
+    if (!controller.signal.aborted) confirmExit?.(false);
     output.finish();
     await output.closeTempFile();
     onExit(exit);
@@ -115,6 +120,7 @@ function processJob(
       controller.abort(reason);
     },
     done,
+    ...(exitConfirmed ? { exitConfirmed } : {}),
   };
 }
 
@@ -134,7 +140,7 @@ export function startBashJob(deps: { jobs: JobsService; exec: ExecFn }, req: Bas
     output: [{ read: (fromByte) => req.output.readFrom(fromByte) }],
     run: () =>
       processJob(
-        (signal) =>
+        (signal, onExitConfirmed) =>
           deps.exec(req.command, req.cwd, {
             onData: (data) => {
               req.output.append(data);
@@ -142,6 +148,7 @@ export function startBashJob(deps: { jobs: JobsService; exec: ExecFn }, req: Bas
             },
             signal,
             env: req.env,
+            ...(onExitConfirmed ? { onExitConfirmed } : {}),
           }),
         req.output,
         resolveExit,
@@ -149,6 +156,7 @@ export function startBashJob(deps: { jobs: JobsService; exec: ExecFn }, req: Bas
           stopped = reason;
         },
         req.offerEscalation ?? NO_OFFER,
+        getActivation(req.owner)?.tracksBashExit === true,
       ),
   });
   const startedAt = deps.jobs.snapshot(id)?.startedAt ?? Date.now();

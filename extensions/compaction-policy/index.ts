@@ -8,6 +8,7 @@
 // 纯扩展。删段由宿主 agent_exclude_entry / agent_restore_entry 写 runtime pulse，
 // watchConfig 应用；会话内 appendEntry 持久 + 分支安全。不再注册 TUI slash。
 import { projectCwd } from "../_shared/session-cwd.js";
+import { beginCompactionIntent, finishCompactionActivity } from "../_shared/compaction-activity.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getConfig, refreshConfig, watchConfig } from "../_shared/runtime-config.js";
 import { currentCwd } from "../_shared/workspace-context.js";
@@ -140,8 +141,12 @@ export default function (pi: ExtensionAPI) {
     const resume = shouldResumeAfterAutoCompact(
       viewAutoCompactTurn(event, ctx.hasPendingMessages?.() ?? false),
     );
+    const identity = { sessionId: ctx.sessionManager.getSessionId(), sessionPath: ctx.sessionManager.getSessionFile() ?? undefined };
+    const intent = beginCompactionIntent(identity, 'policy-auto');
     let resumed = false;
     const resumeAfterAutoCompact = (error?: { message?: string }) => {
+      // SDK's compaction_end normally settles first; callbacks also close a failed preparation.
+      finishCompactionActivity(identity.sessionId, intent.operationId, !error);
       if (resumed || !resume) return;
       if (error && isCompactionCancelled(error.message ?? "")) return;
       resumed = true;

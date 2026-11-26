@@ -10,6 +10,7 @@ const useStyles = createStyles(({ css, token }) => ({
     margin-block-end: 16px;
   `,
   title: css`
+    letter-spacing: -0.015em;
     font-size: var(--pi-font-size, 14px);
     font-weight: 600;
     color: ${token.colorText};
@@ -36,7 +37,7 @@ export function SettingCard({ title, desc, children }: Props) {
   const { styles, cx } = useStyles();
   return (
     <div className={styles.card} data-testid={title ? `set-card-${title}` : 'set-card'}>
-      {title ? <div className={cx(styles.title, desc && styles.titleWithDesc)}>{title}</div> : null}
+      {title ? <div className={cx(styles.title, Boolean(desc) && styles.titleWithDesc)}>{title}</div> : null}
       {desc ? <div className={styles.desc}>{desc}</div> : null}
       {children}
     </div>

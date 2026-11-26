@@ -50,17 +50,21 @@ function ToolSegmentBody({ segment }: { segment: ToolSegment }) {
   const ownsChildren = isCodemodeTool(segment.toolName);
   return (
     <>
-      <ToolExecution
-        toolName={segment.toolName}
-        toolCallId={segment.toolCallId}
-        args={segment.args}
-        result={segment.result}
-        status={segment.status}
-        argsComplete={segment.argsComplete}
-        startedAt={segment.startedAt}
-        durationMs={segment.durationMs}
-        nested={ownsChildren ? segment.children : undefined}
-      />
+      <span data-source-cwd={segment.cwd} style={{ display: 'contents' }}>
+        <ToolExecution
+          toolName={segment.toolName}
+          toolCallId={segment.toolCallId}
+          args={segment.args}
+          result={segment.result}
+          status={segment.status}
+          argsComplete={segment.argsComplete}
+          startedAt={segment.startedAt}
+          durationMs={segment.durationMs}
+          sourceCwd={segment.cwd}
+          sourceRefs={segment.sourceRefs}
+          nested={ownsChildren ? segment.children : undefined}
+        />
+      </span>
       {!ownsChildren && segment.children && segment.children.length > 0 ? (
         <div className={styles.nestedTools}>
           {segment.children.map((child) => (
@@ -82,6 +86,8 @@ function sameTool(a: ToolSegment, b: ToolSegment): boolean {
     a.argsComplete !== b.argsComplete ||
     a.startedAt !== b.startedAt ||
     a.durationMs !== b.durationMs ||
+    a.cwd !== b.cwd ||
+    a.sourceRefs !== b.sourceRefs ||
     a.parentToolCallId !== b.parentToolCallId
   ) {
     return false;
@@ -109,14 +115,16 @@ function SegmentItem({ segment }: { segment: TimelineSegment }) {
       );
     case 'text':
       return (
-        <StructuredMessageBody
-          formatted={formatStructuredMessageText(segment.content)}
-          fallback={
-            <LazyMarkdown variant="chat" animated={segment.streaming}>
-              {segment.content}
-            </LazyMarkdown>
-          }
-        />
+        <span data-source-cwd={segment.sourceCwd} style={{ display: 'contents' }}>
+          <StructuredMessageBody
+            formatted={formatStructuredMessageText(segment.content)}
+            fallback={
+              <LazyMarkdown variant="chat" animated={segment.streaming}>
+                {segment.content}
+              </LazyMarkdown>
+            }
+          />
+        </span>
       );
     case 'tool':
       return <ToolSegmentBody segment={segment} />;
@@ -144,7 +152,7 @@ const MemoSegment = memo(SegmentItem, (prev, next) => {
     );
   }
   if (a.kind === 'text' && b.kind === 'text') {
-    return a.content === b.content && a.streaming === b.streaming;
+    return a.content === b.content && a.streaming === b.streaming && a.sourceCwd === b.sourceCwd;
   }
   if (a.kind === 'tool' && b.kind === 'tool') {
     return sameTool(a, b);

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getApprovalPolicy: vi.fn(() => "auto"),
-  decide: vi.fn(() => ({ action: "pass" as const })),
+  decide: vi.fn<typeof import("./policy.js").decide>(() => ({ action: "pass" as const })),
 }));
 
 vi.mock("../_shared/approval.js", () => ({ getApprovalPolicy: mocks.getApprovalPolicy }));

@@ -1,0 +1,143 @@
+renderer : 69 -> 68
+<= src/lib/agentData.ts: error TS2304: Cannot find name 'JobMetadata'.
+renderer remaining diagnostics:
+[2] ../extensions/_shared/ripgrep.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessByStdio<null, Readable, Readable>'.
+[1] ../extensions/_shared/ripgrep.ts: error TS7006: Parameter 'code' implicitly has an 'any' type.
+[1] ../extensions/_shared/ripgrep.ts: error TS7006: Parameter 'err' implicitly has an 'any' type.
+[1] ../extensions/_shared/runtime-config.ts: error TS2339: Property 'on' does not exist on type 'FSWatcher'.
+[3] ../extensions/_shared/sandbox/operations.ts: error TS18046: 'child.on' is of type 'unknown'.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS2344: Type '"kill" | "on" | "pid" | "stderr" | "stdout"' does not satisfy the constraint 'keyof ChildProcess'.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS2352: Conversion of type 'Pick<ChildProcess, "kill" | "on" | "pid" | "stderr" | "stdout">' to type 'ChildProcess' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS2554: Expected 2 arguments, but got 3.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS2571: Object is of type 'unknown'.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS2769: No overload matches this call.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS7006: Parameter 'code' implicitly has an 'any' type.
+[1] ../extensions/_shared/sandbox/windows/account.ts: error TS2339: Property 'on' does not exist on type 'ChildProcess'.
+[2] ../extensions/_shared/sandbox/windows/account.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessByStdio<null, null, Readable>'.
+[2] ../extensions/_shared/sandbox/windows/account.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessByStdio<null, Readable, Readable>'.
+[2] ../extensions/_shared/sandbox/windows/account.ts: error TS7006: Parameter 'code' implicitly has an 'any' type.
+[2] ../extensions/_shared/sandbox/windows/account.ts: error TS7006: Parameter 'error' implicitly has an 'any' type.
+[2] ../extensions/code-exec/base-kernel.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessWithoutNullStreams'.
+[1] ../extensions/dap/client.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessWithoutNullStreams'.
+[2] ../extensions/github/gh.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessWithoutNullStreams'.
+[1] ../extensions/github/gh.ts: error TS7006: Parameter 'code' implicitly has an 'any' type.
+[2] ../extensions/lsp/client.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessWithoutNullStreams'.
+[1] ../extensions/mcp/index.ts: error TS2339: Property 'args' does not exist on type 'McpServerConfig'.
+[1] ../extensions/mcp/index.ts: error TS2339: Property 'env' does not exist on type 'McpServerConfig'.
+[2] ../extensions/mcp/transport.ts: error TS2339: Property 'once' does not exist on type 'ChildProcess'.
+[1] ../extensions/mcp/transport.ts: error TS7006: Parameter 'error' implicitly has an 'any' type.
+[1] ../extensions/multi-agent/cancel.ts: error TS2339: Property 'on' does not exist on type 'FSWatcher'.
+[1] ../extensions/multi-agent/subagentProcessRegistry.ts: error TS2339: Property 'once' does not exist on type 'ChildProcess'.
+[2] ../extensions/multi-agent/worker-session.ts: error TS2339: Property 'on' does not exist on type 'ChildProcess'.
+[10] ../extensions/multi-agent/worker-session.ts: error TS2339: Property 'once' does not exist on type 'ChildProcess'.
+[3] ../extensions/multi-agent/worker-session.ts: error TS7006: Parameter 'code' implicitly has an 'any' type.
+[1] ../extensions/multi-agent/worker-session.ts: error TS7006: Parameter 'error' implicitly has an 'any' type.
+[1] ../extensions/multi-agent/worker-session.ts: error TS7006: Parameter 'message' implicitly has an 'any' type.
+[3] ../extensions/multi-agent/worker-session.ts: error TS7006: Parameter 'signal' implicitly has an 'any' type.
+[1] ../extensions/resource-manager/mcp-store.ts: error TS2339: Property 'on' does not exist on type 'FSWatcher'.
+[2] ../extensions/working-directory/worktree.ts: error TS2339: Property 'on' does not exist on type 'ChildProcessByStdio<null, Readable, Readable>'.
+[1] ../extensions/working-directory/worktree.ts: error TS7006: Parameter 'code' implicitly has an 'any' type.
+[1] ../extensions/working-directory/worktree.ts: error TS7006: Parameter 'e' implicitly has an 'any' type.
+[2] electron/app/providerService.ts: error TS2339: Property 'placeholder' does not exist on type 'AuthPrompt'.
+[1] src/lib/pi.ts: error TS2304: Cannot find name 'ProviderCredentialStatus'.
+[1] src/lib/pi.ts: error TS2304: Cannot find name 'ProviderLoginUiEvent'.
+[1] src/lib/pi.ts: error TS2304: Cannot find name 'ProviderOAuthCapability'.
+
+node : 195 -> 192
+<= electron/app/codeGraph/codeGraphQuery.ts: error TS2339: Property 'nodeId' does not exist on type 'SegmentMatch'.
+<= electron/app/codeGraph/codeGraphRuntime.integration.test.ts: error TS2339: Property 'error' does not exist on type '{ state: "completed"; }'.
+<= electron/app/codeGraph/indexTaskStore.test.ts: error TS2341: Property 'db' is private and only accessible within class 'IndexTaskStore'.
+node remaining diagnostics:
+[1] ../cli/src/agent-data-plugins.test.ts: error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+[1] ../extensions/_shared/sandbox/operations.test.ts: error TS2322: Type '((pid: number, signal?: Signals | undefined) => void) | undefined' is not assignable to type '((pid: number, signal?: 0 | Signals | undefined) => void) | undefined'.
+[1] ../extensions/_shared/sandbox/operations.test.ts: error TS2322: Type 'Mock<Constructable | Procedure>' is not assignable to type '(argv: string[], policy: SandboxPolicy) => Promise<ConfinedArgv>'.
+[1] ../extensions/_shared/sandbox/operations.test.ts: error TS2322: Type 'Mock<Constructable | Procedure>' is not assignable to type 'SpawnImpl | undefined'.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS2554: Expected 2 arguments, but got 3.
+[1] ../extensions/_shared/sandbox/operations.ts: error TS2769: No overload matches this call.
+[2] ../extensions/_shared/sandbox/windows/reclaim.test.ts: error TS2339: Property 'mock' does not exist on type '((path: string) => void) | Mock<Procedure>'.
+[2] ../extensions/_shared/sandbox/windows/reclaim.test.ts: error TS7006: Parameter 'call' implicitly has an 'any' type.
+[1] ../extensions/agent-mode/questions.test.ts: error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+[3] ../extensions/agent-mode/visualReview.test.ts: error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+[1] ../extensions/context-rules/rules.test.ts: error TS2559: Type '{ id: string; scope: "global"; path: string; title: string; enabled: boolean; body: string; }' has no properties in common with type 'Pick<RuleFile, "modes">'.
+[3] ../extensions/goal/goal-auth.real.test.ts: error TS2322: Type '{ previewId: string | undefined; }' is not assignable to type 'JsonValue'.
+[3] ../extensions/goal/goal-auth.real.test.ts: error TS2339: Property 'details' does not exist on type 'AgentMessage'.
+[1] ../extensions/mcp-policy/index.test.ts: error TS2493: Tuple type '[]' of length '0' has no element at index '4'.
+[4] ../extensions/mcp/index.test.ts: error TS2339: Property 'getProviderToken' does not exist on type '{ init: () => void; snapshot: () => McpSnapshot; callTool: () => Promise<{ text: string; }>; subscribe: (l: (s: McpSnapshot) => void) => () => void; closeAll: () => void; emit: (next: McpSnapshot) => void | undefined; calls: { ...; }; }'.
+[3] ../extensions/mcp/index.test.ts: error TS2339: Property 'name' does not exist on type 'never'.
+[24] ../extensions/mcp/index.test.ts: error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+[3] ../extensions/mcp/index.test.ts: error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+[1] ../extensions/mcp/index.ts: error TS2339: Property 'args' does not exist on type 'McpServerConfig'.
+[1] ../extensions/mcp/index.ts: error TS2339: Property 'env' does not exist on type 'McpServerConfig'.
+[1] ../extensions/mcp/manager.test.ts: error TS18048: 's' is possibly 'undefined'.
+[1] ../extensions/mcp/manager.test.ts: error TS2322: Type 'Mock<(_server: McpServerConfig, hooks?: { getProviderToken?: ((provider: string) => Promise<string | undefined>) | undefined; } | undefined) => Promise<McpClient>>' is not assignable to type '((s: McpServerConfig, hooks?: OAuthConnectHooks | undefined) => Promise<McpClient>) | undefined'.
+[1] ../extensions/mcp/manager.test.ts: error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+[6] ../extensions/mcp/manager.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+[1] ../extensions/mcp/transport.test.ts: error TS2352: Conversion of type 'undefined' to type 'RequestInit' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[1] ../extensions/mcp/transport.test.ts: error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+[1] ../extensions/multi-agent/activation.test.ts: error TS2322: Type '{ role: string; content: string; } | { role: string; content: { type: string; text: string; }[]; }' is not assignable to type '{ role: string; content: { type: string; text: string; }[]; }'.
+[1] ../extensions/multi-agent/activation.test.ts: error TS2322: Type 'Mock<Constructable | Procedure>' is not assignable to type '(msg: { customType: string; content: string; display: boolean; details: Record<string, unknown>; }, opts: { triggerTurn: boolean; deliverAs?: "followUp" | "steer" | undefined; }) => void'.
+[1] ../extensions/multi-agent/activation.test.ts: error TS2322: Type 'string' is not assignable to type '{ type: string; text: string; }[]'.
+[1] ../extensions/multi-agent/activation.test.ts: error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+[1] ../extensions/multi-agent/embedded-runner.run.test.ts: error TS2322: Type '{ role: string; content: string; } | { role: string; content: { type: string; text: string; }[]; }' is not assignable to type '{ role: string; content: { type: string; text: string; }[]; stopReason: string; }'.
+[1] ../extensions/multi-agent/embedded-runner.run.test.ts: error TS2322: Type 'string | { type: string; text: string; } | { type: string; text: string; }' is not assignable to type '{ type: string; text: string; }'.
+[1] ../extensions/multi-agent/embedded-runner.run.test.ts: error TS2322: Type 'string' is not assignable to type '{ type: string; text: string; }[]'.
+[1] ../extensions/multi-agent/embedded-runner.run.test.ts: error TS2345: Argument of type '(opts: { resourceLoaderOptions: { extensionFactories: Array<(pi: unknown) => void>; appendSystemPrompt?: string[]; }; }) => Promise<{ modelRuntime: { id: string; }; }>' is not assignable to parameter of type '() => Promise<{ modelRuntime: { id: string; }; }>'.
+[1] ../extensions/multi-agent/embedded-runner.run.test.ts: error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+[1] ../extensions/multi-agent/embedded-runner.run.test.ts: error TS2741: Property 'stopReason' is missing in type '{ role: string; content: { type: string; text: string; }[]; }' but required in type '{ role: string; content: { type: string; text: string; }[]; stopReason: string; }'.
+[1] ../extensions/multi-agent/index.test.ts: error TS2322: Type 'Promise<{ ok: boolean; output: string; exitCode: number; error: string | undefined; transcript: string; sessionPath: string | undefined; stopReason: "completed" | "error"; }>' is not assignable to type 'Promise<EmbeddedSubagentResult>'.
+[1] ../extensions/multi-agent/index.test.ts: error TS2353: Object literal may only specify known properties, and 'modelRegistry' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+[5] ../extensions/multi-agent/index.test.ts: error TS2353: Object literal may only specify known properties, and 'sessionManager' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+[1] ../extensions/multi-agent/index.test.ts: error TS2741: Property 'sessionPath' is missing in type '{ ok: true; output: string; exitCode: number; transcript: string; stopReason: "completed"; }' but required in type 'EmbeddedSubagentResult'.
+[1] ../extensions/multi-agent/worker-session.test.ts: error TS2741: Property 'routingMode' is missing in type '{ childConfig: { PI_RUNTIME_CONFIG: string; }; parentPath: string; workspace: string; ctx: { origin: "subagent"; workspace: string; cwd: string; config: { A: string; }; sessionId: () => string; }; cleanup: () => void; }' but required in type 'PreparedEmbedded'.
+[1] ../extensions/prompt-metadata.test.ts: error TS2322: Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+[2] ../extensions/sandbox/bashTool.test.ts: error TS2352: Conversion of type 'Record<string, unknown>' to type 'TObject<{ command: TString; timeout: TOptional<TNumber>; run_in_background: TOptional<TBoolean>; sandbox_permissions: TOptional<TUnion<[TLiteral<"workspace-write">, TLiteral<...>]>>; justification: TOptional<...>; }>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[1] ../extensions/todo/todo.test.ts: error TS2339: Property 'content' does not exist on type '{ stopReason?: undefined; role: "toolResult"; toolName: string; details: { todos: { id: number; text: string; status: string; }[]; nextId: number; }; content: ({ text?: undefined; type: string; } | { type: string; text: string; })[]; } | { ...; }'.
+[1] ../extensions/todo/todo.test.ts: error TS2339: Property 'content' does not exist on type '{ stopReason?: undefined; role: "toolResult"; toolName: string; details: { todos: { id: number; text: string; status: string; }[]; nextId: number; }; content: string; } | { role: string; stopReason: string; }'.
+[1] ../extensions/visual-companion/index.test.ts: error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+[1] ../extensions/visual-companion/reviewRegistry.test.ts: error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+[2] electron/agent/completeAskUser.test.ts: error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+[1] electron/agent/completeAskUser.ts: error TS6307: File 'D:/OneDrive/Project Files/Pi/electron-agent/src/features/chat/pendingAskUser.ts' is not listed within the file list of project 'D:/OneDrive/Project Files/Pi/electron-agent/tsconfig.node.json'. Projects must list all files or use an 'include' pattern.
+[1] electron/agent/workspaceHandle.test.ts: error TS2339: Property 'isStreaming' does not exist on type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { ...; }; }) => Promise<...>>; ... 5 more ...; subC...'.
+[1] electron/agent/workspaceHandle.test.ts: error TS2339: Property 'mock' does not exist on type '(parentSessionPath: string) => Promise<void>'.
+[3] electron/agent/workspaceHandle.test.ts: error TS2352: Conversion of type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { newSession: (options?: unknown) => Promise<{ canc...' to type '{ sendCustomMessage: Mock<Constructable | Procedure>; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[38] electron/agentData/runtime.ts: error TS2393: Duplicate function implementation.
+[2] electron/agentData/runtime.ts: error TS2554: Expected 1 arguments, but got 2.
+[2] electron/agentData/threadStore.ts: error TS2352: Conversion of type 'Record<string, SQLOutputValue>[]' to type 'ItemRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[1] electron/agentData/threadStore.ts: error TS2352: Conversion of type 'Record<string, SQLOutputValue>[]' to type 'ThreadRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[1] electron/agentData/threadStore.ts: error TS2352: Conversion of type 'Record<string, SQLOutputValue>[]' to type 'TurnRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[1] electron/agentData/threadStore.ts: error TS2769: No overload matches this call.
+[1] electron/app/agentDataService.ts: error TS2345: Argument of type 'CreateThreadInput' is not assignable to parameter of type 'Record<string, unknown>'.
+[1] electron/app/agentDataService.ts: error TS2345: Argument of type 'CreateTurnInput' is not assignable to parameter of type 'Record<string, unknown>'.
+[1] electron/app/codeGraph/codeGraphHostClient.test.ts: error TS2741: Property 'start' is missing in type '{ request: <T = unknown>(method: string, params?: Record<string, unknown> | undefined) => Promise<T>; shutdown: Mock<() => Promise<void>>; readonly isRunning: boolean; }' but required in type 'CodeGraphHostProcess'.
+[2] electron/app/enhancePrompt.test.ts: error TS2345: Argument of type '(context: { messages: { role?: string | undefined; content?: { text?: string | undefined; }[] | undefined; }[]; }) => AsyncGenerator<{ delta?: undefined; type: string; message: { role: string; content: { type: string; id: string; name: string; arguments: {}; }[]; reason: string; }; } | { ...; } | { ...; }, void, unk...' is not assignable to parameter of type '(context: { tools?: unknown[] | undefined; }) => AsyncGenerator<unknown, any, any>'.
+[1] electron/app/goalControlAuthorization.sdk.integration.test.ts: error TS2322: Type 'Mock<(owner: string, call: unknown) => unknown>' is not assignable to type '(owner: string, call: unknown) => Promise<unknown>'.
+[1] electron/app/mcpConfigService.ts: error TS2322: Type '{ name: string; config: unknown; }[]' is not assignable to type 'EffectiveMcpConfig[]'.
+[1] electron/app/packageSdkStage.ts: error TS2339: Property 'dependencies' does not exist on type 'Manifest | {}'.
+[4] electron/app/permissionManager.test.ts: error TS2322: Type '() => Promise<string>' is not assignable to type '(operation: PermissionOperation, profile: string) => Promise<PermissionDecision> | PermissionDecision'.
+[2] electron/app/permissionManager.test.ts: error TS2322: Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision> | PermissionDecision'.
+[1] electron/app/piRuntimeService.ts: error TS2345: Argument of type 'AgentSession' is not assignable to parameter of type 'CompleteAskUserSession'.
+[1] electron/app/providerService.builtinModels.test.ts: error TS6307: File 'D:/OneDrive/Project Files/Pi/electron-agent/src/lib/pi.ts' is not listed within the file list of project 'D:/OneDrive/Project Files/Pi/electron-agent/tsconfig.node.json'. Projects must list all files or use an 'include' pattern.
+[1] electron/app/providerService.test.ts: error TS2554: Expected 0 arguments, but got 3.
+[2] electron/app/providerService.ts: error TS2339: Property 'placeholder' does not exist on type 'AuthPrompt'.
+[2] electron/app/sessionProjectTransfer.test.ts: error TS2339: Property 'sessionPath' does not exist on type '{ sessionId: string; mode: string; }'.
+[1] electron/app/sourceCodeProtection.test.ts: error TS2322: Type 'UserConfig' is not assignable to type 'ViteSlice'.
+[1] electron/browser/webviewPopup.test.ts: error TS2353: Object literal may only specify known properties, and 'control' does not exist in type '{ type: string; key?: string | undefined; code?: string | undefined; }'.
+[1] electron/browser/webviewPopup.ts: error TS2345: Argument of type '(_event: unknown, input: InputEventLike) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.
+[1] electron/ipc/register.test.ts: error TS2739: Type '{ approve: Mock<Procedure>; isApproved: Mock<Procedure>; }' is missing the following properties from type 'WorkspaceApprovalService': approvalsPath, dataDir, read, write
+[1] electron/ipc/register.test.ts: error TS2739: Type '{ execute: Mock<Procedure>; }' is missing the following properties from type 'TerminalService': registry, emit
+[1] electron/ipc/register.test.ts: error TS2740: Type '{ read: Mock<Procedure>; readSnapshot: Mock<Procedure>; write: Mock<Procedure>; patch: Mock<Procedure>; delete: Mock<...>; }' is missing the following properties from type 'UiHistoryService': pendingWrites, resolveWorkspace, enqueue, writeAtomically, and 2 more.
+[1] electron/ipc/register.test.ts: error TS2741: Property 'assertRepository' is missing in type '{ status: Mock<Procedure>; diff: Mock<Procedure>; branches: Mock<Procedure>; checkout: Mock<Procedure>; createBranch: Mock<...>; logGraph: Mock<...>; }' but required in type 'GitService'.
+[1] electron/main.config.test.ts: error TS18048: 'browserWindowOptions.webPreferences' is possibly 'undefined'.
+[3] electron/main.ts: error TS2322: Type 'unknown' is not assignable to type 'Promise<unknown>'.
+[1] electron/main.ts: error TS2339: Property 'isQuitting' does not exist on type 'App'.
+[2] electron/tencentdb/runtime.test.ts: error TS18046: 'call.options' is of type 'unknown'.
+[1] electron/tencentdb/runtime.test.ts: error TS2307: Cannot find module './runtime' or its corresponding type declarations.
+[1] electron/tencentdb/runtime.test.ts: error TS2339: Property 'endsWith' does not exist on type 'never'.
+[1] electron/tencentdb/runtime.test.ts: error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+[1] electron/tencentdb/runtime.test.ts: error TS2571: Object is of type 'unknown'.
+[1] src/lib/pi.ts: error TS2304: Cannot find name 'ProviderCredentialStatus'.
+[1] src/lib/pi.ts: error TS2304: Cannot find name 'ProviderLoginUiEvent'.
+[1] src/lib/pi.ts: error TS2304: Cannot find name 'ProviderOAuthCapability'.
+[1] src/lib/pi.ts: error TS6307: File 'D:/OneDrive/Project Files/Pi/electron-agent/src/lib/sessionStats.ts' is not listed within the file list of project 'D:/OneDrive/Project Files/Pi/electron-agent/tsconfig.node.json'. Projects must list all files or use an 'include' pattern.
+[1] src/lib/pi.ts: error TS6307: File 'D:/OneDrive/Project Files/Pi/electron-agent/src/platform/runtime.ts' is not listed within the file list of project 'D:/OneDrive/Project Files/Pi/electron-agent/tsconfig.node.json'. Projects must list all files or use an 'include' pattern.
+

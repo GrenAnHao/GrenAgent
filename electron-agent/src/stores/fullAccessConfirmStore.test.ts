@@ -1,7 +1,8 @@
+import type { SessionPreferences } from '../lib/sessionPreferences';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { setApproval, setSessionDefaults } = vi.hoisted(() => ({
-  setApproval: vi.fn(() => Promise.resolve({ ok: true, sessionPath: '/ws/a.jsonl' })),
+  setApproval: vi.fn<typeof import('../lib/pi').pi.setApproval>(() => Promise.resolve({ ok: true, sessionPath: '/ws/a.jsonl' })),
   setSessionDefaults: vi.fn(() => Promise.resolve({ revision: 1 })),
 }));
 
@@ -25,7 +26,7 @@ import {
 import { resetSessionPreferencesForTests, useSessionPreferencesStore } from './sessionPreferencesStore';
 
 const OWNER = '/ws/a.jsonl';
-const prefs = (patch: Record<string, unknown> = {}) => ({
+const prefs = (patch: Partial<SessionPreferences> = {}): SessionPreferences => ({
   model: { provider: 'anthropic', id: 'm' },
   thinkingLevel: 'medium',
   mode: 'agent',

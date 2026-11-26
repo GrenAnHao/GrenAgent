@@ -44,6 +44,8 @@ const styles = createStaticStyles(({ css }) => ({
     }
   `,
   fixedBadge: css`
+    font-weight: 500;
+    letter-spacing: 0.01em;
     position: absolute;
     inset-block-start: 8px;
     inset-inline-end: 8px;
@@ -105,6 +107,7 @@ const styles = createStaticStyles(({ css }) => ({
     border-block-start: 1px solid ${cssVar.colorBorderSecondary};
     color: ${cssVar.colorError};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -118,6 +121,7 @@ const styles = createStaticStyles(({ css }) => ({
     border-block-start: 1px solid ${cssVar.colorBorderSecondary};
     color: ${cssVar.colorTextSecondary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;

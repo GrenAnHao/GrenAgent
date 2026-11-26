@@ -5,7 +5,7 @@
 
 export type ProjectedSessionEntryLike = {
   sourceEntry: { id: string };
-  messages: Array<Record<string, unknown>>;
+  messages: object[];
 };
 
 export type SessionProjectionLike = {

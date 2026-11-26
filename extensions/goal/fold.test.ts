@@ -9,8 +9,8 @@ function ev(event: GoalEvent) {
 }
 
 describe("isGoalEventKind", () => {
-  it("accepts the eight kinds and rejects others", () => {
-    for (const kind of ["create", "edit", "pause", "resume", "complete", "blocked", "clear", "round"] as const) {
+  it("accepts lifecycle kinds including restart and rejects others", () => {
+    for (const kind of ["create", "edit", "pause", "resume", "restart", "complete", "blocked", "clear", "round"] as const) {
       expect(isGoalEventKind(kind)).toBe(true);
     }
     expect(isGoalEventKind("begin_judging")).toBe(false);
@@ -19,6 +19,49 @@ describe("isGoalEventKind", () => {
 });
 
 describe("foldGoal", () => {
+  it("projects legacy budgets and edits deterministically without modifying entries", () => {
+    const entries = [
+      ev({ kind: "create", goalId: "g", revision: 1, at, payload: { condition: "first", maxRounds: 2 } }),
+      ev({ kind: "edit", goalId: "g", revision: 2, at, payload: { condition: "second" } }),
+      ev({ kind: "edit", goalId: "g", revision: 3, at, payload: { condition: "second" } }),
+      ev({ kind: "round", goalId: "g", revision: 4, at, payload: { round: 1 } }),
+      ev({ kind: "round", goalId: "g", revision: 5, at, payload: { round: 2 } }),
+    ];
+    const before = structuredClone(entries);
+    expect(foldGoal(entries)).toMatchObject({ conditionRevision: 2, runNumber: 1, runRoundsStarted: 2, roundsStarted: 2 });
+    expect(entries).toEqual(before);
+  });
+
+  it("restarts exhausted mixed-format history but preserves lifetime rounds and frozen duration", () => {
+    const entries = [
+      ev({ kind: "create", goalId: "g", revision: 1, at, payload: { condition: "work", maxRounds: 2 } }),
+      ev({ kind: "round", goalId: "g", revision: 2, at, payload: { round: 1 } }),
+      ev({ kind: "round", goalId: "g", revision: 3, at, payload: { round: 2, runNumber: 1, runRound: 2 } }),
+      ev({ kind: "pause", goalId: "g", revision: 4, at: "2026-09-13T00:01:00.000Z", payload: { pauseReason: { code: "max-rounds" } } }),
+    ];
+    expect(foldGoal(entries)).toMatchObject({ pauseReason: { code: "max-rounds" }, ranMs: 60_000, runNumber: 1, runRoundsStarted: 2 });
+    entries.push(ev({ kind: "restart", goalId: "g", revision: 5, at: "2026-09-13T01:00:00.000Z", payload: { runNumber: 2 } }));
+    entries.push(ev({ kind: "round", goalId: "g", revision: 6, at, payload: { round: 3, runNumber: 2, runRound: 1 } }));
+    const restarted = foldGoal(entries);
+    expect(restarted).toMatchObject({ status: "active", roundsStarted: 3, runNumber: 2, runRoundsStarted: 1, conditionRevision: 1, ranMs: 60_000 });
+    expect(restarted?.pauseReason).toBeUndefined();
+    entries.push(ev({ kind: "round", goalId: "g", revision: 7, at, payload: { round: 4, runNumber: 1, runRound: 3 } }));
+    expect(foldGoal(entries)).toEqual(restarted);
+  });
+
+  it("does not reset a non-exhausted budget on resume or an invalid restart", () => {
+    const entries = [
+      ev({ kind: "create", goalId: "g", revision: 1, at, payload: { condition: "work", maxRounds: 2 } }),
+      ev({ kind: "round", goalId: "g", revision: 2, at, payload: { round: 1 } }),
+      ev({ kind: "pause", goalId: "g", revision: 3, at, payload: {} }),
+    ];
+    expect(foldGoal(entries)?.pauseReason).toEqual({ code: "user" });
+    entries.push(ev({ kind: "restart", goalId: "g", revision: 4, at, payload: { runNumber: 2 } }));
+    expect(foldGoal(entries)).toMatchObject({ status: "paused", revision: 3, runNumber: 1, runRoundsStarted: 1 });
+    entries.push(ev({ kind: "resume", goalId: "g", revision: 5, at, payload: {} }));
+    expect(foldGoal(entries)).toMatchObject({ status: "active", runNumber: 1, runRoundsStarted: 1, roundsStarted: 1 });
+  });
+
   it("folds create → edit → pause → resume → round → complete", () => {
     const snapshot = foldGoal([
       ev({ kind: "create", goalId: "g1", revision: 1, at, payload: { condition: "  写完  ", maxRounds: 8 } }),

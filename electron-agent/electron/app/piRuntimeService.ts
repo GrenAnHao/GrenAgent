@@ -1,5 +1,17 @@
-import { workflowHistoryMessages, legacyExclusions, derivedSelection } from './sessionWorkflowData.js';
+import { workflowHistoryMessages, workflowUserMessageEntries, legacyExclusions, derivedSelection } from './sessionWorkflowData.js';
+import { SessionProjectTransferOwner, type TransferFamily } from './sessionProjectTransfer.js';
+import { buildTransferredSession, readTransferSession } from './sessionProjectTransferHistory.js';
+import { parseSessionProjectTransferRequest, assertTransferSourceWorkspace, type SessionProjectTransferRequest, type SessionProjectTransferAck, type SessionProjectTransferBusyReason } from './sessionProjectTransferContracts.js';
+import { sessionTransferBusyReason, type TransferActivityFacts } from './sessionProjectTransferActivity.js';
+import { transferredSessionPreferences } from './sessionProjectTransferPolicy.js';
+import { withSessionOperationLease, sessionOperationLeases } from './sessionOperationLease.js';
+import { configureTransferJournalBlocker } from './sessionProjectTransferBlocker.js';
+import { readTransferJournalBlocks } from './sessionProjectTransferJournal.js';
+import { pauseSessionTransferWarming } from '../../../cli/src/session-project-transfer-context.js';
+import { readLatestTransferNotice } from '../../../extensions/_shared/session-project-transfer.js';
+import { sessionCwdController, sameDirectory } from '../../../extensions/_shared/session-cwd.js';
 import { parseContextExclusionPulse } from '../../../extensions/compaction-policy/exclusion.js';
+import { beginCompactionIntent, getCompactionActivity, getCompactionContextRevision, getCompactionOwnerEpoch, getCompactionSequence } from '../../../extensions/_shared/compaction-activity.js';
 import { join, isAbsolute } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { SessionWorkflowOwner } from './sessionWorkflowOwner.js';
@@ -23,6 +35,8 @@ import { getAgentMode, getDefaultAgentMode, isAgentMode, setAgentMode } from '..
 import { getAllConfig as getRuntimeConfigSnapshot } from '../../../extensions/_shared/runtime-config.js';
 import { PLAN_UNCONFIRMED_MESSAGE, planBlocksModeSwitch } from '../../../extensions/agent-mode/planState.js';
 import { buildGoalStatus, type GoalStatusEnvelope } from '../../../extensions/goal/status.js';
+import { unavailableGoalControl } from '../../../extensions/goal/control.js';
+import { parseGoalControlRequest, type GoalControlReceipt } from '../../../extensions/goal/control-contract.js';
 import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile, sessionDefaultsConfigKey } from './settingsService';
 import {
   SESSION_PREFERENCES_ENTRY,
@@ -76,6 +90,7 @@ const commandTypes = {
   agent_get_state: 'get_state',
   agent_get_messages: 'get_messages',
   agent_get_goal: 'get_state',
+  agent_goal_control: 'get_state',
   agent_get_commands: 'get_commands',
   agent_new_session: 'new_session',
   agent_switch_session: 'switch_session',
@@ -105,7 +120,7 @@ export interface AgentHostPort {
   evict?(workspace: string, handle: WorkspaceHandlePort): Promise<void>;
 }
 export type WorkspaceHandlePort = Pick<WorkspaceHandle,
-  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'reload' | 'ui' | 'currentTurnOrigin' | 'dispose'> & Partial<Pick<WorkspaceHandle, 'publishCandidate' | 'activateCandidate'>>;
+  'session' | 'prompt' | 'controlGoal' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'reload' | 'ui' | 'currentTurnOrigin' | 'dispose'> & Partial<Pick<WorkspaceHandle, 'publishCandidate' | 'activateCandidate'>>;
 
 /** 第 3 份已删除 client 接缝：会话操作一律走 runOnHandle。 */
 interface SessionOps {
@@ -198,6 +213,10 @@ export interface PiRuntimeOptions {
    * 所以有存活任务的会话换走时要停靠，停靠期间也不能被当成空闲拆掉。
    */
   hasLiveJobs?: (sessionId: string) => boolean;
+  /** Host-owned adapters; never supplied by renderer or imported session data. */
+  sessionTransferPorts?: Omit<import('./sessionProjectTransfer.js').TransferPorts, 'writers'> & {
+    writers?: Partial<import('./sessionProjectTransfer.js').TransferWritersPort>;
+  };
   agentHost: AgentHostPort;
   modelRuntimeHost: { refresh(): Promise<void>; workspaces?(): string[] };
 }
@@ -213,6 +232,7 @@ export class PiRuntimeService {
   private readonly itemPayloads = new Map<string, Record<string, unknown>>();
   private readonly workspaceThreads = new Map<string, string>();
   private readonly queuedTurns = new Map<string, Array<{ input: string; permissionProfile: string }>>();
+  private readonly queuedDispatches = new Set<string>();
   private readonly permissionProfiles = new Map<string, string>();
   private readonly currentSessionByWorkspace = new Map<string, SessionContext>();
   private readonly pendingSessionForks = new Map<string, { sourceSessionId: string; targetSessionId: string }>();
@@ -226,7 +246,213 @@ export class PiRuntimeService {
   private exclusionPulseRev = 0;
   private readonly workflows: SessionWorkflowOwner;
   private readonly portability = new SessionPortability();
-  constructor(private readonly options: PiRuntimeOptions) { this.workflows = new SessionWorkflowOwner(options.agentDir); }
+  private readonly transfers: SessionProjectTransferOwner;
+  private transferRecovery: Promise<void> | undefined;
+  private readonly attemptedTransferOpens = new Set<string>();
+  private readonly backgroundTransferRecovery = new Map<string, Promise<void>>();
+  private readonly retiredTransferSources = new Set<string>();
+  /** Only the manual compact command that actually acquired this lease may bypass itself for abort/read. */
+  private readonly compactLeaseOwners = new Map<string, { path: string; owner: string }>();
+
+  constructor(private readonly options: PiRuntimeOptions) {
+    this.workflows = new SessionWorkflowOwner(options.agentDir);
+    const ports = options.sessionTransferPorts ?? {};
+    this.transfers = new SessionProjectTransferOwner({ agentDir: options.agentDir, ports: {
+      ...ports,
+      lease: ports.lease ?? {
+        acquire: (paths, leaseOptions) => sessionOperationLeases(options.agentDir).acquire([...paths], leaseOptions),
+        checkAvailable: paths => sessionOperationLeases(options.agentDir).assertAvailable([...paths]),
+      },
+      activity: { busy: async input => {
+        const reason = sessionTransferBusyReason(await this.transferActivity(input.family));
+        if (reason) return { busyReason: transferBusyCode(reason), detail: reason };
+        return ports.activity?.busy?.(input);
+      } },
+      position: { read: async ({ sessionPath }) => {
+        const owner = this.handleOwningPathAcrossWorkspaces(sessionPath);
+        if (owner) return { leafId: owner.handle.session.sessionManager.getLeafId() };
+        const manager = await this.readTransferManager(sessionPath);
+        await this.workflows.restoreReadOnlyPosition(manager, sessionPath);
+        return { leafId: manager.getLeafId() };
+      } },
+      images: ports.images ?? { build: async input => {
+        const config = await this.runtimeConfigSnapshot();
+        return Promise.all(input.files.map(async file => {
+          const manager = await this.readTransferManager(file.path, file.content);
+          await this.workflows.restoreReadOnlyPosition(manager, file.path);
+          const owner = this.handleOwningPathAcrossWorkspaces(file.path);
+          const preferences = owner ? this.preferencesOf(owner.handle) : readSessionPreferences(manager.getEntries() as SessionPreferenceEntry[]);
+          const moved = buildTransferredSession(file.content, {
+            operationId: input.operationId, fromWorkspace: input.sourceWorkspace, toWorkspace: input.targetWorkspace,
+            leafId: sameSessionPath(file.path, input.sessionPath) ? input.leafId : manager.getLeafId(),
+            preferences: transferredSessionPreferences(preferences, input.targetWorkspace, config), now: input.now, beforeSha256: file.sha256,
+          });
+          return { path: file.path, content: moved.raw };
+        }));
+      } },
+
+      writers: {
+        release: async (input) => {
+          const { family } = input;
+          const facts = await this.transferActivity(family);
+          const reason = sessionTransferBusyReason(facts);
+          if (reason) throw new Error(`SESSION_BUSY: ${reason}`);
+          await ports.writers?.release?.(input);
+          for (const member of family.members) {
+            const owned = this.handleOwningPathAcrossWorkspaces(member.sessionPath);
+            if (owned) await this.awaitPreferenceWrites(owned.workspace, member.sessionId);
+          }
+          await this.releaseSessions(family.members.map(member => member.sessionPath));
+          for (const member of family.members) this.retiredTransferSources.add(this.transferSourceKey(family.sourceWorkspace, member.sessionId));
+        },
+        registerProject: async (input) => {
+          if (ports.writers?.registerProject) await ports.writers.registerProject(input);
+          else await this.options.resolveWorkspace?.(input.targetWorkspace);
+        },
+        invalidate: async (input) => { await ports.writers?.invalidate?.(input); },
+        open: async (input) => {
+          if (ports.writers?.open) await ports.writers.open(input);
+          else await this.openTransferredSession(input);
+        },
+      },
+    } });
+    configureTransferJournalBlocker(options.agentDir);
+  }
+
+  /** Roll back uncommitted data before use; clean stores never construct a runtime. */
+  async recoverSessionTransfers(): Promise<void> {
+    this.transferRecovery ??= (async () => {
+      const pending = await readTransferJournalBlocks(this.options.agentDir);
+      const rollback: string[] = [];
+      for (const block of pending) {
+        if (this.backgroundTransferRecovery.has(block.operationId)) continue;
+        const uncommitted = block.phase === 'prepared' || block.phase === 'applying';
+        if (!uncommitted && this.attemptedTransferOpens.has(block.operationId)) continue;
+        const locks = await sessionOperationLeases(this.options.agentDir).check(block.sessionPaths);
+        if (locks.busyPaths.length > 0) continue; // No attempted flag: retry after the other writer exits.
+        if (uncommitted) rollback.push(block.operationId);
+        else this.startTransferOpenRecovery(block);
+      }
+      if (rollback.length > 0) await this.transfers.recoverAll(rollback);
+    })().finally(() => { this.transferRecovery = undefined; });
+    await this.transferRecovery;
+  }
+
+  /** A slow/broken target startup may block its family, never every other project's commands. */
+  private startTransferOpenRecovery(block: Awaited<ReturnType<typeof readTransferJournalBlocks>>[number]): void {
+    const { operationId } = block;
+    this.attemptedTransferOpens.add(operationId);
+    const pending = this.transfers.recoverAll([operationId]).then(async () => {
+      const result = await this.transfers.status(operationId);
+      if (result.status === 'opened') await this.options.sessionTransferPorts?.writers?.invalidate?.({
+        operationId, workspaces: [result.sourceWorkspace, result.targetWorkspace],
+      });
+    }).catch(error => {
+      console.error('Session transfer recovery failed', operationId, error);
+    }).finally(() => { this.backgroundTransferRecovery.delete(operationId); });
+    this.backgroundTransferRecovery.set(operationId, pending);
+  }
+
+  async sessionProjectTransfer(workspace: string, raw: SessionProjectTransferRequest): Promise<SessionProjectTransferAck> {
+    const request = parseSessionProjectTransferRequest(raw as unknown as Record<string, unknown>);
+    assertTransferSourceWorkspace(workspace, request.sourceWorkspace);
+    request.sourceWorkspace = workspace;
+    const permission = await this.authorize(workspace, 'agent_session_project_transfer', { sessionPath: request.sessionPath });
+    if (permission.status !== 'allowed') throw new Error('SESSION_OPERATION_DENIED');
+    if (request.action !== 'preview') this.attemptedTransferOpens.add(request.operationId);
+    await this.recoverSessionTransfers();
+    if (request.action === 'preview') {
+      const preview = await this.transfers.preview(request);
+      if (preview.status !== 'preview') return preview;
+      // The owner keeps full closure details for adapters; the renderer receives only the narrow acknowledgement.
+      const ack = { ...preview };
+      Reflect.deleteProperty(ack, 'familyMembers');
+      Reflect.deleteProperty(ack, 'fingerprint');
+      return { ...ack, warnings: [...(preview.warnings ?? []), '移动不搬动代码或历史文件。目标未授权时将回到 Ask／仅查看。'] };
+    }
+    if (request.action === 'commit') return this.transfers.commit(request);
+    if (request.action === 'retry-open') return this.transfers.retryOpen(request);
+    return this.transfers.status(request);
+  }
+
+  /** Disposed source handles must not reclaim a moved identity through late events. */
+  acceptsSessionEvent(workspace: string, meta: { sessionId?: string }): boolean {
+    return !meta.sessionId || !this.retiredTransferSources.has(this.transferSourceKey(workspace, meta.sessionId));
+  }
+
+  private handleOwningPathAcrossWorkspaces(sessionPath: string): { workspace: string; handle: WorkspaceHandlePort } | undefined {
+    for (const workspace of this.options.agentHost.workspaces?.() ?? []) {
+      const handle = this.handleOwningPath(workspace, sessionPath);
+      if (handle) return { workspace, handle };
+    }
+    return undefined;
+  }
+
+  /** SDK open() upgrades old files on disk. Transfer preview/snapshot must remain read-only. */
+  private async readTransferManager(sessionPath: string, raw?: string): Promise<SessionManager> {
+    const document = readTransferSession(raw ?? await readFile(sessionPath, 'utf8'));
+    return SessionManager.inMemory(document.header.cwd, {}, [document.header, ...document.entries]);
+  }
+
+  private async transferActivity(family: TransferFamily): Promise<TransferActivityFacts> {
+    let primary: TransferActivityFacts | undefined;
+    for (const member of family.members) {
+      const owned = this.handleOwningPathAcrossWorkspaces(member.sessionPath);
+      const manager = owned?.handle.session.sessionManager ?? await this.readTransferManager(member.sessionPath);
+      const key = this.sessionKey(owned?.workspace ?? family.sourceWorkspace, member.sessionId);
+      const facts: TransferActivityFacts = {
+        sessionId: member.sessionId, entries: manager.getEntries(), session: owned?.handle.session,
+        hasPendingUi: owned?.handle.ui.hasAnyPending ? () => owned.handle.ui.hasAnyPending() : undefined,
+        activeTurn: this.activeTurns.has(key) || this.queuedDispatches.has(key), queuedTurns: this.queuedTurns.get(key)?.length ?? 0,
+        preferenceWritePending: this.preferenceWrites.has(key),
+        structuralOperationPending: !!owned && this.workflows.isLocked(owned.handle.session),
+        hasLiveJobs: this.options.hasLiveJobs ? this.options.hasLiveJobs(member.sessionId) || !!member.agentId && this.options.hasLiveJobs(member.agentId) : undefined,
+      };
+      primary ??= facts;
+      if (sessionTransferBusyReason(facts)) return facts;
+      if (owned) pauseSessionTransferWarming(member.sessionId);
+    }
+    return primary ?? { sessionId: family.sessionId, entries: [], activeTurn: false, queuedTurns: 0,
+      preferenceWritePending: false, structuralOperationPending: true, hasLiveJobs: undefined };
+  }
+
+  private async openTransferredSession(input: {
+    operationId: string; targetWorkspace: string; sessionPath: string; sessionId: string;
+    leafId: string | null; family: TransferFamily;
+  }): Promise<void> {
+    const host = this.options.agentHost;
+    if (!host.openAdditional || !host.focus || !host.evict) throw new Error('SESSION_TRANSFER_RUNTIME_UNAVAILABLE');
+    const identity = await readSessionIdentity(input.sessionPath, input.targetWorkspace);
+    if (identity.sessionId !== input.sessionId) throw new Error('SESSION_TRANSFER_IDENTITY_MISMATCH');
+    const manager = SessionManager.open(input.sessionPath);
+    const preferences = readSessionPreferences(manager.getEntries() as SessionPreferenceEntry[]);
+    setAgentMode(preferences.mode ?? 'ask', input.targetWorkspace, input.sessionId);
+    setApprovalPolicy(preferences.approval ?? 'readonly', input.targetWorkspace, input.sessionId);
+    let next = this.handleOwningPath(input.targetWorkspace, input.sessionPath);
+    const created = !next;
+    try {
+      next ??= await host.openAdditional(input.targetWorkspace, input.targetWorkspace, input.sessionPath);
+      if (next.session.sessionId !== input.sessionId || !sameDirectory(next.session.sessionManager.getCwd(), identity.workspace)) {
+        throw new Error('SESSION_TRANSFER_RUNTIME_IDENTITY_MISMATCH');
+      }
+      const cwd = sessionCwdController(input.sessionId);
+      if (!cwd || !sameDirectory(cwd.current(), input.targetWorkspace)) throw new Error('SESSION_TRANSFER_TOOL_CWD_MISMATCH');
+      if (input.leafId === null) next.session.sessionManager.resetLeaf();
+      else if (next.session.sessionManager.getEntry(input.leafId)) next.session.sessionManager.branch(input.leafId);
+      else throw new Error('SESSION_TRANSFER_POSITION_MISSING');
+      // The runtime factory restores model/thinking from the committed canonical
+      // preferences. Reopen is not a preference edit: never append a new revision.
+      next.session.refreshContext();
+      await this.workflows.savePosition(next.session);
+      host.focus(input.targetWorkspace, next);
+      await this.refreshCurrentSession(input.targetWorkspace, this.handleOps(next));
+      this.retiredTransferSources.delete(this.transferSourceKey(input.targetWorkspace, input.sessionId));
+      next.activateCandidate?.();
+    } catch (error) {
+      if (created && next) await host.evict(input.targetWorkspace, next).catch(() => {});
+      throw error;
+    }
+  }
 
   /** Production WorkspaceHandle delegates here; older fork-only ports keep their existing contract. */
   async stagedFork(workspace: string, handle: WorkspaceHandlePort, entryId: string, options?: {position?:'before'|'at'}): Promise<{cancelled:boolean;selectedText?:string;sessionPath?:string}> {
@@ -239,6 +465,13 @@ export class PiRuntimeService {
 
   /** One explicit owner across tree, edit and portability commands. Paths are granted by main, never by renderer. */
   async sessionWorkflow(workspace: string, request: SessionWorkflowRequest, options: {notifyFork?:boolean} = {}): Promise<SessionWorkflowAck> {
+    await this.recoverSessionTransfers();
+    const path = request.targetSessionPath ?? sessionFileOf(this.options.agentHost.get(workspace));
+    if (!path) return this.sessionWorkflowUnlocked(workspace, request, options);
+    return withSessionOperationLease(this.options.agentDir, [path], () => this.sessionWorkflowUnlocked(workspace, request, options));
+  }
+
+  private async sessionWorkflowUnlocked(workspace: string, request: SessionWorkflowRequest, options: {notifyFork?:boolean}): Promise<SessionWorkflowAck> {
     const auth = await this.authorize(workspace, 'agent_session_workflow', {action:request.action,targetSessionPath:request.targetSessionPath});
     if (auth.status !== 'allowed') throw new Error('SESSION_OPERATION_DENIED');
     const handle = request.targetSessionPath ? this.handleOwningPath(workspace, request.targetSessionPath) : await this.resolveHandle(workspace);
@@ -353,6 +586,7 @@ export class PiRuntimeService {
 
 
   async openWorkspace(workspace: string): Promise<{ restoredSession: null; sessionFile: string | null; sessionId?: string | null }> {
+    await this.recoverSessionTransfers();
     const ops = this.handleOps(await this.openInteractive(workspace));
     const state = await ops.getState();
     const sessionFile = typeof state.sessionFile === 'string' ? state.sessionFile : null;
@@ -373,20 +607,26 @@ export class PiRuntimeService {
    * 渲染进程热更新后内存里的 isStreaming 会丢。这里把主进程仍在跑的交互回合交回去，
    * 供界面加载完重新点亮停止按钮和侧边栏运行态。
    */
-  listRunningTurns(): Array<{ workspace: string; sessionId?: string; sessionPath?: string }> {
-    const rows: Array<{ workspace: string; sessionId?: string; sessionPath?: string }> = [];
+  listRunningTurns(): Array<{ workspace: string; sessionId?: string; sessionPath?: string; isStreaming?: boolean; isCompacting?: boolean; compaction?: ReturnType<typeof getCompactionActivity>; contextRevision?: number; ownerEpoch?: string; activitySequence?: number }> {
+    const rows: Array<{ workspace: string; sessionId?: string; sessionPath?: string; isStreaming?: boolean; isCompacting?: boolean; compaction?: ReturnType<typeof getCompactionActivity>; contextRevision?: number; ownerEpoch?: string; activitySequence?: number }> = [];
     const covered = new Set<string>();
     for (const workspace of this.options.agentHost.workspaces?.() ?? []) {
       for (const handle of this.handlesOf(workspace)) {
         const session = handle.session;
-        if (!session?.isStreaming) continue;
+        if (!session) continue;
         const sessionId = typeof session.sessionId === 'string' ? session.sessionId : undefined;
+        const compaction = sessionId ? getCompactionActivity(sessionId) : undefined;
+        if (!session.isStreaming && !session.isCompacting && !compaction) continue;
         const sessionPath = typeof session.sessionFile === 'string' ? session.sessionFile : undefined;
         covered.add(this.sessionKey(workspace, sessionId));
         rows.push({
           workspace,
           ...(sessionId ? { sessionId } : {}),
           ...(sessionPath ? { sessionPath } : {}),
+          isStreaming: Boolean(session.isStreaming), isCompacting: Boolean(session.isCompacting || compaction),
+          ...(compaction ? { compaction } : {}),
+          ...(sessionId ? { contextRevision: getCompactionContextRevision(sessionId), activitySequence: getCompactionSequence(sessionId) } : {}),
+          ownerEpoch: getCompactionOwnerEpoch(),
         });
       }
     }
@@ -399,16 +639,29 @@ export class PiRuntimeService {
         workspace: active.workspace,
         ...(active.sessionId ? { sessionId: active.sessionId } : {}),
         ...(active.sessionPath ? { sessionPath: active.sessionPath } : {}),
+        isStreaming: true, isCompacting: false,
       });
     }
     return rows;
   }
 
   async warmWorkspace(workspace: string): Promise<void> {
+    await this.recoverSessionTransfers();
     await this.openInteractive(workspace);
   }
 
   async closeWorkspace(workspace: string): Promise<void> {
+    await this.recoverSessionTransfers();
+    for (const pending of await this.transfers.blockedFamilies()) {
+      if ((pending.sourceWorkspace && sameSessionPath(pending.sourceWorkspace, workspace)) || (pending.targetWorkspace && sameSessionPath(pending.targetWorkspace, workspace))) {
+        throw new Error('SESSION_TRANSFER_BUSY: 工作区有关联会话正在迁移或等待恢复');
+      }
+    }
+    const paths = this.handlesOf(workspace).flatMap(handle => sessionFileOf(handle) ? [sessionFileOf(handle)!] : []);
+    return paths.length ? withSessionOperationLease(this.options.agentDir, paths, () => this.closeWorkspaceUnlocked(workspace)) : this.closeWorkspaceUnlocked(workspace);
+  }
+
+  private async closeWorkspaceUnlocked(workspace: string): Promise<void> {
     for (const [key, active] of this.activeTurns) if (active.workspace === workspace) this.activeTurns.delete(key);
     for (const key of this.assistantItems.keys()) if (key.startsWith(`${workspace}\0`)) this.assistantItems.delete(key);
     for (const key of this.workspaceThreads.keys()) if (key.startsWith(`${workspace}\0`)) this.workspaceThreads.delete(key);
@@ -473,6 +726,49 @@ export class PiRuntimeService {
   }
 
   async send(workspace: string, command: string, rawArgs: Record<string, unknown>): Promise<unknown> {
+    if (command === 'agent_session_project_transfer') return this.sessionProjectTransfer(workspace, rawArgs as unknown as SessionProjectTransferRequest);
+    await this.recoverSessionTransfers();
+    const paths = new Set<string>();
+    const target = readOptionalString(rawArgs.targetSessionPath) ?? (command === 'agent_switch_session' ? readOptionalString(rawArgs.sessionPath) : undefined);
+    if (target) paths.add(target);
+    const current = sessionFileOf(this.options.agentHost.get(workspace));
+    // 项目默认是纯配置读（readSessionDefaults 只读 runtime settings，不碰会话）：
+    // 押上前景会话锁会让草稿初始化与运行中的回合互撞出 LEASE_BUSY。
+    // See .agents/notes/proposed/bug-fix/2026-11-20-draft-preferences-lease-busy.md
+    const sessionFreeRead = command === 'agent_get_session_defaults';
+    if (current && (!target || SESSION_REPLACING_COMMANDS.includes(command)) && !sessionFreeRead) paths.add(current);
+    if (command === 'agent_switch_session' && target) await readSessionIdentity(target, workspace);
+    // Only a live compaction owned by this exact handle may bypass its own mutation lease:
+    // abort and read-only activity/stats must reach it while compact() is awaiting the SDK.
+    // Other operations (including an exclusive transfer lease) retain normal serialization.
+    const observation = command === 'agent_abort' || command === 'agent_get_state' || command === 'agent_get_session_stats';
+    const handle = observation ? target ? this.handleOwningPath(workspace, target) : this.options.agentHost.get(workspace) : undefined;
+    const held = handle && this.compactLeaseOwners.get(handle.session.sessionId);
+    if (observation && held && getCompactionActivity(handle!.session.sessionId)
+      && sameSessionPath(held.path, sessionFileOf(handle) ?? '') && (!target || sameSessionPath(held.path, target))) {
+      const lease = await sessionOperationLeases(this.options.agentDir).check([held.path], { workspaces: [workspace] });
+      if (lease.blocked.length === 0 && lease.holders.some(item => item.owner === held.owner && lease.paths.includes(item.path))) {
+        return this.sendUnlocked(workspace, command, rawArgs);
+      }
+    }
+    if (paths.size === 0) return this.sendUnlocked(workspace, command, rawArgs);
+    const compactOwner = command === 'agent_compact' ? `compact-${randomUUID()}` : undefined;
+    // 输入栏按会话路径读偏好，常与历史加载竞争同一把锁；只让这一路短等，不放宽写入或迁移。
+    const preferenceRead = command === 'agent_get_state' && Boolean(target);
+    return withSessionOperationLease(this.options.agentDir, [...paths], async () => {
+      const compactHandle = compactOwner ? target ? this.handleOwningPath(workspace, target) : this.options.agentHost.get(workspace) : undefined;
+      const compactSession = compactHandle?.session.sessionId;
+      const compactPath = compactHandle && sessionFileOf(compactHandle);
+      if (compactOwner && compactSession && compactPath) this.compactLeaseOwners.set(compactSession, { owner: compactOwner, path: compactPath });
+      try {
+        return await this.sendUnlocked(workspace, command, rawArgs);
+      } finally {
+        if (compactSession && this.compactLeaseOwners.get(compactSession)?.owner === compactOwner) this.compactLeaseOwners.delete(compactSession);
+      }
+    }, compactOwner ? { owner: compactOwner } : preferenceRead ? { waitMs: 500 } : {});
+  }
+
+  private async sendUnlocked(workspace: string, command: string, rawArgs: Record<string, unknown>): Promise<unknown> {
     if (command === 'agent_session_workflow') return this.sessionWorkflow(workspace, rawArgs as unknown as SessionWorkflowRequest);
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
@@ -495,6 +791,9 @@ export class PiRuntimeService {
     if (command === 'agent_get_goal') {
       return this.readGoalStatus(workspace, targetPath);
     }
+    if (command === 'agent_goal_control') {
+      return this.controlTargetGoal(workspace, targetPath, args);
+    }
     if (command === 'agent_get_session_defaults') {
       return this.readSessionDefaults(workspace);
     }
@@ -509,6 +808,13 @@ export class PiRuntimeService {
     }
     if (command === 'agent_get_state' && targetPath) {
       return this.readTargetSessionState(workspace, targetPath);
+    }
+    if (targetPath && (command === 'ask_user_draft_read' || command === 'ask_user_draft_write')) {
+      const owner = this.handleOwningPath(workspace, targetPath);
+      const requestId = readOptionalString(args.requestId);
+      if (command === 'ask_user_draft_write' && (!owner || (requestId && !owner.ui.hasPending(requestId)))) return;
+      const sessionFile = sessionFileOf(owner) ?? (await readSessionIdentity(targetPath, workspace)).sessionPath;
+      return this.runAskUserDraft(sessionFile, command, args);
     }
     if (PROMPT_COMMANDS.has(command)) {
       // prompt / steer / follow_up 都会触发供应商请求，都要过同一道门：
@@ -527,8 +833,10 @@ export class PiRuntimeService {
         if (command === 'agent_abort') return { stopped: true, aborted: false } satisfies AbortResult;
         if (command === 'agent_take_steering') return { steering: [] };
         if (command === 'agent_cancel_steer') return { cancelled: false };
+        // 压缩必须落在原来那份存活会话上；不可把后台目标改写成前景会话。
+        if (command === 'agent_compact') throw new Error('SESSION_NOT_LIVE: compaction target is no longer open');
         // 要快照的会话已经不在 handle 上（后台跑完被拆了）：读它自己的会话文件，不能拿前景那份顶替。
-        if (command === 'agent_get_messages') return this.readDetachedMessages(workspace, targetPath);
+        if (command === 'agent_get_messages') return this.readDetachedMessages(workspace, targetPath, args.userEntriesOnly === true);
         if (PROMPT_COMMANDS.has(command)) {
           const switched = await this.send(workspace, 'agent_switch_session', { sessionPath: targetPath });
           if (isCancelledResult(switched)) throw new Error('SESSION_SWITCH_CANCELLED');
@@ -600,19 +908,7 @@ export class PiRuntimeService {
     if (command === 'ask_user_draft_read' || command === 'ask_user_draft_write' || command === 'ask_user_draft_delete') {
       const sessionFile = handle.session.sessionFile;
       if (typeof sessionFile !== 'string' || !sessionFile) throw new Error('ask_user draft requires a session file');
-      if (command === 'ask_user_draft_read') {
-        const toolCallId = args.toolCallId;
-        if (typeof toolCallId !== 'string' || !toolCallId) throw new Error('toolCallId must be a non-empty string');
-        return readAskUserDraft(sessionFile, toolCallId);
-      }
-      if (command === 'ask_user_draft_write') {
-        const draft = args.draft;
-        if (!draft || typeof draft !== 'object' || typeof (draft as AskUserDraft).toolCallId !== 'string') {
-          throw new Error('draft must be an object with a string toolCallId');
-        }
-        return writeAskUserDraft(sessionFile, draft as AskUserDraft);
-      }
-      return deleteAskUserDraft(sessionFile);
+      return this.runAskUserDraft(sessionFile, command, args);
     }
     if (command === 'agent_complete_ask_user') {
       const toolCallId = args.toolCallId;
@@ -628,7 +924,7 @@ export class PiRuntimeService {
         });
         const sessionFile = handle.session.sessionFile;
         if (typeof sessionFile === 'string' && sessionFile) {
-          return finishCompleteAskUser('ok', () => deleteAskUserDraft(sessionFile));
+          return finishCompleteAskUser('ok', () => deleteAskUserDraft(sessionFile, toolCallId));
         }
         return 'ok';
       }
@@ -639,7 +935,7 @@ export class PiRuntimeService {
       });
       const sessionFile = handle.session.sessionFile;
       if (typeof sessionFile === 'string' && sessionFile) {
-        return finishCompleteAskUser(result, () => deleteAskUserDraft(sessionFile));
+        return finishCompleteAskUser(result, () => deleteAskUserDraft(sessionFile, toolCallId));
       }
       return result;
     }
@@ -731,16 +1027,26 @@ export class PiRuntimeService {
     const identity = await readSessionIdentity(sessionPath, workspace);
     if (!existsSync(identity.sessionPath)) return null;
     const manager = SessionManager.open(identity.sessionPath);
-    return buildGoalStatus({ entries: manager.getEntries(), sessionId: manager.getSessionId() || identity.sessionId });
+    return buildGoalStatus({ entries: manager.getEntries(), sessionId: manager.getSessionId() || identity.sessionId, source: 'offline' });
+  }
+
+  private async controlTargetGoal(workspace: string, sessionPath: string | undefined, raw: unknown): Promise<GoalControlReceipt> {
+    if (!sessionPath) throw new Error('GOAL_TARGET_SESSION_REQUIRED');
+    const request = parseGoalControlRequest(raw);
+    // A caller supplied path is not authority to touch another project's owner.
+    const identity = await readSessionIdentity(sessionPath, workspace);
+    const owner = this.handleOwningPath(workspace, identity.sessionPath);
+    if (!owner) return unavailableGoalControl(identity.sessionId, request, 'GOAL_OWNER_UNAVAILABLE: 请重新打开原会话后重试');
+    return owner.controlGoal(request);
   }
 
   /** 只读地投影一份不在任何 handle 上的会话。路径必须属于这个项目。 */
-  private async readDetachedMessages(workspace: string, sessionPath: string): Promise<{ messages: unknown[] }> {
+  private async readDetachedMessages(workspace: string, sessionPath: string, userEntriesOnly: boolean): Promise<{ messages: unknown[] }> {
     const identity = await readSessionIdentity(sessionPath, workspace);
     if (!existsSync(identity.sessionPath)) return { messages: [] };
     const manager = SessionManager.open(identity.sessionPath);
     await this.workflows.restoreReadOnlyPosition(manager, identity.sessionPath);
-    return { messages: workflowHistoryMessages(manager) };
+    return { messages: userEntriesOnly ? workflowUserMessageEntries(manager.getBranch()) : workflowHistoryMessages(manager) };
   }
 
   private contextOf(handle: WorkspaceHandlePort): SessionContext {
@@ -792,6 +1098,7 @@ export class PiRuntimeService {
   async handlePiEvent(workspace: string, raw: Record<string, unknown>, sessionOrMetadata?: EventMeta, source?: 'interactive' | 'goal' | 'subagent'): Promise<void> {
     const eventSessionId = typeof sessionOrMetadata === 'string' ? sessionOrMetadata : sessionOrMetadata?.sessionId ?? readOptionalString(raw.sessionId);
     const eventSource = source ?? (typeof sessionOrMetadata === 'object' ? sessionOrMetadata?.source : undefined);
+    if (!this.acceptsSessionEvent(workspace, { sessionId: eventSessionId })) return;
     if (eventSource === 'subagent') return;
     if (raw.type === 'agent_settled' && eventSessionId) {
       const owner=this.handlesOf(workspace).find(h=>h.session.sessionId===eventSessionId);
@@ -943,7 +1250,20 @@ export class PiRuntimeService {
     }
   }
 
-  enqueueTurn(workspace: string, input: string, permissionProfile = 'workspace', session: SessionContext = this.currentSessionByWorkspace.get(workspace) ?? {}): { status: 'queued'; position: number } {
+  async enqueueTurn(workspace: string, input: string, permissionProfile = 'workspace', session: SessionContext = this.currentSessionByWorkspace.get(workspace) ?? {}): Promise<{ status: 'queued'; position: number }> {
+    await this.recoverSessionTransfers();
+    const path = session.sessionPath ?? sessionFileOf(this.options.agentHost.get(workspace));
+    const enqueue = async (): Promise<{ status: 'queued'; position: number }> => {
+      if (path) {
+        const identity = await readSessionIdentity(path, workspace);
+        if (session.sessionId && identity.sessionId !== session.sessionId) throw new Error('SESSION_STALE');
+      }
+      return this.enqueueTurnUnlocked(workspace, input, permissionProfile, session);
+    };
+    return path ? withSessionOperationLease(this.options.agentDir, [path], enqueue) : enqueue();
+  }
+
+  private enqueueTurnUnlocked(workspace: string, input: string, permissionProfile: string, session: SessionContext): { status: 'queued'; position: number } {
     const stateKey = this.sessionKey(workspace, session.sessionId);
     const queue = this.queuedTurns.get(stateKey) ?? [];
     queue.push({ input, permissionProfile });
@@ -953,9 +1273,32 @@ export class PiRuntimeService {
     return { status: 'queued', position };
   }
 
+  private runAskUserDraft(sessionFile: string, command: string, args: Record<string, unknown>): Promise<unknown> {
+    if (command === 'ask_user_draft_read') {
+      const toolCallId = readOptionalString(args.toolCallId);
+      if (!toolCallId) throw new Error('toolCallId must be a non-empty string');
+      return readAskUserDraft(sessionFile, toolCallId);
+    }
+    if (command === 'ask_user_draft_write') {
+      const draft = args.draft;
+      if (!draft || typeof draft !== 'object' || typeof (draft as AskUserDraft).toolCallId !== 'string') {
+        throw new Error('draft must be an object with a string toolCallId');
+      }
+      return writeAskUserDraft(sessionFile, draft as AskUserDraft);
+    }
+    return deleteAskUserDraft(sessionFile);
+  }
+
   async respondUi(workspace: string, response: Record<string, unknown>): Promise<void> {
     const requestId = readOptionalString(response.id) ?? '';
-    this.uiOwner(workspace, requestId)?.ui.respond(requestId, response);
+    const owner = this.uiOwner(workspace, requestId);
+    const draftToolCallId = readOptionalString(response.askUserDraftToolCallId);
+    // Only the live request owner may authorize cleanup, never the current foreground by fallback.
+    const sessionFile = draftToolCallId && owner?.ui.pendingAskUserRequestId() === requestId ? sessionFileOf(owner) : undefined;
+    owner?.ui.respond(requestId, response);
+    if (sessionFile && draftToolCallId) {
+      void deleteAskUserDraft(sessionFile, draftToolCallId).catch(() => {});
+    }
   }
 
   async rejectUiRequest(workspace: string, _metadata: EventMeta | undefined, requestId: string): Promise<void> {
@@ -1861,7 +2204,11 @@ export class PiRuntimeService {
       case 'agent_get_available_models': return {
         models: s.modelRuntime.getAvailableSnapshot().map((m) => snapshotSessionModel(m) ?? m),
       };
-      case 'agent_compact': this.workflows.assertSendable(s); return s.compact(typeof args.customInstructions === 'string' ? args.customInstructions : undefined);
+      case 'agent_compact': {
+        this.workflows.assertSendable(s);
+        beginCompactionIntent({ sessionId: s.sessionId, sessionPath: s.sessionFile ?? undefined }, 'user-manual');
+        return s.compact(typeof args.customInstructions === 'string' ? args.customInstructions : undefined);
+      }
       case 'agent_set_auto_compaction': s.setAutoCompactionEnabled(args.enabled === true); return undefined;
       case 'agent_abort_retry': s.abortRetry(); return undefined;
       case 'agent_get_session_stats': {
@@ -1871,18 +2218,25 @@ export class PiRuntimeService {
         } catch {
           systemPrompt = '';
         }
-        return withEstimatedContextUsage(s.getSessionStats(), {
-          messages: s.messages,
-          systemPrompt,
-        });
+        return {
+          ...withEstimatedContextUsage(s.getSessionStats(), { messages: s.messages, systemPrompt }),
+          sessionId: s.sessionId, sessionPath: s.sessionFile,
+          contextRevision: getCompactionContextRevision(s.sessionId), ownerEpoch: getCompactionOwnerEpoch(),
+        };
       }
       case 'agent_get_state': return handle.getState();
       case 'agent_get_messages': {
-        const build = s.sessionManager?.buildSessionProjection;
-        if (typeof build === 'function') {
-          return { messages: typeof s.sessionManager.getBranch === 'function' ? workflowHistoryMessages(s.sessionManager) : messagesWithEntryIds(build.call(s.sessionManager)) };
+        const manager = s.sessionManager;
+        if (args.userEntriesOnly === true) {
+          return { messages: workflowUserMessageEntries(manager.getBranch()) };
         }
-        return { messages: s.messages };
+        const transfer = readLatestTransferNotice(manager?.getEntries?.() ?? []);
+        const position = { ...(typeof manager?.getLeafId === 'function' ? { leafId: manager.getLeafId() } : {}), ...(transfer ? { transfer } : {}) };
+        const build = manager?.buildSessionProjection;
+        if (typeof build === 'function') {
+          return { ...position, messages: typeof manager.getBranch === 'function' ? workflowHistoryMessages(manager) : messagesWithEntryIds(build.call(manager)) };
+        }
+        return { ...position, messages: s.messages };
       }
       case 'agent_get_commands': return handle.getCommands();
       case 'agent_get_fork_messages': return { messages: s.getUserMessagesForForking() };
@@ -2156,6 +2510,9 @@ export class PiRuntimeService {
     const next = queue?.shift();
     if (!next) return;
     if (queue?.length === 0) this.queuedTurns.delete(stateKey);
+    // prepareTurn awaits storage before registering activeTurns. Keep the popped
+    // queue item busy through that gap so a transfer cannot snapshot a new writer.
+    this.queuedDispatches.add(stateKey);
     try {
       // 排队的会话停在后台时直接打到它的 handle；走前景路径会把排队内容发进当前画面那份会话。
       const parked = this.parkedHandleFor(workspace, session);
@@ -2166,10 +2523,16 @@ export class PiRuntimeService {
       }
     } catch {
       // send() records the failed turn; later enqueued turns remain available for the next terminal event.
+    } finally {
+      this.queuedDispatches.delete(stateKey);
     }
   }
 
   private sessionKey(workspace: string, sessionId?: string): string { return `${workspace}\0${sessionId ?? ''}`; }
+
+  private transferSourceKey(workspace: string, sessionId: string): string {
+    return `${workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()}\0${sessionId}`;
+  }
 
   private hasInteractiveTurn(workspace: string): boolean {
     return [...this.activeTurns.values()].some((turn) => turn.workspace === workspace && turn.source === 'interactive');
@@ -2237,6 +2600,8 @@ export class PiRuntimeService {
     if (!sessionFile) return stateSessionId ? { sessionId: stateSessionId, source: 'interactive' } : undefined;
     try {
       const identity = await readSessionIdentity(sessionFile, workspace);
+      // A rolled-back transfer can be explicitly reopened in its original workspace.
+      this.retiredTransferSources.delete(this.transferSourceKey(workspace, identity.sessionId));
       return { sessionId: identity.sessionId, sessionPath: identity.sessionPath, source: 'interactive' };
     } catch (error) {
       if (isSessionWorkspaceMismatch(error)) return undefined;
@@ -2329,7 +2694,7 @@ const SESSION_REPLACING_COMMANDS = ['agent_switch_session', 'agent_new_session',
 /** 带 targetSessionPath 时可以打到停在后台那份会话的命令。 */
 const ROUTED_COMMANDS = new Set([
   'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering', 'agent_cancel_steer',
-  'agent_get_messages', 'agent_get_session_stats', 'agent_get_state',
+  'agent_get_messages', 'agent_get_session_stats', 'agent_get_state', 'agent_compact',
 ]);
 const PROMPT_COMMANDS = new Set(['agent_prompt', 'agent_steer', 'agent_follow_up']);
 
@@ -2349,8 +2714,8 @@ async function refreshHandleModel(handle: WorkspaceHandlePort): Promise<void> {
   if (state.model !== live) state.model = live;
 }
 
-function sessionFileOf(handle: WorkspaceHandlePort): string | undefined {
-  const file = handle.session.sessionFile;
+function sessionFileOf(handle: WorkspaceHandlePort | undefined): string | undefined {
+  const file = handle?.session.sessionFile;
   return typeof file === 'string' && file ? file : undefined;
 }
 
@@ -2488,6 +2853,19 @@ function supportedThinkingLevels(model: unknown): string[] {
     if (level === 'xhigh' || level === 'max') return mapped !== undefined;
     return true;
   });
+}
+
+function transferBusyCode(reason: string | undefined): SessionProjectTransferBusyReason {
+  if (/无法确认|unknown/i.test(reason ?? '')) return 'unknown';
+  if (/预热|warming/i.test(reason ?? '')) return 'turn-active';
+  if (/后台|background/i.test(reason ?? '')) return 'background-jobs';
+  if (/子代理|subagent/i.test(reason ?? '')) return 'subagent-unsettled';
+  if (/排队|queue/i.test(reason ?? '')) return 'turn-queued';
+  if (/批准|选择|交互|pending.ui/i.test(reason ?? '')) return 'pending-ui';
+  if (/目标|goal|计划/i.test(reason ?? '')) return 'goal-running';
+  if (/恢复|修改|结构|偏好|保存|structure/i.test(reason ?? '')) return 'structure-recovery';
+  if (/执行|空闲|turn/i.test(reason ?? '')) return 'turn-active';
+  return 'unknown';
 }
 
 function readInput(args: Record<string, unknown>): string {

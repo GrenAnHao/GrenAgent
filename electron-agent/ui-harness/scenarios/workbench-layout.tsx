@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
 import { MainChatColumn } from '../../src/features/layout/MainChatColumn';
 import { ModuleRail } from '../../src/features/layout/ModuleRail';
 import { Sidebar } from '../../src/features/sessions/Sidebar';
+import { ResizeHandle } from '../../src/components/ResizeHandle';
 import { useSessionStore } from '../../src/store/session';
 import { AgentStoreContext } from '../../src/stores/AgentStoreContext';
 import { createAgentStore } from '../../src/stores/agent';
@@ -35,6 +36,7 @@ const NEW_DRAFT_ID = 'workbench-bottom-new-draft';
 const RESTORED_DRAFT = '切换草稿和重新挂载后仍保留的正文';
 const NEW_DRAFT_TEXT = '新建对话待发送内容';
 const CROWDED_DRAFT = '尚未发送的工作台草稿';
+let compactUsage = 850;
 
 installBridge({
   subscribe: async () => () => {},
@@ -49,12 +51,19 @@ installBridge({
   invoke: async (command: string, args: Record<string, unknown> = {}) => {
     switch (command) {
       case 'warm_workspace': case 'enhance_prompt_abort': return undefined;
+      case 'agent_abort': track(`agent-abort:${args.targetSessionPath}`); return { stopped: true, aborted: true };
+      case 'agent_take_steering': return { steering: [] };
       case 'get_settings': return { defaultSessionModel: 'fixture/workbench-model' };
       case 'get_provider_config': return { modelsJson: JSON.stringify({ providers: { fixture: { name: 'Fixture', api: 'openai-responses', apiKey: 'fixture', models: [model] } } }), authJson: '{}', agentDir: 'C:/agent' };
       case 'agent_get_available_models': case 'list_models_global': return { models: [model] };
       case 'get_model_fast_preferences': return {};
       case 'agent_get_session_defaults': return structuredClone(preferences);
       case 'agent_get_state': return { sessionFile: args.targetSessionPath || A.path, sessionPath: args.targetSessionPath || A.path, model, thinkingLevel: 'high', preferences: structuredClone(preferences), unavailable: [] };
+      case 'agent_get_session_stats': return { sessionId: 'layout-a', sessionPath: args.targetSessionPath || A.path,
+        contextRevision: compactUsage < 500 ? 1 : 0, ownerEpoch: 'host-layout',
+        userMessages: 1, assistantMessages: 1, toolCalls: 0, toolResults: 0, totalMessages: 2,
+        tokens: { input: 500, output: 50, cacheRead: 0, cacheWrite: 0, total: 550 }, cost: 0,
+        contextUsage: { tokens: compactUsage, contextWindow: 1000, percent: compactUsage / 10 } };
       case 'get_git_branches': return { current: 'main', branches: [{ name: 'main', current: true }] };
       case 'get_git_status': case 'subagent_list': return [];
       case 'get_file_tree': return { name: 'workbench', path: WORKSPACE, kind: 'directory', children: [] };
@@ -97,6 +106,32 @@ exposeActions({
   remountChat: () => remountMainChatColumn(),
   sidebarWidth: (width: number) => resizeFixtureSidebar(width),
   empty: () => store.useStore.setState(initialAgentState(), true),
+  recoveryFixture: (event: AgentEvent) => store.useStore.setState((state) => applyEvent(state, event), true),
+  compactionUnconfirmedFixture: () => store.useStore.setState({ compactionUnconfirmed: true }),
+  compactUsageFixture: (tokens: number) => { compactUsage = tokens; },
+  compactionAutoHandoffFixture: () => {
+    const compaction = { ownerEpoch: 'host-layout', operationId: 'policy-auto-1', phase: 'preparing' as const, startedAt: 2000, sequence: 4 };
+    store.useStore.setState((state) => applyEvent(state, { type: 'compaction_activity', compaction } as never), true);
+    running.add(A.path);
+    resizeFixtureSidebar(261);
+    setTimeout(() => store.useStore.setState((state) => applyEvent(state, { type: 'message_end',
+      message: { role: 'assistant', content: [], stopReason: 'aborted', errorMessage: 'Request was aborted' },
+      internalAbort: { origin: 'policy-auto', operationId: compaction.operationId } } as never), true), 25);
+    setTimeout(() => store.useStore.setState((state) => applyEvent(state, { type: 'compaction_start',
+      compaction: { ...compaction, phase: 'running', sequence: 5 } } as never), true), 160);
+  },
+  compactionFixture: (event: AgentEvent) => {
+    store.useStore.setState((state) => applyEvent(state, event), true);
+    if (event.type === 'compaction_activity' || event.type === 'compaction_start') running.add(A.path);
+    if (event.type === 'compaction_end') running.delete(A.path);
+    resizeFixtureSidebar(running.has(A.path) ? 261 : 260);
+  },
+  switchFixtureSession: (path: string) => {
+    const sessions = useSessionStore.getState();
+    const previous = sessions.activeSessionPath;
+    sessions.setActiveSession(path);
+    store.showCachedSession(path, previous);
+  },
   crowdedDraft: () => {
     const key = readComposerOwnerKey(WORKSPACE);
     useComposerFilesStore.getState().restore(key, {
@@ -140,7 +175,8 @@ export default function WorkbenchLayoutScenario(): ReactElement {
           <Suspense fallback={null}><Titlebar /></Suspense>
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <ModuleRail />
-          <aside data-testid="workbench-sidebar" style={{ width: sidebarWidth, flex: `0 0 ${sidebarWidth}px`, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--gren-sidebar-bg)' }}>
+          <ResizeHandle placement="left" defaultSize={sidebarWidth} minSize={0} maxSize={1200} onResize={setSidebarWidth} backgroundColor="var(--gren-sidebar-bg)">
+          <div data-testid="workbench-sidebar" style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <Sidebar
               runningSessionPaths={running}
               onNewConversation={() => track('new-conversation')}
@@ -153,7 +189,8 @@ export default function WorkbenchLayoutScenario(): ReactElement {
               onRemoveProject={noop}
               onSubmitRename={noop}
             />
-          </aside>
+          </div>
+          </ResizeHandle>
           <main data-testid="workbench-main" style={{ display: 'flex', flex: 1, minWidth: 0, height: '100%' }}>
             <MainChatColumn key={chatGeneration} />
           </main>

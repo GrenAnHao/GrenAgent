@@ -11,7 +11,7 @@ const assistant = (id: string, over: Partial<Extract<ChatMessage, { kind: 'assis
   ...over,
 });
 
-const tool = (id: string, toolName: string, status: 'running' | 'done' | 'error' = 'done'): ChatMessage => ({
+const tool = (id: string, toolName: string, status: 'running' | 'done' | 'error' = 'done'): Extract<ChatMessage, { kind: 'tool' }> => ({
   kind: 'tool',
   id,
   toolCallId: `c-${id}`,

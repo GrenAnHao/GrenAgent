@@ -14,6 +14,11 @@ import {
 } from '../../../extensions/multi-agent/embedded-events.js';
 import { lookupParentHost, __resetParentHostsForTest } from '../../../extensions/multi-agent/parent-host.js';
 import { WorkspaceHandle } from './workspaceHandle.js';
+import { beginGoalOwner, __resetGoalActivationsForTest } from '../../../extensions/goal/status.js';
+import { registerGoalControl, __resetGoalControlsForTest } from '../../../extensions/goal/control.js';
+import { createGoal, readSnapshot } from '../../../extensions/goal/session.js';
+import { occupyGoalRound, releaseGoalRound, __resetGoalAuthForTest } from '../../../extensions/goal/auth.js';
+import { __resetGoalContinueForTest } from '../../../extensions/goal/continue.js';
 
 vi.mock('../../../extensions/multi-agent/activation.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../extensions/multi-agent/activation.js')>();
@@ -25,6 +30,8 @@ function makeSession(id: string) {
   return {
     id,
     sessionId: id,
+    isStreaming: false,
+    sendCustomMessage: vi.fn(async () => {}),
     subscribe: vi.fn((cb: (e: unknown) => void) => { subs.push(cb); return () => { const i = subs.indexOf(cb); if (i >= 0) subs.splice(i, 1); }; }),
     bindExtensions: vi.fn(async (_bindings: {
       mode: string;
@@ -80,6 +87,59 @@ function makeHandle(runtime: unknown, over: Record<string, unknown> = {}) {
   });
   return { handle, onEvent, onFatal, emit };
 }
+
+describe('WorkspaceHandle Goal failure boundary', () => {
+  afterEach(() => {
+    __resetGoalControlsForTest(); __resetGoalActivationsForTest(); __resetGoalAuthForTest(); __resetGoalContinueForTest();
+  });
+  function withGoal() {
+    const { runtime, first } = makeRuntime();
+    const entries: unknown[] = [];
+    const ctx = { cwd: 'D:/proj', sessionManager: { getSessionId: () => 's1', getSessionFile: () => undefined, getEntries: () => entries }, ui: { notify: vi.fn(), setStatus: vi.fn() } };
+    const pi = { appendEntry: (customType: string, data: unknown) => entries.push({ type: 'custom', customType, data }), sendMessage: vi.fn() };
+    beginGoalOwner('s1');
+    registerGoalControl(pi as never, ctx as never);
+    createGoal(pi as never, ctx as never, 'original');
+    return { runtime, first, ctx: ctx as never, entries };
+  }
+  it('Goal: preparation exceptions without normal end messages persist a safe runtime pause', async () => {
+    const f = withGoal();
+    const { handle } = makeHandle(f.runtime, { resolveConfig: async () => { throw new Error('secret-token'); } });
+    await expect(handle.prompt('work', {}, 'main')).rejects.toThrow('secret-token');
+    expect(readSnapshot(f.ctx)).toMatchObject({ status: 'paused', pauseReason: { code: 'runtime-error' } });
+    expect(JSON.stringify(f.entries)).not.toContain('secret-token');
+  });
+  it('Goal: post-acceptance exceptions close only the captured runner despite no SDK end message', async () => {
+    const f = withGoal();
+    const snapshot = readSnapshot(f.ctx)!;
+    occupyGoalRound('s1', { goalId: snapshot.goalId, runNumber: snapshot.runNumber, conditionRevision: snapshot.conditionRevision, round: 1 });
+    const { handle } = makeHandle(f.runtime);
+    f.first.prompt.mockImplementation(async (_text: string, options: { preflightResult: (value: string) => void }) => {
+      options.preflightResult('started');
+      f.first.emit({ type: 'agent_start' });
+      throw new Error('post-run failure');
+    });
+    await expect(handle.prompt('work', {}, 'main')).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(readSnapshot(f.ctx)?.status).toBe('paused'));
+  });
+  it('Goal: a post-run catch after settled cannot pause its replacement runner', async () => {
+    const f = withGoal();
+    const snapshot = readSnapshot(f.ctx)!;
+    const old = occupyGoalRound('s1', { goalId: snapshot.goalId, runNumber: snapshot.runNumber, conditionRevision: snapshot.conditionRevision, round: 1 })!;
+    f.first.prompt.mockImplementation(async (_text: string, options: { preflightResult: (value: string) => void }) => {
+      options.preflightResult('started');
+      f.first.emit({ type: 'agent_start' });
+      f.first.emit({ type: 'agent_settled' });
+      releaseGoalRound('s1', old.roundId);
+      occupyGoalRound('s1', { goalId: snapshot.goalId, runNumber: snapshot.runNumber, conditionRevision: snapshot.conditionRevision, round: 2 });
+      throw new Error('old post-run failure');
+    });
+    const { handle } = makeHandle(f.runtime);
+    await expect(handle.prompt('work', {}, 'main')).resolves.toBeUndefined();
+    await Promise.resolve();
+    expect(readSnapshot(f.ctx)?.status).toBe('active');
+  });
+});
 
 describe('WorkspaceHandle', () => {
   // 很多用例 start 后不 dispose；模块级 sink 表会留着旧 handle，并按“第一个认领”吞掉子会话事件。
@@ -577,8 +637,6 @@ describe('WorkspaceHandle', () => {
     function attachParentFields(session: ReturnType<typeof makeSession>, file = sessionPath) {
       Object.assign(session, {
         sessionFile: file,
-        sendCustomMessage: vi.fn(async () => {}),
-        isStreaming: false,
       });
     }
 
@@ -618,7 +676,7 @@ describe('WorkspaceHandle', () => {
       const msg = { customType: 'subagent-settled', content: 'done', display: true, details: {} };
       const opts = { triggerTurn: true, deliverAs: 'followUp' as const };
       host!.sendMessage(msg, opts);
-      expect((first as { sendCustomMessage: ReturnType<typeof vi.fn> }).sendCustomMessage).toHaveBeenCalledWith(msg, opts);
+      expect(first.sendCustomMessage).toHaveBeenCalledWith(msg, opts);
       await handle.dispose();
     });
 
@@ -676,13 +734,13 @@ describe('WorkspaceHandle', () => {
         expect(host).toBeDefined();
         expect(host?.isDraining()).toBe(true);
         host!.sendMessage(notice, noticeOpts);
-        expect((first as { sendCustomMessage: ReturnType<typeof vi.fn> }).sendCustomMessage).toHaveBeenCalledWith(notice, noticeOpts);
-        expect((second as { sendCustomMessage: ReturnType<typeof vi.fn> }).sendCustomMessage).not.toHaveBeenCalled();
+        expect(first.sendCustomMessage).toHaveBeenCalledWith(notice, noticeOpts);
+        expect(second.sendCustomMessage).not.toHaveBeenCalled();
       });
       const { handle } = makeHandle(runtime);
       await handle.start();
       await handle.switchSession(nextPath);
-      expect(runtime.switchSession.mock.invocationCallOrder[0]).toBeLessThan(drainByParent.mock.invocationCallOrder[0]);
+      expect(runtime.switchSession.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(drainByParent).mock.invocationCallOrder[0]);
       expect(drainByParent).toHaveBeenCalledWith(sessionPath);
       expect(lookupParentHost(sessionPath, 'D:/proj')).toBeUndefined();
       const next = lookupParentHost(nextPath, 'D:/proj');

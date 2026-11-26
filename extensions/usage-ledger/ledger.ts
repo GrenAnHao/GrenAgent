@@ -5,11 +5,15 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "../_shared/sqlite.js";
+import type { CostSource, UsageFilters, UsageReport, WarmUsage } from "./analytics.js";
+import type { CallQuery } from "./analytics.js";
+import { readCallPage, readUsageReport } from "./report.js";
+export type { CostSource, WarmUsage } from "./analytics.js";
 
 /** 一次模型调用。口径与会话 jsonl 里 `type: message`、`role: assistant`、带 `usage` 的条目相同。 */
 export interface LedgerCall {
   sessionId: string;
-  /** ISO 时间；按它的前 10 位分日（UTC 日期，与旧扫描一致）。 */
+  /** ISO 时间；桌面查询按本机自然日切分。 */
   timestamp: string | null;
   provider: string;
   model: string;
@@ -31,9 +35,6 @@ export interface LedgerCall {
   canonicalKey?: string;
 }
 
-export type CostSource = "provider" | "catalog" | "unknown";
-export interface WarmUsage { sessionId:string; entryId:string; timestamp:string; kind:"cache_warm"; provider:string; attributedModel:string; input:number; output:number; cacheRead:number; cacheWrite:number; totalTokens:number; cost:number; costSource:CostSource }
-
 export interface LedgerSession {
   id: string;
   path: string | null;
@@ -44,17 +45,7 @@ export interface LedgerSession {
 
 export type LedgerSource = "live" | "import";
 
-export interface LedgerReport {
-  totals: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: number; sessions: number; messages: number; cacheHitRate: number };
-  byDay: Array<{ date: string; tokens: number; cost: number }>;
-  byModel: Array<{ provider: string; model: string; tokens: number; cost: number; messages: number }>;
-  byProject: Array<{ cwd: string; name: string | null; tokens: number; cost: number; sessions: number }>;
-  recentSessions: Array<{ id: string; name: string | null; cwd: string | null; path: string; timestamp: string | null; tokens: number; cost: number }>;
-  warmingTotals: {cost:number;messages:number;totalTokens:number};
-  warmingCalls: WarmUsage[];
-  recordedCost: {assistantCost:number;warmingCost:number;totalCost:number;sourceBreakdown:Record<CostSource,number>};
-  calls: Array<{ responseModel:string|null;costSource:CostSource; timestamp: string | null; provider: string; model: string; input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: number }>;
-}
+export type LedgerReport = Required<UsageReport>;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS calls (
@@ -84,7 +75,7 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
--- 按 日 × 会话 × 模型 汇总，报表只扫这张表（本机 4.7 万次调用对应几千行）。
+-- 按 日 × 会话 × 模型 汇总，保留写入时 UTC 聚合；本地日查询须读原始时间戳。
 -- 由 calls 的插入触发器维护，和记账是同一条语句、同一个事务；别的进程写账也一样。
 CREATE TABLE IF NOT EXISTS rollup (
   day TEXT NOT NULL,
@@ -207,7 +198,7 @@ export class UsageLedger {
   }
 
   /** 会话信息：已知的字段不会被 null 覆盖。 */
-  upsertSession(session: LedgerSession): void {
+  upsertSession(session: LedgerSession, options: { onlySamePath?: boolean } = {}): void {
     this.database
       .prepare(
         `INSERT INTO sessions (id, path, cwd, started_at, name) VALUES (?, ?, ?, ?, ?)
@@ -215,9 +206,20 @@ export class UsageLedger {
            path = COALESCE(excluded.path, sessions.path),
            cwd = COALESCE(excluded.cwd, sessions.cwd),
            started_at = COALESCE(sessions.started_at, excluded.started_at),
-           name = COALESCE(excluded.name, sessions.name)`,
+           name = COALESCE(excluded.name, sessions.name)
+         WHERE ? OR sessions.path = excluded.path`,
       )
-      .run(session.id, session.path, session.cwd, session.startedAt, session.name);
+      .run(session.id, session.path, session.cwd, session.startedAt, session.name, options.onlySamePath ? 0 : 1);
+  }
+
+  /**
+   * 会话项目归属变化（跨项目移动）：只改已登记行的 cwd / path，不新增行、不动 calls 与 rollup。
+   * 返回是否真的改了；调用方的可信迁移 owner 负责校验 ID 与物理路径不变。
+   */
+  setSessionLocation(location: { id: string; path?: string | null; cwd: string }): boolean {
+    return Number(this.database
+      .prepare('UPDATE sessions SET cwd = ?, path = COALESCE(?, path) WHERE id = ?')
+      .run(location.cwd, location.path ?? null, location.id).changes) > 0;
   }
 
   /** 一批写入放进一个事务；导入几万行时比逐条提交快两个数量级。 */
@@ -243,85 +245,23 @@ export class UsageLedger {
     this.database.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
   }
 
-  report(): LedgerReport {
+  calls(query: CallQuery, options: {worksDir: string | string[]; now?: Date}) {
     const db = this.database;
-    const t = db
-      .prepare(
-        `SELECT COALESCE(SUM(input), 0) AS input, COALESCE(SUM(output), 0) AS output, COALESCE(SUM(cache_read), 0) AS cacheRead,
-                COALESCE(SUM(cache_write), 0) AS cacheWrite, COALESCE(SUM(total_tokens), 0) AS totalTokens, COALESCE(SUM(cost), 0) AS cost,
-                COALESCE(SUM(messages), 0) AS messages, COUNT(DISTINCT session_id) AS sessions
-         FROM rollup`,
-      )
-      .get() as Record<string, number>;
-    const totals = {
-      input: num(t.input), output: num(t.output), cacheRead: num(t.cacheRead), cacheWrite: num(t.cacheWrite),
-      totalTokens: num(t.totalTokens), cost: num(t.cost), sessions: num(t.sessions), messages: num(t.messages), cacheHitRate: 0,
-    };
-    totals.cacheHitRate = totals.input + totals.cacheRead ? totals.cacheRead / (totals.input + totals.cacheRead) : 0;
-
-    const byDay = (db
-      .prepare(
-        `SELECT day AS date, SUM(total_tokens) AS tokens, SUM(cost) AS cost
-         FROM rollup WHERE day <> '' GROUP BY day ORDER BY day`,
-      )
-      .all() as Array<Record<string, unknown>>).map((r) => ({ date: String(r.date), tokens: num(r.tokens), cost: num(r.cost) }));
-
-    const byModel = (db
-      .prepare(
-        `SELECT provider, model, SUM(total_tokens) AS tokens, SUM(cost) AS cost, SUM(messages) AS messages
-         FROM rollup GROUP BY provider, model ORDER BY tokens DESC`,
-      )
-      .all() as Array<Record<string, unknown>>).map((r) => ({ provider: String(r.provider), model: String(r.model), tokens: num(r.tokens), cost: num(r.cost), messages: num(r.messages) }));
-
-    // 项目名沿用旧口径：这个目录下最早一个有名字的会话标题（渲染层会再按侧栏命名覆盖）。
-    const byProject = (db
-      .prepare(
-        `SELECT s.cwd AS cwd, SUM(r.total_tokens) AS tokens, SUM(r.cost) AS cost, COUNT(DISTINCT r.session_id) AS sessions,
-                (SELECT s2.name FROM sessions s2 WHERE s2.cwd = s.cwd AND s2.name IS NOT NULL ORDER BY s2.started_at LIMIT 1) AS name
-         FROM rollup r JOIN sessions s ON s.id = r.session_id
-         WHERE s.cwd IS NOT NULL
-         GROUP BY s.cwd ORDER BY tokens DESC`,
-      )
-      .all() as Array<Record<string, unknown>>).map((r) => ({ cwd: String(r.cwd), name: str(r.name), tokens: num(r.tokens), cost: num(r.cost), sessions: num(r.sessions) }));
-
-    const recentSessions = (db
-      .prepare(
-        `SELECT s.id AS id, s.name AS name, s.cwd AS cwd, s.path AS path, s.started_at AS timestamp, a.tokens AS tokens, a.cost AS cost
-         FROM (SELECT session_id, SUM(total_tokens) AS tokens, SUM(cost) AS cost FROM rollup GROUP BY session_id) a
-         JOIN sessions s ON s.id = a.session_id
-         WHERE s.path IS NOT NULL
-         ORDER BY s.started_at DESC LIMIT 50`,
-      )
-      .all() as Array<Record<string, unknown>>).map((r) => ({
-        id: String(r.id), name: str(r.name), cwd: str(r.cwd), path: String(r.path), timestamp: str(r.timestamp), tokens: num(r.tokens), cost: num(r.cost),
-      }));
-
-    const calls = (db
-      .prepare(
-        `SELECT ts AS timestamp, provider, model, response_model AS responseModel, cost_source AS costSource, input, output, cache_read AS cacheRead, cache_write AS cacheWrite, total_tokens AS totalTokens, cost
-         FROM calls ORDER BY ts DESC LIMIT 500`,
-      )
-      .all() as Array<Record<string, unknown>>).map((r) => ({
-        responseModel:str(r.responseModel),costSource:(r.costSource === "provider" || r.costSource === "catalog" ? r.costSource : "unknown") as CostSource,
-        timestamp: str(r.timestamp), provider: String(r.provider), model: String(r.model),
-        input: num(r.input), output: num(r.output), cacheRead: num(r.cacheRead), cacheWrite: num(r.cacheWrite), totalTokens: num(r.totalTokens), cost: num(r.cost),
-      }));
-
-    const warmingCalls=(db.prepare('SELECT * FROM aux_usage ORDER BY ts DESC LIMIT 500').all() as Array<Record<string,unknown>>).map(r=>({sessionId:String(r.session_id),entryId:String(r.entry_id),timestamp:String(r.ts),kind:'cache_warm' as const,provider:String(r.provider),attributedModel:String(r.attributed_model),input:num(r.input),output:num(r.output),cacheRead:num(r.cache_read),cacheWrite:num(r.cache_write),totalTokens:num(r.total_tokens),cost:num(r.cost),costSource:r.cost_source as CostSource}));
-    const wt=db.prepare('SELECT COALESCE(SUM(cost),0) AS cost,COUNT(*) AS messages,COALESCE(SUM(total_tokens),0) AS totalTokens FROM aux_usage').get() as Record<string,number>;
-    const warmingTotals={cost:num(wt.cost),messages:num(wt.messages),totalTokens:num(wt.totalTokens)};
-    const sourceBreakdown:Record<CostSource,number>={provider:0,catalog:0,unknown:0};
-    for(const r of db.prepare("SELECT COALESCE(cost_source,'unknown') AS source,SUM(cost) AS cost FROM calls GROUP BY cost_source UNION ALL SELECT cost_source AS source,SUM(cost) AS cost FROM aux_usage GROUP BY cost_source").all() as Array<{source:CostSource;cost:number}>) sourceBreakdown[r.source in sourceBreakdown?r.source:'unknown']+=num(r.cost);
-    return { totals, byDay, byModel, byProject, recentSessions, calls, warmingCalls,warmingTotals,recordedCost:{assistantCost:totals.cost,warmingCost:warmingTotals.cost,totalCost:totals.cost+warmingTotals.cost,sourceBreakdown} };
+    db.exec("SAVEPOINT usage_calls");
+    try { return readCallPage(db, query, options.worksDir, options.now ?? new Date()); }
+    finally { db.exec("RELEASE usage_calls"); }
   }
-}
 
-function num(value: unknown): number {
-  return typeof value === "number" ? value : typeof value === "bigint" ? Number(value) : 0;
-}
-
-function str(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
+  report(filters: UsageFilters = {}, options: { worksDir?: string | string[]; now?: Date } = {}): LedgerReport {
+    const db = this.database;
+    // A report must not mix an older assistant total with a newly committed warm or source breakdown.
+    db.exec("SAVEPOINT usage_report");
+    try {
+      return readUsageReport(db, filters, options.worksDir ?? "", options.now ?? new Date());
+    } finally {
+      db.exec("RELEASE usage_report");
+    }
+  }
 }
 
 const ledgers = new Map<string, UsageLedger>();

@@ -45,7 +45,7 @@ function fail(e: unknown) {
 
 function deliver(snapshot: JobSnapshot, info: JobDoneInfo): void {
   const killed = killedByModel.delete(snapshot.id);
-  if (snapshot.reported || killed || info.awaited || info.cause === "teardown") return;
+  if (snapshot.reported || killed || info.awaited || info.cause === "teardown" || info.cause === "subagent-timeout") return;
   const host = owners.get(snapshot.owner);
   if (!host) return;
   const msg = {

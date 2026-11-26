@@ -67,7 +67,22 @@ export async function executeCodeGraphTool(
     uniqueNodes([focal, ...refs.map(({ node }) => node)]), refs.map(({ edge }) => edge));
 }
 
+const NOISE_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', 'target', '__pycache__']);
+function noisePath(path: string): boolean {
+  const parts = path.replaceAll('\\', '/').split('/');
+  return parts.some((part, i) => part.startsWith('.') || (i < parts.length - 1 && NOISE_DIRS.has(part)));
+}
+function visibleNodeFilter(graph: CodeGraph, hide: unknown) {
+  if (!hide) return () => true;
+  const allowed = new Map<string, boolean>();
+  return (n: Node) => {
+    if (!allowed.has(n.filePath)) allowed.set(n.filePath, !noisePath(n.filePath) && !graph.getFile(n.filePath)?.generated);
+    return allowed.get(n.filePath)!;
+  };
+}
+
 function search(graph: CodeGraph, args: Record<string, unknown>, limit: number): CodeRetrievalResult {
+  const visible = visibleNodeFilter(graph, args.hideIgnored);
   const kinds = collectKinds(args);
   const offset = typeof args.offset === 'number' ? args.offset : 0;
   const mode = typeof args.mode === 'string' ? args.mode : 'search';
@@ -88,7 +103,7 @@ function search(graph: CodeGraph, args: Record<string, unknown>, limit: number):
   } else if (mode === 'segment') {
     const words = Array.isArray(args.words) ? args.words as string[] : query.split(/\s+/).filter(Boolean);
     nodes = graph.getSegmentMatches(words, offset + limit).flatMap((match) => {
-      const node = graph.getNode(match.nodeId);
+      const node = graph.getNodesByName(match.name).find((n) => n.filePath === match.filePath && n.startLine === match.startLine && n.kind === match.kind);
       return node ? [node] : [];
     });
   } else {
@@ -101,9 +116,22 @@ function search(graph: CodeGraph, args: Record<string, unknown>, limit: number):
       ...(offset ? { offset } : {}),
       ...(args.caseSensitive !== undefined ? { caseSensitive: args.caseSensitive === true } : {}),
     };
-    nodes = graph.searchNodes(query, options).map(({ node }) => node);
+    if (args.hideIgnored) {
+      // A page of hidden hits must not crowd a visible symbol out of search.
+      const batch = Math.max(64, limit);
+      const seen = new Set<string>();
+      for (let at = 0; nodes.length < offset + limit; at += batch) {
+        const hits = graph.searchNodes(query, { ...options, limit: batch, offset: at });
+        const previous = seen.size;
+        for (const { node } of hits) {
+          if (!seen.has(node.id) && visible(node)) nodes.push(node);
+          seen.add(node.id);
+        }
+        if (hits.length < batch || previous === seen.size) break;
+      }
+    } else nodes = graph.searchNodes(query, options).map(({ node }) => node);
   }
-  nodes = applyFilters(nodes, args, kinds).slice(offset, offset + limit);
+  nodes = applyFilters(nodes.filter(visible), args, kinds).slice(offset, offset + limit);
   return result('搜索结果', nodes.map(toRow), nodes);
 }
 
@@ -119,8 +147,10 @@ async function explore(graph: CodeGraph, workspace: string, args: Record<string,
     ...(Array.isArray(args.seedNames) ? { seedNames: args.seedNames as string[] } : {}),
   });
   const maxFiles = Math.min(numberArg(args.maxFiles, 12), 200);
+  const visible = visibleNodeFilter(graph, args.hideIgnored);
   const files = new Set<string>();
   const nodes = [...contextView.nodes.values()].filter((node) => {
+    if (!visible(node)) return false;
     if (!files.has(node.filePath) && files.size >= maxFiles) return false;
     files.add(node.filePath);
     return true;
@@ -144,21 +174,48 @@ function listFiles(graph: CodeGraph, workspace: string, args: Record<string, unk
   const pattern = typeof args.pattern === 'string' ? args.pattern.replaceAll('\\', '/') : undefined;
   const files = graph.getFiles().filter((entry) => {
     const name = entry.path.replaceAll('\\', '/');
+    if (args.hideIgnored && (entry.generated || noisePath(name))) return false;
     if (path && name !== path && !name.startsWith(`${path}/`)) return false;
     if (pattern && !matchesGlob(name, pattern)) return false;
     const tail = path ? name.slice(path.length).replace(/^\//, '') : name;
     return args.maxDepth === undefined || tail.split('/').length <= numberArg(args.maxDepth, 1);
-  }).sort((a, b) => a.path.localeCompare(b.path));
-  // 先过滤、排序，再切页：total 是过滤后的总数，调用方据此判断还有没有下一页。
+  });
+  const counts = args.sort === 'references' ? graph.getFileDependentCounts(files.map((f) => f.path)) : undefined;
+  const languages: Record<string, number> = {};
+  const folders = new Map<string, number>();
+  const entries: Array<{ file:string; record?: (typeof files)[number]; fileCount?:number; incoming?:number }> = [];
+  for (const entry of files) {
+    const file = entry.path.replaceAll('\\', '/');
+    if (args.languageCounts) languages[entry.language] = (languages[entry.language] ?? 0) + 1;
+    if (args.format === 'children') {
+      const tail = path ? file.slice(path.length + 1) : file;
+      const split = tail.indexOf('/');
+      if (split >= 0) {
+        const folder = (path ? path + '/' : '') + tail.slice(0, split);
+        folders.set(folder, (folders.get(folder) ?? 0) + 1);
+        continue;
+      }
+    }
+    entries.push({ file, record:entry, incoming:counts?.get(entry.path) });
+  }
+  for (const [file, fileCount] of folders) entries.push({ file, fileCount });
+  entries.sort((a, b) => {
+    if (Boolean(a.record) !== Boolean(b.record)) return a.record ? 1 : -1;
+    if (!a.record && (a.file === 'src' || b.file === 'src')) return a.file === 'src' ? -1 : 1;
+    return (b.incoming ?? 0) - (a.incoming ?? 0)
+      || (args.sort ? a.file.slice(a.file.lastIndexOf('/') + 1).localeCompare(b.file.slice(b.file.lastIndexOf('/') + 1)) : 0)
+      || a.file.localeCompare(b.file);
+  });
   const offset = numberArg(args.offset, 0);
   const end = typeof args.limit === 'number' ? offset + Math.min(args.limit, MAX_FILE_PAGE) : undefined;
-  const rows = files.slice(offset, end).map((entry): CodeRetrievalRow => ({
-    file: entry.path.replaceAll('\\', '/'), kind: 'file',
-    ...(args.includeMetadata !== false ? {
-      snippet: [entry.language, `${entry.nodeCount} 个节点`, entry.generated ? 'generated' : '', `${entry.size} B`].filter(Boolean).join(' · '),
-    } : {}),
-  }));
-  return result('索引文件', rows, [], [], formatFiles(rows, args.format), { page: { offset, total: files.length } });
+  const rows = entries.slice(offset, end).map(({file, record, fileCount, incoming}): CodeRetrievalRow => {
+    if (!record) return {file, kind:'directory', fileCount};
+    return { file, kind:'file', ...(counts ? { incomingFiles:incoming ?? 0 } : {}),
+      ...(args.includeMetadata !== false ? { snippet:[record.language, record.nodeCount + ' 个节点', record.generated ? 'generated' : '', record.size + ' B'].filter(Boolean).join(' · ') } : {}) };
+  });
+  return result('索引文件', rows, [], [], formatFiles(rows, args.format), {
+    page: { offset, total: entries.length }, ...(args.languageCounts ? { languages } : {}),
+  });
 }
 
 function status(graph: CodeGraph): CodeRetrievalResult {

@@ -1,0 +1,31 @@
+library-tests
+Test Files  5 passed (5)
+      Tests  71 passed (71)
+   Start at  14:23:47
+   Duration  63.76s (transform 2.07s, setup 29.73s, import 106.59s, tests 30.35s, environment 6.52s)
+
+final-commands
+Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  14:25:30
+   Duration  60.19s (transform 738ms, setup 11.72s, import 38.63s, tests 7.14s, environment 2.03s)
+
+disk
+Test Files  3 passed (3)
+      Tests  31 passed (31)
+   Start at  14:20:00
+   Duration  11.48s (transform 1.01s, setup 0ms, import 16.24s, tests 1.99s, environment 0ms)
+
+rule
+Test Files  2 passed (2)
+      Tests  19 passed (19)
+   Start at  14:20:00
+   Duration  7.66s (transform 504ms, setup 0ms, import 12.46s, tests 284ms, environment 0ms)
+
+
+生产构建 (npm run build)
+> tsc -p tsconfig.renderer.json --noEmit
+> tsc -p tsconfig.node.json --noEmit --tsBuildInfoFile ./tmp/tsc-node/check.tsbuildinfo
+✓ built in 8.54s
+✓ built in 102ms
+✓ built in 14.72s

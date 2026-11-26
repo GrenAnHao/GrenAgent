@@ -1,0 +1,56 @@
+{
+  "failure": {
+    "persisted": false,
+    "snapshot": {
+      "goalId": "ea82277a-cf45-4933-b7c5-05c651b4bb34",
+      "revision": 2,
+      "condition": "finish",
+      "status": "active",
+      "roundsStarted": 1,
+      "runNumber": 1,
+      "runRoundsStarted": 1,
+      "conditionRevision": 1,
+      "maxRounds": 4,
+      "createdAt": "2026-11-17T07:29:22.855Z",
+      "updatedAt": "2026-11-17T07:29:22.862Z",
+      "ranMs": 0,
+      "runStartedAt": "2026-11-17T07:29:22.855Z"
+    },
+    "error": "GOAL_PAUSE_NOT_PERSISTED"
+  },
+  "stoppedAt": "2026-11-17T07:29:22.863Z",
+  "receipt": {
+    "outcome": "committed",
+    "committedRevision": 4
+  },
+  "events": [
+    {
+      "kind": "pause",
+      "revision": 3,
+      "at": "2026-11-17T07:29:22.863Z",
+      "payload": {
+        "pauseReason": {
+          "code": "request-error",
+          "message": "最终请求失败，请检查连接或供应商设置。"
+        }
+      }
+    },
+    {
+      "kind": "resume",
+      "revision": 4,
+      "at": "2026-11-17T07:29:22.864Z",
+      "payload": {
+        "operationId": "evidence-resume",
+        "controlAction": "resume",
+        "expectedRevision": 2,
+        "expectedConditionRevision": 1,
+        "controlRequest": "{\"operationId\":\"evidence-resume\",\"action\":\"resume\",\"goalId\":\"ea82277a-cf45-4933-b7c5-05c651b4bb34\",\"expectedRevision\":2,\"expectedConditionRevision\":1}",
+        "supersedesConfirmedLoss": {
+          "ownerEpoch": "59b5d7c6-6ddc-4908-a1f7-fb0875a755ff",
+          "roundId": "28cba8a2-c153-4453-a77a-d97a74b0310a",
+          "sequence": 6
+        }
+      }
+    }
+  ]
+}

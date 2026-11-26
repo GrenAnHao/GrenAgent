@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { argumentHint, COMMAND_NAME_RE, parsePromptParams, type PromptParam } from '../../../extensions/prompt-commands/syntax.js';
 import { isSafeFileStem, parseTemplate, promptsDir } from '../../../extensions/prompt-commands/templates.js';
+import { replacePreviewedFile } from './extensionFiles';
 import type { AgentMode } from '../../../extensions/agent-mode/modes.js';
 import {
   globalRulesDir,
   listRuleIds,
   normalizeRuleModes,
+  normalizeRuleGlobs,
   parseRule,
   projectRulesDir,
   type RuleFile,
@@ -46,6 +48,7 @@ export interface SaveRuleInput {
   body: string;
   /** 原始模式名称；saveRule 在写盘前校验、归一化。空数组 / 省略适用全部模式。 */
   modes?: readonly string[];
+  globs?: readonly string[];
 }
 
 function errorText(error: unknown): string {
@@ -80,10 +83,11 @@ function commandMarkdown(description: string, body: string): string {
   return lines.join('\n');
 }
 
-function ruleMarkdown(title: string, enabled: boolean, body: string, modes?: readonly AgentMode[]): string {
+function ruleMarkdown(title: string, enabled: boolean, body: string, modes?: readonly AgentMode[], globs?: readonly string[]): string {
   const lines = ['---', `title: ${JSON.stringify(title)}`, `enabled: ${enabled}`];
   // 没有模式范围时不写这一行：保持旧文件格式，旧版本客户端照常读。
   if (modes && modes.length > 0) lines.push(`modes: [${modes.join(', ')}]`);
+  if (globs?.length) lines.push(`globs: ${JSON.stringify(globs)}`);
   lines.push('---', body, '');
   return lines.join('\n');
 }
@@ -97,16 +101,78 @@ export function ruleIdFromTitle(title: string, taken: ReadonlySet<string>): stri
   return id;
 }
 
+function relativeProject(left: string, right: string) { return relative(left, right) === ''; }
+
 export class PromptLibraryService {
-  constructor(private readonly agentDir: string) {}
+  constructor(private readonly agentDir: string, private readonly projects: () => Promise<string[]> = async () => []) {}
+
+  directory(kind: string, workspace?: string): string {
+    if (kind === 'commands') return resolve(promptsDir(this.agentDir));
+    if (kind === 'rules') return workspace ? projectRulesDir(workspace) : globalRulesDir(this.agentDir);
+    throw new Error('未知的资源目录');
+  }
+
+  private async roots(workspace?: string) {
+    const roots: string[] = [];
+    for (const path of [...(workspace ? [workspace] : []), ...await this.projects()]) {
+      const root = resolve(path);
+      if (!roots.some((entry) => relativeProject(entry, root))) roots.push(root);
+    }
+    return roots;
+  }
+
+  async listLibraryRules(workspace?: string) {
+    const custom = await this.listRules(workspace);
+    const projects = await this.roots(workspace);
+    const builtin = await Promise.all(projects.map(async (project) => {
+      // Same-directory priority in Pi's loadContextFileFromDir. Read only named root files.
+      const names = ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD'];
+      const found = new Set<string>();
+      const rows = [];
+      for (const title of names) {
+        const path = join(project, title);
+        try {
+          const info = await stat(path);
+          if (!info.isFile()) continue;
+          const identity = title.toLowerCase() + ':' + info.dev + ':' + info.ino;
+          if (found.has(identity)) continue;
+          const body = await readFile(path, 'utf8');
+          rows.push({ id: path, scope: 'project' as const, title, path, body, enabled: found.size === 0,
+            builtinProject: project, currentProject: !!workspace && relativeProject(project, workspace), readOnly: !(await lstat(path)).isFile() });
+          found.add(identity);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          rows.push({ id:path, scope:'project' as const, title, path, body:'', enabled:false, error:errorText(error),
+            builtinProject:project, currentProject:!!workspace && relativeProject(project, workspace), readOnly:true });
+        }
+      }
+      return rows;
+    }));
+    return [...custom, ...builtin.flat()];
+  }
+
+  async builtinDirectory(workspace: string, path: string) {
+    const projects = await this.roots(workspace);
+    const root = projects.find((project) => relativeProject(project, dirname(path)));
+    if (!root || !['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD'].includes(basename(path))) {
+      throw new Error('只能访问已关联项目根目录中的指令文件');
+    }
+    return root;
+  }
+
+  async saveBuiltin(workspace: string, path: string, original: string, content: string) {
+    await this.builtinDirectory(workspace, path);
+    await replacePreviewedFile(path, original, content);
+  }
 
   async listCommands(): Promise<PromptCommandInfo[]> {
     const dir = promptsDir(this.agentDir);
     let names: string[];
     try {
       names = (await readdir(dir)).filter((file) => file.endsWith('.md')).map((file) => file.slice(0, -3));
-    } catch {
-      return [];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
     }
     const commands = await Promise.all(
       names.map(async (name): Promise<PromptCommandInfo> => {
@@ -172,10 +238,11 @@ export class PromptLibraryService {
     const id = keepId ? input.original!.id : ruleIdFromTitle(title, new Set(listRuleIds(dir)));
     const path = join(dir, `${id}.md`);
     const modes = normalizeRuleModes(input.modes ?? []);
+    const globs = normalizeRuleGlobs(input.globs);
     await mkdir(dir, { recursive: true });
-    await writeAtomic(path, ruleMarkdown(title, input.enabled, body, modes));
+    await writeAtomic(path, ruleMarkdown(title, input.enabled, body, modes, globs));
     if (originalPath && !keepId) await rm(originalPath, { force: true });
-    return { id, scope: input.scope, path, title, enabled: input.enabled, body, modes };
+    return { id, scope: input.scope, path, title, enabled: input.enabled, body, modes, ...(globs && { globs }) };
   }
 
   async setRuleEnabled(ref: RuleRef, enabled: boolean, workspace?: string): Promise<void> {
@@ -190,7 +257,7 @@ export class PromptLibraryService {
     const rule = parseRule(ref.id, ref.scope, path, content);
     if (rule.error) throw new Error(`规则文件解析失败：${rule.error}`);
     // 开关只看 enabled，标题 / 正文 / 模式范围原样保留。
-    await writeAtomic(path, ruleMarkdown(rule.title, enabled, normalizeBody(rule.body), rule.modes));
+    await writeAtomic(path, ruleMarkdown(rule.title, enabled, normalizeBody(rule.body), rule.modes, rule.globs));
   }
 
   async deleteRule(ref: RuleRef, workspace?: string): Promise<void> {

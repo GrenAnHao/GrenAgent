@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { decideGoalContinuation } from "./continue.js";
-import type { GoalSnapshot } from "./types.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { commitPendingGoalPause, decideGoalContinuation, goalRunUnavailable, reportGoalRunFailure, __resetGoalContinueForTest } from "./continue.js";
+import { __resetGoalActivationsForTest, beginGoalOwner, getGoalOwnerStoppedAt } from "./status.js";
+import { createGoal, readSnapshot } from "./session.js";
+import type { GoalEvent, GoalSnapshot } from "./types.js";
+
+afterEach(() => { __resetGoalContinueForTest(); __resetGoalActivationsForTest(); });
 
 function snap(over: Partial<GoalSnapshot> = {}): GoalSnapshot {
   return {
@@ -9,6 +13,9 @@ function snap(over: Partial<GoalSnapshot> = {}): GoalSnapshot {
     condition: "写完",
     status: "active",
     roundsStarted: 1,
+    runNumber: 1,
+    runRoundsStarted: 1,
+    conditionRevision: 1,
     maxRounds: 256,
     createdAt: "2026-09-13T00:00:00.000Z",
     updatedAt: "2026-09-13T00:00:00.000Z",
@@ -16,6 +23,39 @@ function snap(over: Partial<GoalSnapshot> = {}): GoalSnapshot {
     ...over,
   };
 }
+
+describe("trusted failure-pause repair", () => {
+  it("keeps the original failure kind, stop instant and crash fence without lifting unavailable", () => {
+    const sessionId = "continue-repair";
+    const entries: Array<{ type: "custom"; customType: "goal"; data: GoalEvent }> = [];
+    let failAppend = false;
+    const pi = { appendEntry: (_type: string, data: GoalEvent) => {
+      if (failAppend) throw new Error("disk unavailable");
+      entries.push({ type: "custom", customType: "goal", data });
+    } };
+    const ctx = { sessionManager: { getSessionId: () => sessionId, getEntries: () => entries },
+      ui: { notify: vi.fn(), setStatus: vi.fn() } };
+    beginGoalOwner(sessionId);
+    createGoal(pi as never, ctx as never, "finish");
+    failAppend = true;
+    const fence = { ownerEpoch: "dead-owner", roundId: "dead-round", sequence: 3 };
+    expect(reportGoalRunFailure(pi as never, ctx as never, { kind: "request-error", confirmedLoss: fence }))
+      .toMatchObject({ persisted: false, error: "GOAL_PAUSE_NOT_PERSISTED" });
+    const stoppedAt = getGoalOwnerStoppedAt(sessionId);
+    expect(stoppedAt).toBeTruthy();
+    failAppend = false;
+
+    expect(commitPendingGoalPause(pi as never, ctx as never)).toBe(true);
+    const pause = entries.at(-1)!.data;
+    expect(pause).toMatchObject({ kind: "pause", revision: 2, at: stoppedAt,
+      payload: { pauseReason: { code: "request-error" }, confirmedLoss: fence } });
+    expect(readSnapshot(ctx as never)?.status).toBe("paused");
+    expect(goalRunUnavailable(sessionId)).toBe("GOAL_PAUSE_NOT_PERSISTED");
+    // Persisted pause or another Goal end cannot be appended twice.
+    expect(commitPendingGoalPause(pi as never, ctx as never)).toBe(true);
+    expect(entries).toHaveLength(2);
+  });
+});
 
 describe("decideGoalContinuation", () => {
   it("does nothing without a snapshot", () => {
@@ -63,7 +103,7 @@ describe("decideGoalContinuation", () => {
     })).toEqual({ action: "none" });
   });
 
-  it("treats abort as a stop, not a pause write", () => {
+  it("keeps decision pure; terminal abort is persisted by onAgentSettled", () => {
     const result = decideGoalContinuation({
       snapshot: snap({ status: "active" }),
       activation: "armed",
@@ -77,20 +117,20 @@ describe("decideGoalContinuation", () => {
 
   it("signals max-rounds when roundsStarted has reached the cap", () => {
     expect(decideGoalContinuation({
-      snapshot: snap({ status: "active", roundsStarted: 3, maxRounds: 3 }),
+      snapshot: snap({ status: "active", roundsStarted: 3, runRoundsStarted: 3, maxRounds: 3 }),
       activation: "armed",
       assistantStops: [{ stopReason: "stop" }],
       alreadyNotifiedMaxRounds: false,
     })).toEqual({ action: "max-rounds" });
   });
 
-  it("returns none when max-rounds was already notified", () => {
+  it("does not treat an earlier notification as persisted pause", () => {
     expect(decideGoalContinuation({
-      snapshot: snap({ status: "active", roundsStarted: 3, maxRounds: 3 }),
+      snapshot: snap({ status: "active", roundsStarted: 3, runRoundsStarted: 3, maxRounds: 3 }),
       activation: "armed",
       assistantStops: [{ stopReason: "stop" }],
       alreadyNotifiedMaxRounds: true,
-    })).toEqual({ action: "none" });
+    })).toEqual({ action: "max-rounds" });
   });
 
   it("reenters on a normal stop with the next round", () => {

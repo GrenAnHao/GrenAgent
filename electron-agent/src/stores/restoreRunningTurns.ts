@@ -15,6 +15,12 @@ export interface RunningTurn {
   workspace: string;
   sessionId?: string;
   sessionPath?: string;
+  isStreaming?: boolean;
+  isCompacting?: boolean;
+  compaction?: { ownerEpoch: string; operationId: string; phase: 'preparing' | 'running'; startedAt: number; sequence: number };
+  contextRevision?: number;
+  ownerEpoch?: string;
+  activitySequence?: number;
 }
 
 /**
@@ -55,6 +61,11 @@ let ticket = 0;
 
 interface SessionRunState {
   isStreaming?: boolean;
+  isCompacting?: boolean;
+  compaction?: RunningTurn['compaction'];
+  contextRevision?: number;
+  ownerEpoch?: string;
+  activitySequence?: number;
   sessionFile?: unknown;
   sessionId?: unknown;
 }
@@ -71,16 +82,21 @@ export async function loadRunningTurns(
   try {
     return await list();
   } catch {
-    if (!activeWorkspace) return [];
+    if (!activeWorkspace) return null;
     try {
       const state = await getState(activeWorkspace);
-      if (state?.isStreaming !== true) return [];
+      if (state?.isStreaming !== true && state?.isCompacting !== true) return [];
       const sessionId = typeof state.sessionId === 'string' ? state.sessionId : undefined;
       const sessionPath = typeof state.sessionFile === 'string' ? state.sessionFile : undefined;
       return [{
         workspace: activeWorkspace,
         ...(sessionId ? { sessionId } : {}),
         ...(sessionPath ? { sessionPath } : {}),
+        isStreaming: state.isStreaming === true, isCompacting: state.isCompacting === true,
+        ...(state.compaction ? { compaction: state.compaction } : {}),
+        ...(state.contextRevision !== undefined ? { contextRevision: state.contextRevision } : {}),
+        ...(state.ownerEpoch ? { ownerEpoch: state.ownerEpoch } : {}),
+        ...(state.activitySequence !== undefined ? { activitySequence: state.activitySequence } : {}),
       }];
     } catch {
       return null;
@@ -102,7 +118,18 @@ export async function restoreRunningTurns(): Promise<void> {
     (workspace) => pi.getState(workspace) as Promise<SessionRunState>,
     useSessionStore.getState().activeWorkspace || null,
   );
-  if (turns == null || mine !== ticket) return;
+  if (mine !== ticket) return;
+  if (turns == null) {
+    // A read failure is not evidence that the host stopped. Keep the last known activity,
+    // but distinguish it from a confirmed live snapshot until an event or retry resolves it.
+    for (const [workspace, before] of epochs) {
+      const store = agentStoreRegistry.get(workspace);
+      if (store?.getStreamEpoch() === before && store.useStore.getState().compacting) {
+        store.useStore.setState({ compactionUnconfirmed: true });
+      }
+    }
+    return;
+  }
 
   const planned = planRunningRestore(turns, epochs, (workspace) => agentStoreRegistry.get(workspace)?.getStreamEpoch());
   const live = new Set(planned.map((turn) => turn.workspace));
@@ -118,11 +145,15 @@ export async function restoreRunningTurns(): Promise<void> {
     // 画面没绑定会话（草稿）时不算在看这份：否则草稿会因为同项目另一个会话在跑而显示停止按钮。
     const viewingThis = !turn.sessionPath || (loaded != null && pathsEquivalent(loaded, turn.sessionPath));
     const current = store.useStore.getState();
-    if (viewingThis && !current.isStreaming) {
+    if (viewingThis) {
       store.useStore.setState({
-        isStreaming: true,
-        runActive: true,
-        ...(current.runStartedAt ? {} : { runStartedAt: restoredRunStartedAt(current.messages) }),
+        isStreaming: turn.isStreaming !== false,
+        runActive: turn.isStreaming !== false,
+        ...(turn.isStreaming !== false && !current.runStartedAt ? { runStartedAt: restoredRunStartedAt(current.messages) } : {}),
+        compacting: turn.isCompacting === true,
+        compactionUnconfirmed: false,
+        compaction: turn.isCompacting ? turn.compaction ?? current.compaction : undefined,
+        ...(turn.contextRevision !== undefined ? { contextRevision: turn.contextRevision } : {}),
       });
     }
     const remembered = sessionState.workspaceSessionPaths[turn.workspace];
@@ -147,8 +178,8 @@ export async function restoreRunningTurns(): Promise<void> {
       turn.workspace === workspace && (!turn.sessionPath || (loaded != null && pathsEquivalent(loaded, turn.sessionPath))),
     );
     if (viewingTurn) continue;
-    if (store.useStore.getState().isStreaming) {
-      store.useStore.setState({ isStreaming: false, runActive: false });
+    if (store.useStore.getState().isStreaming || store.useStore.getState().compacting) {
+      store.useStore.setState({ isStreaming: false, runActive: false, compacting: false, compactionUnconfirmed: false, compaction: undefined });
     }
     if (!live.has(workspace) && workspace in nextPaths) {
       delete nextPaths[workspace];

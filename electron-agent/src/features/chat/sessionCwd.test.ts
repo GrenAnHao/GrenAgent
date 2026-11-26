@@ -68,6 +68,33 @@ function segments(messages: ChatMessage[]): TimelineSegment[] {
   return groupMessages(messages).flatMap((item) => (item.kind === 'turn' ? item.segments : []));
 }
 
+describe('transferred session directory segments', () => {
+  it('keeps branch-local sources instead of inheriting the last visible cd', () => {
+    const turn = segments([
+      assistant('transfer-source'),
+      tool('branch-a-cd', 'working_directory', {}, { details: { cwd: 'D:/source/branch-a' } }, { sourceCwd: 'D:/source' }),
+      tool('branch-a-ref', 'present', { files: [{ path: 'same.md' }] }, { details: { files: [{ path: 'same.md' }] } }, { sourceCwd: 'D:/source/branch-a' }),
+      tool('branch-b-ref', 'present', { files: [{ path: 'same.md' }] }, { details: { files: [{ path: 'same.md' }] } }, { sourceCwd: 'D:/source/branch-b' }),
+    ]);
+    const files = presentedForTurn(turn);
+    expect(files.map(file => resolveSessionFile('D:/target', file.cwd, file.path)?.absolute)).toEqual([
+      'D:/source/branch-a/same.md', 'D:/source/branch-b/same.md',
+    ]);
+  });
+  it('does not carry an old transferred cwd into a new target tool', () => {
+    const turn = segments([
+      assistant('transfer-target'),
+      tool('old-cd', 'working_directory', {}, { details: { cwd: 'D:/source/subdir' } }, { sourceCwd: 'D:/source' }),
+      tool('old-ref', 'write', { path: 'same.md' }, undefined, { sourceCwd: 'D:/source/subdir' }),
+      tool('new-ref', 'write', { path: 'same.md' }),
+    ]);
+    const old = turn.find(segment => segment.id === 'old-ref');
+    const fresh = turn.find(segment => segment.id === 'new-ref');
+    expect(old).toHaveProperty('cwd', 'D:/source/subdir');
+    expect(fresh).not.toHaveProperty('cwd');
+  });
+});
+
 describe('session working directory across tool calls (reported session)', () => {
   // 会话头 cwd 是项目目录；模型先把分析脚本用绝对路径写到 E 盘，再 working_directory 切过去，
   // 之后 present / edit 用的相对路径都相对 E 盘。

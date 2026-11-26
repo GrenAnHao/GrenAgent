@@ -1,0 +1,39 @@
+> electron-agent@0.3.0 build
+> npm run typecheck && electron-vite build
+> electron-agent@0.3.0 typecheck
+> npm run typecheck:renderer && npm run typecheck:main
+> electron-agent@0.3.0 typecheck:renderer
+> tsc -p tsconfig.renderer.json --noEmit
+> electron-agent@0.3.0 typecheck:main
+> tsc -p tsconfig.node.json --noEmit --tsBuildInfoFile ./tmp/tsc-node/check.tsbuildinfo
+out-pkg/main/main.jsc                                                                     1,368.21 kB
+✓ built in 5.86s
+out-pkg/preload/preload.js         3.75 kB
+✓ built in 57ms
+out-pkg/renderer/index.html                                                  13.75 kB
+✓ built in 8.08s
+exit 0
+
+[main-tests]
+> node scripts/test-codegraph.mjs --maxWorkers=3 electron/agent/completeAskUser.test.ts electron/app/agentDataService.test.ts electron/app/mcpConfigService.test.ts electron/app/codeGraph/codeGraphHostClient.test.ts electron/app/sourceCodeProtection.test.ts electron/browser/webviewPopup.test.ts electron/main.config.test.ts electron/tencentdb/parentGuard.test.ts electron/ipc/register.test.ts
+ Test Files  9 passed (9)
+      Tests  108 passed (108)
+exit 0
+
+[contracts-tests]
+> node scripts/test-codegraph.mjs --maxWorkers=2 electron/agentData/threadStore.test.ts electron/agentData/threadRpc.test.ts electron/agentData/runtime.test.ts src/features/chat/input/recentTurn.test.ts src/features/chat/steerAbort.test.ts src/features/chat/SessionWorkflowPanel.test.tsx src/features/fileExplorer/useOpenFile.test.ts src/features/dock/browser/BrowserBody.test.tsx src/features/extensions/McpWorkbench.test.tsx src/features/tools/StreamingCodeView.test.tsx
+ Test Files  10 passed (10)
+      Tests  76 passed (76)
+exit 0
+
+[extensions-tests]
+node node_modules/vitest/vitest.mjs run --maxWorkers=2 mcp/index.test.ts mcp/manager.test.ts multi-agent/worker-session.test.ts _shared/sandbox/operations.test.ts prompt-metadata.test.ts
+ Test Files  5 passed (5)
+      Tests  148 passed (148)
+exit 0
+
+[fixture-tests]
+> node scripts/test-codegraph.mjs --maxWorkers=2 electron/tencentdb/parentGuard.test.ts src/features/chat/input/actions/composerPreferences.test.ts src/features/chat/input/editor/useTauriFileDrop.test.ts src/features/dock/browser/BrowserBody.test.tsx
+ Test Files  4 passed (4)
+      Tests  88 passed (88)
+exit 0

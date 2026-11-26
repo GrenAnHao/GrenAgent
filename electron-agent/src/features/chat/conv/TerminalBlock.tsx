@@ -61,6 +61,7 @@ const styles = createStaticStyles(({ css }) => ({
     gap: 8px;
     min-width: 0;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 18px;
   `,
@@ -100,6 +101,7 @@ const styles = createStaticStyles(({ css }) => ({
     max-height: ${OUTPUT_MAX_HEIGHT}px;
     padding: 12px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 18px;
     color: ${cssVar.colorTextSecondary};
@@ -110,6 +112,7 @@ const styles = createStaticStyles(({ css }) => ({
   placeholder: css`
     padding: 12px;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 18px;
     color: ${cssVar.colorTextTertiary};

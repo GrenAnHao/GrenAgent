@@ -49,7 +49,7 @@ describe('codegraph task routing', () => {
       model: { describe: async () => 'stub', complete: async () => '' },
       codeGraph: {
         projects: () => [],
-        status: async (workspace: string) => ({ workspace, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.2', state: 'indexed' as const }),
+        status: async (workspace: string) => ({ workspace, connected: true, indexed: true, sdkAvailable: true, sdkVersion: '1.6.4', state: 'indexed' as const }),
         search: async (workspace: string) => ({ workspace, available: true, results: [] }),
         call: async () => ({ content: [], isError: false, structuredContent: { schemaVersion: 1 as const, rows: [], nodes: [], edges: [] } }),
         runSync: async (_id: string, workspace: string) => { runs.push(workspace); },
@@ -82,8 +82,13 @@ describe('codegraph task routing', () => {
       const second = await runtime.requestAdmin<{ id: string }>('admin.jobs.create', { kind: 'codegraph.sync', workspace: 'D:/repo' });
       expect(second.id).toBe(first.id);
       expect(runs).toHaveLength(1);
+      tasks.stage(first.id, '解析代码', { processed: 1240, total: 3062 });
+      const status = (workspace: string) => runtime.requestAdmin('codeRetrieval.admin.status', { workspace });
+      await expect(status('D:/repo')).resolves.toMatchObject({ manualTask: { id:first.id, state:'running', processed:1240, total:3062 } });
+      expect(await status('D:/other')).not.toHaveProperty('manualTask');
       release();
       await vi.waitFor(() => expect(tasks.get(first.id)?.state).toBe('completed'));
+      await expect(status('D:/repo')).resolves.toMatchObject({ manualTask: { id:first.id, state:'completed' } });
     } finally { runtime.close(); await runtime.waitClosed(); }
   });
 });

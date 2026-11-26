@@ -6,7 +6,7 @@
  *  - 公共文件（入口静态依赖、Provider、主题、配置）→ 全部
  *  - 全局样式文件（公共，但一次通常只改几条规则）→ 按改动落在哪条规则里、规则选择器里的类名被哪些场景的源码用到，缩小范围
  *  - probes/<场景>.mjs → 那个场景；被 probe 引用的共享断言模块 → 引用它的场景
- *  - run.mjs / probe.mjs（harness 自身）→ 全部
+ *  - run.mjs / probe.mjs 与其本地运行时模块（harness 自身）→ 全部
  *  - 渲染层里没人引用的组件 / 样式文件（tsx、jsx、vue、svelte、css）→ 「未覆盖」：该补场景了。
  *    纯 .ts / .js 逻辑文件不提示：它们由单测管，没有场景引用很正常
  *  - 主进程、preload、文档等 harness 看不到的文件 → 忽略
@@ -57,26 +57,32 @@ export function gitChanges(cwd, ref) {
 
 // ——— probe 引用的共享模块 ———
 
-/** 路径键 → 引用它的场景集合。只认相对路径的 import，递归 .mjs/.js */
-function probeImportOwners(harnessDir, scenarios) {
-  const owners = new Map()
+/** 场景 probe 和运行器都是 Node 入口，不在 Vite 的依赖图里。 */
+function localImports(entry) {
+  const dependencies = new Set()
   const importPattern =
     /\bfrom\s*['"](\.{1,2}\/[^'"]+)['"]|\bimport\s*\(\s*['"](\.{1,2}\/[^'"]+)['"]|\bimport\s*['"](\.{1,2}\/[^'"]+)['"]/g
-  for (const name of scenarios) {
-    const seen = new Set()
-    const visit = (file) => {
-      const key = pathKey(file)
-      if (seen.has(key) || !existsSync(file)) return
-      seen.add(key)
-      for (const match of readFileSync(file, 'utf8').matchAll(importPattern)) {
-        const target = resolve(dirname(file), match[1] ?? match[2] ?? match[3])
-        const set = owners.get(pathKey(target)) ?? new Set()
-        set.add(name)
-        owners.set(pathKey(target), set)
-        if (/\.[cm]?js$/.test(target)) visit(target)
-      }
+  const visit = (file) => {
+    const key = pathKey(file)
+    if (dependencies.has(key)) return
+    dependencies.add(key)
+    if (!/\.[cm]?js$/.test(file) || !existsSync(file)) return
+    for (const match of readFileSync(file, 'utf8').matchAll(importPattern)) {
+      visit(resolve(dirname(file), match[1] ?? match[2] ?? match[3]))
     }
-    visit(join(harnessDir, 'probes', `${name}.mjs`))
+  }
+  visit(entry)
+  return dependencies
+}
+
+function probeImportOwners(harnessDir, scenarios) {
+  const owners = new Map()
+  for (const name of scenarios) {
+    for (const key of localImports(join(harnessDir, 'probes', `${name}.mjs`))) {
+      const set = owners.get(key) ?? new Set()
+      set.add(name)
+      owners.set(key, set)
+    }
   }
   return owners
 }
@@ -380,6 +386,7 @@ const NOT_COVERABLE = /\.(test|spec)\.[^.]+$|\.d\.ts$|[\\/]__tests__[\\/]/
  */
 export function selectScenarios({ changed, graph, scenarios, harnessDir, repo }) {
   const probeOwners = probeImportOwners(harnessDir, scenarios)
+  const runnerModules = new Set([...CORE].flatMap((name) => [...localImports(join(harnessDir, name))]))
   const sourceIndex = createSourceIndex(graph)
   const harnessKey = `${pathKey(harnessDir)}/`
   const picked = new Set()
@@ -424,7 +431,7 @@ export function selectScenarios({ changed, graph, scenarios, harnessDir, repo })
       // 路径键在 Windows 上是小写的，文件名要从原始路径取，否则和 depsGraph.mjs 这类文件名对不上
       const inside = relative(harnessDir, file).replace(/\\/g, '/')
       const [first, ...rest] = inside.split('/')
-      if (rest.length === 0 && CORE.has(first)) markAll(name, 'harness 自身')
+      if (runnerModules.has(key) && !ORCHESTRATION.has(first)) markAll(name, 'harness 自身')
       else if (first === 'probes' && rest.length === 1) {
         const scenario = basename(file, extname(file))
         if (scenarios.includes(scenario)) add(name, [scenario])

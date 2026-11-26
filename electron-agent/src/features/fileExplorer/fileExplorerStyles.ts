@@ -139,6 +139,8 @@ export const fileExplorerStyles = createStaticStyles(({ css }) => ({
   `,
   /* 省略号只吃目录部分，文件名不被截。 */
   pathText: css`
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     display: flex;
     flex: 1;
     min-width: 0;

@@ -6,17 +6,17 @@ const ready = { workspace: ws, connected: true, indexed: true, state: 'indexed' 
 describe('codeIndexPresentation', () => {
   it.each([
     [{ workspace: ws, connected: true, indexed: true, state: 'indexed' }, '已索引', undefined, true, 'sync'],
-    [{ workspace: ws, connected: true, indexed: true, state: 'stale' }, '索引过期', 'warning', true, 'sync'],
-    [{ workspace: ws, connected: true, indexed: true, state: 'partial' }, '索引不完整', 'warning', true, 'sync'],
+    [{ workspace: ws, connected: true, indexed: true, state: 'stale' }, '需更新', 'warning', true, 'sync'],
+    [{ workspace: ws, connected: true, indexed: true, state: 'partial' }, '需更新', 'warning', true, 'sync'],
     [{ workspace: ws, connected: true, indexed: true, state: 'failed', message: 'boom' }, '索引失败', 'error', true, 'sync'],
-    [{ workspace: ws, connected: true, indexed: true, state: 'indexing' }, '索引中', 'info', false, 'none'],
+    [{ workspace: ws, connected: true, indexed: true, state: 'indexing' }, '同步中', 'info', false, 'none'],
     [{ workspace: ws, connected: false, indexed: false, state: 'unavailable' }, '未索引', undefined, false, 'build'],
     [{ workspace: ws, connected: false, indexed: false, sdkAvailable: false, state: 'sdk_unavailable' }, 'SDK 不可用', 'error', false, 'none'],
     // 增量同步期间：照常可查，只在标签上说明
     [{ ...ready, phase: 'syncing' }, '同步中', undefined, true, 'sync'],
     [{ ...ready, phase: 'queued' }, '同步中', undefined, true, 'sync'],
     // 全量重建期间 state 是 indexing，不可查
-    [{ ...ready, state: 'indexing', phase: 'rebuilding' }, '索引中', 'info', false, 'none'],
+    [{ ...ready, state: 'indexing', phase: 'rebuilding' }, '同步中', 'info', false, 'none'],
   ] as const)('maps %o', (status, label, banner, canQuery, primary) => {
     const view = codeIndexPresentation({ status, checking: false });
     expect(view.label).toBe(label);
@@ -41,7 +41,7 @@ describe('codeIndexPresentation', () => {
 
   it('warns when the file watcher is unavailable, unless auto sync is turned off', () => {
     const degraded = { ...ready, autoSync: true, watcher: { active: false, degraded: true, reason: 'EMFILE' } };
-    expect(codeIndexPresentation({ checking: false, status: degraded })).toMatchObject({ label: '已索引', banner: { type: 'warning', message: '文件监听不可用（EMFILE），索引不会自动跟上改动，需要时请手动同步', sync: true } });
+    expect(codeIndexPresentation({ checking: false, status: degraded })).toMatchObject({ label: '需更新', banner: { type: 'warning', message: '文件监听不可用（EMFILE），索引不会自动跟上改动，需要时请手动同步', sync: true } });
     expect(codeIndexPresentation({ checking: false, status: { ...degraded, autoSync: false } }).banner).toBeUndefined();
   });
 

@@ -20,6 +20,7 @@ import {ensureLegacyRoster} from "../../extensions/usage-ledger/legacyRoster.js"
 import {attachUsageEntryTracking} from "../../extensions/usage-ledger/liveUsage.js";
 import { attachCacheWarmingControl } from "./cache-warming-control.js";
 import { attachModelCompactionControl } from "./model-compaction-control.js";
+import { sessionProjectTransferContext } from "./session-project-transfer-context.js";
 
 function bareSkillName(name: string): string {
   return name.startsWith("skill:") ? name.slice(6) : name;
@@ -117,9 +118,9 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
       agentDir,
       ...(options.modelRuntime ? { modelRuntime: options.modelRuntime } : {}),
       resourceLoaderOptions: {
-        extensionFactories: getConfigFn("PI_SYSTEM_WORKER") === "1"
-          ? []
-          : [
+        extensionFactories: [
+          sessionProjectTransferContext,
+          ...(getConfigFn("PI_SYSTEM_WORKER") === "1" ? [] : [
               ...filterManagedExtensions(
                 filterExtensionsByProfile(
                   deps.manifestExtensions,
@@ -128,7 +129,8 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
                 allowedJson,
               ).map((x) => x.factory),
               ...(options.extraFactories ?? [createCodemodeExtension(), createToolSearchExtension()]),
-            ],
+            ]),
+        ],
         noContextFiles: getConfigFn("PI_DISABLE_PROJECT_CONTEXT") === "1",
         skillsOverride: (base) => {
           const disabled = disabledSkills(getConfigFn);

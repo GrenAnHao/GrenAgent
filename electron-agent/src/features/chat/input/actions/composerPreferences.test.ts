@@ -1,3 +1,4 @@
+import type { SessionPreferences } from '../../../../lib/sessionPreferences';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { piMock, modelsState } = vi.hoisted(() => ({
@@ -41,7 +42,7 @@ import {
 } from './composerPreferences';
 import { resetSessionPreferencesForTests, useSessionPreferencesStore } from '../../../../stores/sessionPreferencesStore';
 
-const prefs = (patch: Record<string, unknown> = {}) => ({
+const prefs = (patch: Partial<SessionPreferences> = {}): SessionPreferences => ({
   model: { provider: 'anthropic', id: 'm' },
   thinkingLevel: 'medium',
   mode: 'agent',
@@ -77,7 +78,7 @@ beforeEach(() => {
 
 describe('draft preferences', () => {
   it('restores a removed project default mode while keeping the saved draft preferences', async () => {
-    piMock.getSessionDefaults.mockResolvedValue(prefs({ mode: 'brainstorm', thinkingLevel: 'high', fastMode: true, revision: 7 }));
+    piMock.getSessionDefaults.mockResolvedValue({ ...prefs({ thinkingLevel: 'high', fastMode: true, revision: 7 }), mode: 'brainstorm' });
     await ensureComposerPreferences('/ws', 'draft:old');
     expect(useSessionPreferencesStore.getState().get('draft:old')).toMatchObject({
       ownerKey: 'draft:old',
@@ -131,6 +132,26 @@ describe('draft preferences', () => {
     await ensureComposerPreferences('/ws', 'draft:one');
     expect(piMock.getSessionDefaults).not.toHaveBeenCalled();
     expect(useSessionPreferencesStore.getState().peek('draft:one')?.thinkingLevel).toBe('low');
+  });
+
+  it('coalesces concurrent draft initialisation into one defaults read', async () => {
+    // 三个控件同时挂载同一草稿只能发一次 defaults 读：并发无 target 读会在后端
+    // 前景会话锁上互撞出 SESSION_OPERATION_LEASE_BUSY（见 notes 2026-11-20 草稿偏好争用）。
+    let resolveDefaults: (value: unknown) => void = () => {};
+    piMock.getSessionDefaults.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveDefaults = resolve; }),
+    );
+    const all = Promise.all([
+      ensureComposerPreferences('/ws', 'draft:one'),
+      ensureComposerPreferences('/ws', 'draft:one'),
+      ensureComposerPreferences('/ws', 'draft:one'),
+    ]);
+    resolveDefaults(prefs({ revision: 0 }));
+    const results = await all;
+    expect(piMock.getSessionDefaults).toHaveBeenCalledTimes(1);
+    expect(useSessionPreferencesStore.getState().peek('draft:one')).toMatchObject({ mode: 'agent' });
+    // 共享同一在途结果，而不是各自初始化出的三份。
+    expect(new Set(results).size).toBe(1);
   });
 
   it('keeps draft writes local: no setter, no project defaults change', async () => {
@@ -498,7 +519,7 @@ describe('Fast is a per-session preference', () => {
     piMock.getState.mockResolvedValue({ sessionFile: '/ws/a.jsonl', preferences: fastPrefs({ revision: 2 }) });
     await ensureComposerPreferences('/ws', '/ws/a.jsonl');
     expect(useSessionPreferencesStore.getState().peek('/ws/a.jsonl')?.fastMode).not.toBe(true);
-    expect(piMock.getModelFastPreferences).toBeUndefined();
+    expect(piMock).not.toHaveProperty('getModelFastPreferences');
   });
 
   it('rolls a rejected Fast write back to the confirmed value with a visible error', async () => {

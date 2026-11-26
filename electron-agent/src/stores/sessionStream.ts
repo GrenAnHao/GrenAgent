@@ -1,5 +1,5 @@
 import { parsePartialArgs } from '../lib/streamingJson';
-import { saveThinkingDuration } from '../lib/thinkingDurations';
+import { saveThinkingDurations } from '../lib/thinkingDurations';
 import type { AgentEvent } from '../lib/pi';
 import {
   applyEvent,
@@ -38,9 +38,13 @@ export interface SessionStream {
 
 /** 推理结束后把实时计出的时长按消息 timestamp 落盘（供之后从 JSONL 还原时回填）。 */
 export function persistThinkingDurations(state: AgentState): void {
+  saveThinkingDurations(thinkingDurationEntries(state));
+}
+
+function* thinkingDurationEntries(state: AgentState): IterableIterator<[number, number]> {
   for (const m of state.messages) {
     if (m.kind === 'assistant' && m.thinking && m.timestamp != null && m.thinkingDuration != null) {
-      saveThinkingDuration(m.timestamp, m.thinkingDuration);
+      yield [m.timestamp, m.thinkingDuration];
     }
   }
 }
@@ -101,7 +105,8 @@ export function createSessionStream(options: SessionStreamOptions): SessionStrea
       } catch {
         continue;
       }
-      if (ev.type === 'agent_start' || ev.type === 'agent_end' || ev.type === 'agent_settled') {
+      if (ev.type === 'agent_start' || ev.type === 'agent_end' || ev.type === 'agent_settled'
+        || ev.type === 'compaction_activity' || ev.type === 'compaction_start' || ev.type === 'compaction_end') {
         epoch += 1;
       }
       if (ev.type === 'message_end' || ev.type === 'agent_end' || (ev.type === 'compaction_end' && ev.aborted !== true)) {
@@ -139,11 +144,15 @@ export function createSessionStream(options: SessionStreamOptions): SessionStrea
       const previousDelta = previous?.type === 'message_update' && !previous.message
         ? previous.assistantMessageEvent as { type?: string; delta?: unknown; contentIndex?: unknown }
         : undefined;
+      const previousAttempt = (previous as (AgentEvent & { responseAttempt?: { runId: number; attempt: number } }) | undefined)?.responseAttempt;
+      const currentAttempt = (event as AgentEvent & { responseAttempt?: { runId: number; attempt: number } }).responseAttempt;
       if (
         currentDelta && previousDelta &&
         (currentDelta.type === 'text_delta' || currentDelta.type === 'thinking_delta') &&
         previousDelta.type === currentDelta.type &&
         previousDelta.contentIndex === currentDelta.contentIndex &&
+        previousAttempt?.runId === currentAttempt?.runId &&
+        previousAttempt?.attempt === currentAttempt?.attempt &&
         typeof previousDelta.delta === 'string' && typeof currentDelta.delta === 'string'
       ) {
         queue[queue.length - 1] = {

@@ -2,17 +2,25 @@
   "compilerOptions": {
     "composite": true,
     "rootDir": "..",
+    "outDir": "./tmp/tsc-node",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "rewriteRelativeImportExtensions": true,
+    "paths": { "vitest": ["./node_modules/vitest"] },
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "types": ["node", "vitest/globals"]
   },
   "include": [
     "electron.vite.config.ts",
+    "scripts/rendererAssetAliases.ts",
     "electron/**/*.ts",
     "src/lib/usageReport.ts",
+    "src/lib/pi.ts",
+    "src/platform/runtime.ts",
+    "src/lib/sessionStats.ts",
+    "src/features/chat/pendingAskUser.ts",
     "src/features/chat/skillCommandText.ts",
     "../extensions/**/*.ts",
     "../cli/src/**/*.ts"

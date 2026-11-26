@@ -6,6 +6,9 @@ export interface ContextUsage {
 
 export interface SessionStats {
   sessionFile?: string;
+  sessionPath?: string;
+  contextRevision?: number;
+  ownerEpoch?: string;
   sessionId: string;
   userMessages: number;
   assistantMessages: number;
@@ -33,6 +36,8 @@ export interface ContextStats {
   cost: number;
   sessionId: string;
   sessionFile?: string;
+  contextRevision?: number;
+  ownerEpoch?: string;
   userMessages: number;
   assistantMessages: number;
   toolCalls: number;
@@ -62,7 +67,9 @@ export function mapSessionStats(stats: SessionStats): ContextStats {
     tokens: stats.tokens,
     cost: stats.cost,
     sessionId: stats.sessionId,
-    sessionFile: stats.sessionFile,
+    sessionFile: stats.sessionPath ?? stats.sessionFile,
+    contextRevision: stats.contextRevision,
+    ownerEpoch: stats.ownerEpoch,
     userMessages: stats.userMessages,
     assistantMessages: stats.assistantMessages,
     toolCalls: stats.toolCalls,

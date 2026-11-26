@@ -8,13 +8,14 @@ const appendCustomEntry = vi.fn();
 const appendModelChange = vi.fn();
 const sessionCreate = vi.fn((..._args: unknown[]) => undefined);
 const createAgentSessionFromServices = vi.fn();
-const createAgentSessionServicesMock = vi.fn(async () => ({ modelRuntime: { id: "runtime" } }));
+type TestServiceOptions = { resourceLoaderOptions: { extensionFactories: Array<(pi: unknown) => void>; appendSystemPrompt?: string[] } };
+const createAgentSessionServicesMock = vi.fn(async (_opts: TestServiceOptions) => ({ modelRuntime: { id: "runtime" } }));
 const resolveCliModel = vi.fn();
 
 const originalBudgetSessionMethods = new WeakMap<object, { prompt: unknown; dispose: unknown }>();
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  createAgentSessionServices: (...args: unknown[]) => createAgentSessionServicesMock(...args),
+  createAgentSessionServices: (opts: TestServiceOptions) => createAgentSessionServicesMock(opts),
   createAgentSessionFromServices: async (...args: unknown[]) => {
     const created = await createAgentSessionFromServices(...args);
     if (created?.session) originalBudgetSessionMethods.set(created.session, { prompt: created.session.prompt, dispose: created.session.dispose });
@@ -64,7 +65,7 @@ function fakeSession(
   behavior?: { prompt?: ReturnType<typeof vi.fn>; waitForIdle?: ReturnType<typeof vi.fn> },
 ) {
   return {
-    messages: [{ role: "assistant", content: [{ type: "text", text: "child answer" }], stopReason: "stop" }],
+    messages: [{ role: "assistant", content: [{ type: "text", text: "child answer" }], stopReason: "stop" }] as Array<{ role: string; content: string | { type: string; text: string }[]; stopReason?: string }>,
     sessionId: "sa-child",
     model,
     isStreaming: false,
@@ -431,6 +432,38 @@ describe("runEmbeddedSubagent", () => {
     }
   });
 
+  it("marks the first substantive activity as the first response, not the empty launch frame", async () => {
+    const listeners: Array<(event: unknown) => void> = [];
+    const session = fakeSession({ provider: "a", id: "b" });
+    session.subscribe = vi.fn((fn: (event: unknown) => void) => {
+      listeners.push(fn);
+      return () => {};
+    }) as never;
+    session.prompt = vi.fn(async (_t: string, o?: { preflightResult?: (d: unknown) => void }) => {
+      o?.preflightResult?.("started");
+      for (const listener of listeners) {
+        // 空启动帧不算首响应。
+        listener({ type: "message_start", message: { role: "assistant" } });
+      }
+    }) as never;
+    createAgentSessionFromServices.mockResolvedValueOnce({ session });
+    const updates: Array<{ responseStarted?: boolean }> = [];
+    const run = runEmbeddedSubagent({
+      cwd: "/ws", task: "t", agentId: "sa-first", onUpdate: (u) => updates.push(u),
+    });
+    // 等首个进度帧（含空启动帧）出去：此时还没有任何实质活动。
+    for (let i = 0; i < 50 && updates.length === 0; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(updates[0]?.responseStarted).toBe(false);
+    // 思考增量是实质活动：首响应立即可见，不必等最终 output。
+    for (const listener of listeners) {
+      listener({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "想…" } });
+    }
+    await new Promise((r) => setTimeout(r, 30));
+    expect(updates.some((u) => u.responseStarted === true)).toBe(true);
+    const r = await run;
+    expect(r.ok).toBe(true);
+  });
+
   it("omits thinkingLevel when not given", async () => {
     createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
     await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-y" });
@@ -700,7 +733,7 @@ describe("outputSchema", () => {
   function captureFactories() {
     const factories: Array<(pi: unknown) => void> = [];
     let lastAppend: string[] = [];
-    createAgentSessionServicesMock.mockImplementation(async (opts: { resourceLoaderOptions: { extensionFactories: Array<(pi: unknown) => void>; appendSystemPrompt?: string[] } }) => {
+    createAgentSessionServicesMock.mockImplementation(async (opts) => {
       factories.push(...opts.resourceLoaderOptions.extensionFactories);
       lastAppend = opts.resourceLoaderOptions.appendSystemPrompt ?? [];
       return { modelRuntime: { id: "runtime" } };

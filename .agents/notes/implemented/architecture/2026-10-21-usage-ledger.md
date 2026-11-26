@@ -17,12 +17,12 @@ Status: implemented
 新增扩展 `extensions/usage-ledger/`。每条助手消息的 `message_end` 里，如果 `role` 是 `assistant` 且带 `usage`（与旧扫描同一口径），就往 `<agentDir>/usage/ledger.db` 写一行，同一个事务里 upsert 会话信息（id、`getSessionFile()`、cwd、会话头时间、`getSessionName()`）。记账失败只打一行 stderr，不影响对话。
 
 - 注册：`extensions/index.ts` 三张清单，`cli/src/extension-profile.ts` 与 `multi-agent/embedded-runner.ts` 的 `CORE_ALWAYS_ON`。主会话、嵌入式子代理、子进程子代理、命令行 pi 都加载。
-- 时间取记账那一刻的 ISO 时间，和 pi 随后写进 jsonl 的条目时间只差几毫秒；按前 10 位分日（UTC，与旧扫描一致）。
+- 时间取记账那一刻的 ISO 时间，和 pi 随后写进 jsonl 的条目时间只差几毫秒；落盘预汇总按前 10 位分日（UTC），展示另按本地时间切分。
 - 去重键 `callKey`：有 `responseId` 用 `r:<provider>:<responseId>`（全局唯一，分叉复制出来的同一条调用只记一次）；没有就 `t:<sessionId>:<message.timestamp>`；导入时两者都没有再退回条目 id。本机 46,896 条调用全部带 `message.timestamp`，412 条没有 `responseId`，没有重复的 responseId。
 
 ### 账本：SQLite，汇总表由触发器维护
 
-`calls`（键为主键、`INSERT OR IGNORE`）、`sessions`、`meta` 三张表，外加 `rollup`：按 日 × 会话 × provider × 模型 汇总，由 `calls` 的 `AFTER INSERT` 触发器 upsert，和记账是同一条语句、同一个事务，别的进程写账也一样；被去重忽略的插入不触发。报表的总计 / 按日 / 按模型 / 按项目 / 最近会话都只扫 `rollup`，调用明细按 `idx_calls_ts` 取最新 500 条。WAL 模式，`_shared/sqlite.js` 设了 5 秒 `busy_timeout`，多进程并发写靠它排队。
+`calls`（键为主键、`INSERT OR IGNORE`）、`sessions`、`meta` 三张表，外加 `rollup`：按 日 × 会话 × provider × 模型 汇总，由 `calls` 的 `AFTER INSERT` 触发器 upsert，和记账是同一条语句、同一个事务，别的进程写账也一样；被去重忽略的插入不触发。本地日报从原始时间戳按日、会话、渠道、模型分组后计算各维度，保证本地午夜在所有视图中一致。报表继续附最近 500 条调用作预览；明细超出预览时，独立查询按当前时间、项目、供应商和模型先计数，再取每页 20 条，不把全量调用明细发给渲染层。WAL 模式，`_shared/sqlite.js` 设了 5 秒 `busy_timeout`，多进程并发写靠它排队。
 
 `sessions` 的 upsert 用 `COALESCE`：已知字段不会被 null 覆盖，`started_at` 保留第一次写入的值，名字以最新的非空值为准。
 
@@ -34,9 +34,17 @@ Status: implemented
 - `reconcile()`（界面上的「补录」）：扫一遍会话目录，`INSERT OR IGNORE` 补进账本没有的调用，返回补了几条。用于命令行 pi 之外没加载扩展的运行时，或记账上线之前的会话。并发调用共用一次扫描。
 - 导入用 `sessionLineScan` 按 ASCII 标记 `"session_info"` / `"usage"` 找行，只解码命中的行；每个文件一个事务，4 个文件并发，文件之间回到事件循环。导入口径变了就加 `IMPORT_VERSION`，下次打开会重新补录（按键去重，不会重复计数）。
 
+### 报表维度与筛选
+
+时间和项目筛选在账本内执行，先筛再求和、截取明细；不能从最多 500 条明细反算全局。项目身份来自工作目录，不来自可变会话标题；应用管理的独立对话和无工作目录的记录共享「未归属会话 (全局对话)」。最近会话仍展示标题，兼容旧版保存的 JSON 标题。模型占比按标准请求模型跨渠道合并；原始供应商、请求模型与响应模型留在明细，不能把未证实的路由等价当作模型别名。
+
+三张图的 Token 和调用数沿用助手口径；费用维度汇总助手与独立预热的已记录金额，包括供应商报告、目录估算和来源未知三类。页面显示费用来源，不把已记录总额当作供应商结算金额。环形图只折叠排名六名以后的模型；先汇总金额或 Token，再分配整数百分比，保证非空分布总和为 100%。
+
 ### 渲染层
 
-`UsagePanel` 头部多一个「补录」按钮，副标题显示补录结果。最近会话的名字优先取侧栏会话列表（`allSessions`，按路径匹配，之后改过名也对得上），账本里的名字兜底；侧栏列不出来的会话（已删除、子代理会话）不可点击，悬停说明原因。上一次的报表存在模块变量里，切回来先画它。第一次打开的「加载中」写明会导入历史。
+`UsagePanel` 头部保留「补录」并就地显示结果。最近会话的名字优先取侧栏会话列表（`allSessions`，按路径匹配，之后改过名也对得上），账本里的名字兜底；侧栏列不出来的会话（已删除、子代理会话）不可点击，悬停说明原因。只在筛选条件一致时先画缓存；迟到的旧范围数据不能覆盖新的筛选结果。第一次打开的「加载中」写明会导入历史。
+
+桌面会话表搜索、排序要覆盖所选项目和时间内的全部会话摘要，而不是先截取最新 50 个再排名。只在此表请求完整摘要，原查询保留 50 条上限；不读取正文。默认隐藏 Token 和费用均为零的行，点击可用会话复用侧栏的加载/切换流程。趋势及日期筛选按本机自然日查询原始调用和预热时间戳；只重标 UTC 汇总日期虽然便宜，但无法拆开同一 UTC 日内分属两个本地日的调用。保留写入时的 UTC 预汇总，不做历史迁移。环图用中心读数显示当前扇区，不再叠加第二层浮窗。
 
 涉及文件：
 
@@ -64,6 +72,12 @@ Status: implemented
 - **顺手修的**：`cli/src/extension-profile.ts` 的 `CORE_ALWAYS_ON` 原来漏了 `image-limits`，Electron 主会话带插件白名单时不加载它，`cli/src/agent-data-plugins.test.ts` 一直是红的；这次补上，见 [引导大图缩放](../bug-fix/2026-10-20-steer-image-size-limit.md)。
 
 ## Verification
+
+本地午夜切分、顶部浮层、项目滚动及全量调用分页的[封版实测](../../../evidence/2026-11-25-usage-final/REPORT.md)取代下列旧截图中的 UTC 时间段及侧向悬浮。
+
+图表悬停、表格排序与历史跳转见[用量统计交互验收](../../../evidence/2026-11-25-usage-inspection/REPORT.md)，含明暗主题、390px 窄窗以及同项目和跨项目历史正文的 Electron 实测。
+
+用量分析新口径的 [定向验收与截图](../../../evidence/2026-11-25-usage-analytics/REPORT.md) 记录了模型与项目归一、筛选后的费用对账、明暗图表和精确值展示；下列时间与基准测量属于早期账本实现。
 
 结果：通过（单测、真实 SDK 实跑、真实数据对照）；没有在运行中的 Electron 应用里点开验证。证据在 `.agents/evidence/2026-10-21-usage-ledger/`。
 

@@ -16,7 +16,7 @@ const styles = createStaticStyles(({ css }) => ({
  * 代码索引的独立入口。
  *
  * 任务视图下线后不再需要任务监视器：面板自己轮询 `agentData_code_status`，
- * 同步进行中按 1.5s 刷新，回到空闲即停。
+ * 手动任务和自动同步在顶栏按实际阶段更新，空闲项目只做低频只读检查。
  */
 export function CodeIndexWorkspace({ visible, initialProject }: { visible: boolean; initialProject?: string }) {
   return <div className={styles.page}>

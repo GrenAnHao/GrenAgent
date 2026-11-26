@@ -102,6 +102,19 @@ describe('NativeSkillsPanel', () => {
     expect(screen.queryByTestId('skill-skill-4')).toBeNull();
   });
 
+  it('estimates enabled descriptions independently of manual-use wording and SDK metadata', async () => {
+    listSkills.mockResolvedValue([
+      { name:'chinese-code-review', description:'仅在用户显式调用', path:'/a/review', scope:'global' },
+      { name:'manual', description:'excluded', disableModelInvocation:true, path:'/a/manual', scope:'global' },
+      { name:'auto', description:'test', path:'/p/auto', scope:'project' },
+    ]);
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('skill-auto')).toBeTruthy());
+    expect(screen.getByTestId('skill-chinese-code-review')).toHaveTextContent('仅手动 / 调用');
+    expect(screen.getByTestId('skill-auto')).toHaveTextContent('自动按需触发');
+    expect(screen.getByTestId('extension-page-header')).toHaveTextContent('≈ 9 Token');
+  });
+
   it('renders a skill summary as a single line and can switch catalog views', async () => {
     listSkills.mockResolvedValue([
       {

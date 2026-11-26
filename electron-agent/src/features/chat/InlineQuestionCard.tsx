@@ -1,11 +1,10 @@
 import { App } from 'antd';
 import { memo, useEffect, useRef, useState } from 'react';
 import { QuestionSelector } from '../../components/QuestionSelector';
-import { encodeAskUserAnswer, formatAnswers } from '../../components/QuestionSelector/answers';
+import { encodeAskUserAnswer, formatAnswers, selectedVisualReview } from '../../components/QuestionSelector/answers';
 import type { ImageAttachment } from './input/ChatInputContext';
 import {
   completeAskUser,
-  deleteAskUserDraft,
   extensionUiRespond,
   pi,
   writeAskUserDraft,
@@ -28,18 +27,17 @@ function draftImagesToAttachments(
 
 /** 从 ChatMessage 列表取最后一条 running ask_user 的 toolCallId。 */
 function findRunningAskUserToolCallId(messages: ChatMessage[]): string | undefined {
-  let last: string | undefined;
-  for (const m of messages) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]!;
     if (
       m.kind === 'tool' &&
       m.status === 'running' &&
       typeof m.toolName === 'string' &&
       m.toolName.toLowerCase() === 'ask_user'
     ) {
-      last = m.toolCallId;
+      return m.toolCallId;
     }
   }
-  return last;
 }
 
 /**
@@ -48,8 +46,8 @@ function findRunningAskUserToolCallId(messages: ChatMessage[]): string | undefin
 export const InlineQuestionCard = memo(function InlineQuestionCard() {
   const { message } = App.useApp();
   const { workspace, store } = useAgentStoreContext();
-  const messages = store.useStore((s) => s.messages);
   const item = useInlineQuestionStore((s) => s.byWorkspace[workspace]);
+  const toolCallId = store.useStore((s) => item && (item.toolCallId ?? findRunningAskUserToolCallId(s.messages)));
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [customTexts, setCustomTexts] = useState<Record<string, string>>({});
   const [extraText, setExtraText] = useState('');
@@ -58,6 +56,8 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
   const [readyReqId, setReadyReqId] = useState<string | undefined>();
   /** undefined=未取；null=取过但没有；string=sessionFile。随 reqId 重置。 */
   const sessionFileRef = useRef<string | null | undefined>(undefined);
+  const responding = useRef<string | undefined>(undefined);
+  const [pendingReply, setPendingReply] = useState<string | undefined>();
 
   const reqId = item?.id;
   useEffect(() => {
@@ -85,7 +85,6 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
     let cancelled = false;
     void (async () => {
       if (!item || readyReqId !== item.id) return;
-      const toolCallId = item.toolCallId ?? findRunningAskUserToolCallId(messages);
       if (!toolCallId) return;
 
       let sessionPath = item.sessionPath;
@@ -111,7 +110,7 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
         customTexts,
         extraText,
         extraImages: extraImages.map(({ type, mimeType, data }) => ({ type, mimeType, data })),
-      }).catch(() => {});
+      }, sessionPath, item.mode === 'live' ? item.id : undefined).catch(() => {});
     })();
     return () => {
       cancelled = true;
@@ -119,7 +118,7 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
   }, [
     workspace,
     item,
-    messages,
+    toolCallId,
     readyReqId,
     selected,
     customTexts,
@@ -133,6 +132,9 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
   const clear = () => useInlineQuestionStore.getState().clear(workspace, item.id);
 
   const respond = (payload: { value?: string; cancelled?: boolean }) => {
+    if (responding.current === item.id) return;
+    responding.current = item.id;
+    setPendingReply(item.id);
     void (async () => {
       if (item.mode === 'restored') {
         const toolCallId = item.toolCallId ?? item.id;
@@ -155,13 +157,18 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
           type: 'extension_ui_response',
           id: item.id,
           ...payload,
+          ...(toolCallId ? { askUserDraftToolCallId: toolCallId } : {}),
         });
-        await deleteAskUserDraft(workspace).catch(() => {});
         clear();
       } catch (err) {
         message.error(err instanceof Error ? err.message : String(err));
       }
-    })();
+    })().finally(() => {
+      if (responding.current === item.id) {
+        responding.current = undefined;
+        setPendingReply(undefined);
+      }
+    });
   };
 
   const toggle = (qid: string, oid: string, multi: boolean) =>
@@ -175,6 +182,7 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
 
   return (
     <QuestionSelector
+      key={item.id}
       allowExtra={Boolean(data.allowExtra)}
       allowExtraImages={data.allowExtraImages !== false}
       customTexts={customTexts}
@@ -188,6 +196,7 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
           value: encodeAskUserAnswer(
             formatAnswers(data, selected, customTexts, extraText, extraImages.length),
             extraImages,
+            selectedVisualReview(data, selected),
           ),
         })
       }
@@ -196,6 +205,7 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
       onExtraTextChange={setExtraText}
       onSkip={() => respond({ cancelled: true })}
       onToggle={toggle}
+      submitting={pendingReply === item.id}
       questions={data.questions}
       selected={selected}
     />

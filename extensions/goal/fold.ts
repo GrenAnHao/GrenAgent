@@ -4,6 +4,7 @@ import {
   type GoalEvent,
   type GoalEventKind,
   type GoalSnapshot,
+  type GoalPauseReason,
 } from "./types.js";
 
 export function isGoalEventKind(value: unknown): value is GoalEventKind {
@@ -56,7 +57,19 @@ function freezeRun(snapshot: GoalSnapshot, at: string): Pick<GoalSnapshot, "ranM
   return { ranMs: (snapshot.ranMs ?? 0) + extra };
 }
 
+function pauseReason(payload: Record<string, unknown>): GoalPauseReason {
+  const value = payload.pauseReason;
+  const reason = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const code = reason.code;
+  if (code === "request-error" || code === "runtime-error" || code === "max-rounds" || code === "user") {
+    return { code, ...(typeof reason.message === "string" ? { message: reason.message.slice(0, 240) } : {}) };
+  }
+  // Older pauses were manual and had no structured reason.
+  return { code: "user" };
+}
+
 function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalSnapshot | undefined {
+  if (event.kind !== "create" && (!snapshot || event.goalId !== snapshot.goalId || event.revision <= snapshot.revision)) return snapshot;
   switch (event.kind) {
     case "create": {
       if (snapshot !== undefined && snapshot.status !== "complete") return snapshot;
@@ -68,6 +81,9 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
         condition,
         status: "active",
         roundsStarted: 0,
+        runNumber: 1,
+        runRoundsStarted: 0,
+        conditionRevision: 1,
         maxRounds: parseMaxRounds(event.payload.maxRounds),
         createdAt: event.at,
         updatedAt: event.at,
@@ -83,29 +99,48 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
         ...snapshot,
         revision: event.revision,
         condition,
+        conditionRevision: snapshot.conditionRevision + (condition === snapshot.condition ? 0 : 1),
         updatedAt: event.at,
       };
     }
     case "pause": {
-      if (!snapshot || snapshot.status !== "active") return snapshot;
+      if (!snapshot || (snapshot.status !== "active" && snapshot.status !== "paused")) return snapshot;
+      if (snapshot.status === "paused") return { ...snapshot, revision: event.revision, updatedAt: event.at };
       const { runStartedAt: _, ...rest } = snapshot;
       return {
         ...rest,
         revision: event.revision,
         status: "paused",
+        pauseReason: pauseReason(event.payload),
         updatedAt: event.at,
         ...freezeRun(snapshot, event.at),
       };
     }
     case "resume": {
-      if (!snapshot || (snapshot.status !== "paused" && snapshot.status !== "blocked")) return snapshot;
-      const { blockedReason: _, ...rest } = snapshot;
+      if (!snapshot || snapshot.status === "complete") return snapshot;
+      if (snapshot.status === "active") return { ...snapshot, revision: event.revision, updatedAt: event.at };
+      const { blockedReason: _, pauseReason: _pause, ...rest } = snapshot;
       return {
         ...rest,
         revision: event.revision,
         status: "active",
         updatedAt: event.at,
         ranMs: snapshot.ranMs ?? 0,
+        runStartedAt: event.at,
+      };
+    }
+    case "restart": {
+      if (!snapshot || snapshot.status === "complete" || snapshot.runRoundsStarted < snapshot.maxRounds) return snapshot;
+      if (event.payload.runNumber !== snapshot.runNumber + 1) return snapshot;
+      const { blockedReason: _, pauseReason: _pause, ...rest } = snapshot;
+      return {
+        ...rest,
+        revision: event.revision,
+        status: "active",
+        runNumber: snapshot.runNumber + 1,
+        runRoundsStarted: 0,
+        updatedAt: event.at,
+        ...freezeRun(snapshot, event.at),
         runStartedAt: event.at,
       };
     }
@@ -137,13 +172,19 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
     case "clear":
       return undefined;
     case "round": {
-      if (!snapshot) return snapshot;
+      if (!snapshot || snapshot.status !== "active") return snapshot;
       const round = Number(event.payload.round);
-      if (!Number.isInteger(round) || round < 1) return snapshot;
+      if (!Number.isSafeInteger(round) || round <= snapshot.roundsStarted) return snapshot;
+      if (event.payload.runNumber !== undefined && event.payload.runNumber !== snapshot.runNumber) return snapshot;
+      // Legacy events store the cumulative round; retain that meaning even if
+      // an imported history starts with a later round rather than round one.
+      const runRound = snapshot.runRoundsStarted + round - snapshot.roundsStarted;
+      if (event.payload.runRound !== undefined && event.payload.runRound !== runRound) return snapshot;
       return {
         ...snapshot,
         revision: event.revision,
         roundsStarted: round,
+        runRoundsStarted: runRound,
         updatedAt: event.at,
       };
     }
@@ -158,11 +199,7 @@ function applyEpoch(epoch: GoalEvent[], seed: GoalSnapshot | undefined): GoalSna
   const sorted = [...epoch].sort((a, b) => a.revision - b.revision);
   let next = seed;
   for (const event of sorted) {
-    if (event.kind === "clear") {
-      next = undefined;
-    } else {
-      next = applyEvent(next, event);
-    }
+    next = applyEvent(next, event);
   }
   return next;
 }

@@ -44,11 +44,20 @@ function persist(map: DurationMap): void {
 
 /** 记录一条推理时长（timestamp 为 pi 助手消息的 Unix ms）。 */
 export function saveThinkingDuration(timestamp: number, duration: number): void {
-  if (!Number.isFinite(timestamp) || !Number.isFinite(duration) || duration <= 0) return;
+  saveThinkingDurations([[timestamp, duration]]);
+}
+
+export function saveThinkingDurations(entries: Iterable<readonly [number, number]>): void {
   const map = load();
-  const key = String(timestamp);
-  if (map[key] === duration) return;
-  map[key] = duration;
+  let changed = false;
+  for (const [timestamp, duration] of entries) {
+    if (!Number.isFinite(timestamp) || !Number.isFinite(duration) || duration <= 0) continue;
+    const key = String(timestamp);
+    if (map[key] === duration) continue;
+    map[key] = duration;
+    changed = true;
+  }
+  if (!changed) return;
 
   const keys = Object.keys(map);
   if (keys.length > MAX_ENTRIES) {
@@ -64,6 +73,12 @@ export function saveThinkingDuration(timestamp: number, duration: number): void 
 export function getThinkingDuration(timestamp: number | undefined): number | undefined {
   if (timestamp == null || !Number.isFinite(timestamp)) return undefined;
   return load()[String(timestamp)];
+}
+
+/** 一次快照转换只需要读一次 localStorage，而不是每条助手消息都解析。 */
+export function thinkingDurationLookup(): (timestamp: number | undefined) => number | undefined {
+  const map = load();
+  return (timestamp) => timestamp == null || !Number.isFinite(timestamp) ? undefined : map[String(timestamp)];
 }
 
 /** 仅测试用：清空存储与内存兜底。 */

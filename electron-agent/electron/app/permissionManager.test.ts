@@ -33,10 +33,10 @@ describe('PermissionManager', () => {
   it('runs providers in order and preserves the strictest decision', async () => {
     const calls: string[] = [];
     const providers: PermissionProvider[] = [
-      { name: 'approval', evaluate: async () => { calls.push('approval'); return 'allow'; } },
-      { name: 'safety', evaluate: async () => { calls.push('safety'); return 'ask'; } },
-      { name: 'mcp-policy', evaluate: async () => { calls.push('mcp-policy'); return 'deny'; } },
-      { name: 'workspace-trust', evaluate: async () => { calls.push('workspace-trust'); return 'allow'; } },
+      { name: 'approval', evaluate: async () => { calls.push('approval'); return 'allow' as const; } },
+      { name: 'safety', evaluate: async () => { calls.push('safety'); return 'ask' as const; } },
+      { name: 'mcp-policy', evaluate: async () => { calls.push('mcp-policy'); return 'deny' as const; } },
+      { name: 'workspace-trust', evaluate: async () => { calls.push('workspace-trust'); return 'allow' as const; } },
     ];
     const { manager } = await fixture(providers);
 
@@ -45,7 +45,7 @@ describe('PermissionManager', () => {
   });
 
   it('turns an automation ask into a persisted blocked request and resolves it', async () => {
-    const { dataDir, manager } = await fixture([{ name: 'approval', evaluate: async () => 'ask' }]);
+    const { dataDir, manager } = await fixture([{ name: 'approval', evaluate: async () => 'ask' as const }]);
 
     const result = await manager.authorize({ kind: 'web.search', workspace: 'C:/repo', mode: 'automation' }, 'automation');
 
@@ -64,7 +64,7 @@ describe('PermissionManager', () => {
     directories.push(dataDir);
     const manager = new PermissionManager({
       dataDir,
-      providers: [{ name: 'approval', evaluate: async () => 'ask' }],
+      providers: [{ name: 'approval', evaluate: async () => 'ask' as const }],
       resolveProfile: () => 'readonly',
       now: () => 42,
     });

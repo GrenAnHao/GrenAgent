@@ -251,6 +251,74 @@ describe("openWorkerChildSession", () => {
       vi.useRealTimers();
     }
   });
+
+  it("disposeAndWait resolves only after the worker acknowledges, so a transfer cannot race its appends", async () => {
+    const child = nextChild();
+    const handle = await openWorkerChildSession({ cwd: "/ws", task: "t", agentId: "sa-1" }, prepared());
+    // worker 收到 dispose 但不立刻回执：模拟仍在收尾 / 写日志的旧进程。
+    let ack!: () => void;
+    const acked = new Promise<void>((resolve) => {
+      ack = resolve;
+    });
+    child.serve = (method) => {
+      if (method === "dispose") return acked.then(() => null);
+      return null;
+    };
+
+    const session = handle.session as unknown as { disposeAndWait?: (ms?: number) => Promise<{ confirmed: boolean }> };
+    expect(typeof session.disposeAndWait).toBe("function");
+    let settled = false;
+    const waiting = session.disposeAndWait!(1000).then((result) => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(child.sent.filter((m) => m.method === "dispose")).toHaveLength(1);
+    expect(settled).toBe(false);
+
+    ack();
+    await expect(waiting).resolves.toEqual({ confirmed: true });
+  });
+
+  it("disposeAndWait reports unconfirmed on timeout instead of pretending the worker stopped", async () => {
+    const child = nextChild();
+    const handle = await openWorkerChildSession({ cwd: "/ws", task: "t", agentId: "sa-1" }, prepared());
+    child.serve = (method) => (method === "dispose" ? new Promise(() => {}) : null);
+    const session = handle.session as unknown as { disposeAndWait?: (ms?: number) => Promise<{ confirmed: boolean }> };
+    await expect(session.disposeAndWait!(20)).resolves.toEqual({ confirmed: false });
+  });
+
+  it("disposalConfirmed stays false until the ack (or exit) proves the worker stopped", async () => {
+    const child = nextChild();
+    const handle = await openWorkerChildSession({ cwd: "/ws", task: "t", agentId: "sa-1" }, prepared());
+    const session = handle.session as unknown as {
+      disposalConfirmed: boolean;
+      disposeAndWait?: (ms?: number) => Promise<{ confirmed: boolean }>;
+    };
+    expect(session.disposalConfirmed).toBe(false);
+
+    let ack!: () => void;
+    const acked = new Promise<void>((resolve) => {
+      ack = resolve;
+    });
+    child.serve = (method) => (method === "dispose" ? acked.then(() => null) : null);
+    const waiting = session.disposeAndWait!(1000);
+    await Promise.resolve();
+    expect(session.disposalConfirmed).toBe(false);
+    ack();
+    await expect(waiting).resolves.toEqual({ confirmed: true });
+    expect(session.disposalConfirmed).toBe(true);
+  });
+
+  it("disposeAndWait is already confirmed when the worker exited first", async () => {
+    const child = nextChild();
+    const handle = await openWorkerChildSession({ cwd: "/ws", task: "t", agentId: "sa-1" }, prepared());
+    child.exit(0);
+    const session = handle.session as unknown as { disposeAndWait?: (ms?: number) => Promise<{ confirmed: boolean }> };
+    await expect(session.disposeAndWait!(1000)).resolves.toEqual({ confirmed: true });
+    expect(child.sent.some((m) => m.method === "dispose")).toBe(false);
+  });
 });
 
 describe("approvals from a worker child", () => {

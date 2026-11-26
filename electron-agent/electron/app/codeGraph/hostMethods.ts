@@ -1,3 +1,4 @@
+import type { ManualSyncOptions } from './codeGraphEngine';
 import type { IndexProgress } from '@colbymchenry/codegraph';
 import type { CodeRetrievalTool } from '../../agentData/codeRetrievalProtocol';
 import type { MethodHandler } from '../../agentProcess/rpcPeer';
@@ -6,7 +7,7 @@ import type { CodeGraphHostMethod } from './hostContract';
 
 /** CodeGraphThreads 与单线程退路的 CodeGraphService 都满足；同步结果不过线（runSync 只回 null）。 */
 type Engine = Pick<CodeGraphService, 'status' | 'call' | 'search' | 'cancelSync'> & {
-  runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void): Promise<unknown>;
+  runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void, options?: ManualSyncOptions): Promise<unknown>;
 };
 
 function str(params: Record<string, unknown>, key: string): string {
@@ -33,7 +34,7 @@ export function createCodeGraphHostMethods(
       const jobId = str(p, 'jobId');
       tracker.active.add(jobId);
       try {
-        await engine.runSync(jobId, str(p, 'workspace'), (progress) => onProgress(jobId, progress));
+        await engine.runSync(jobId, str(p, 'workspace'), (progress) => onProgress(jobId, progress), p.mode === 'full' ? { mode: 'full' } : undefined);
         return null;
       } finally {
         tracker.active.delete(jobId);

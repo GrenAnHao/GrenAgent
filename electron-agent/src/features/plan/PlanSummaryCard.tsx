@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Button } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../components/WorkbenchButton';
 import { AlertTriangle, ListChecks, PanelRight } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';

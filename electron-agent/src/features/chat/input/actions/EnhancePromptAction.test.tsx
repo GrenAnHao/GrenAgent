@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GoalSnapshot } from '../../../stores/goalStore';
+import type { GoalSnapshot } from '../../../../stores/goalStore';
 
 const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt, abortEnhancePrompt, session } = vi.hoisted(() => ({
   chatInput: {
@@ -11,7 +11,7 @@ const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt, abor
   peekComposerModel: vi.fn(() => ({ provider: 'openai', id: 'gpt' } as { provider: string; id: string } | null)),
   getSettings: vi.fn(() => Promise.resolve({} as Record<string, string>)),
   getState: vi.fn(() => Promise.resolve({} as Record<string, unknown>)),
-  enhancePrompt: vi.fn(() => Promise.resolve({ ok: true, content: '美化' })),
+  enhancePrompt: vi.fn<typeof import('../../../../lib/pi').pi.enhancePrompt>(() => Promise.resolve({ ok: true, content: '美化' })),
   abortEnhancePrompt: vi.fn(() => Promise.resolve()),
   session: {
     messages: [] as Array<{ kind: string; id: string; text: string; thinking?: string; streaming?: boolean; timestamp?: number }>,
@@ -219,7 +219,7 @@ describe('EnhancePromptAction', () => {
   it('cancelled 且 seq 已变则忽略 clear', async () => {
     chatInput.empty = false;
     chatInput.readDraft.mockReturnValue('草稿');
-    let resolveFirst!: (v: unknown) => void;
+    let resolveFirst!: (v: Awaited<ReturnType<typeof enhancePrompt>>) => void;
     enhancePrompt.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
     enhancePrompt.mockResolvedValueOnce({ ok: true, content: '新' });
     render(<EnhancePromptAction />);

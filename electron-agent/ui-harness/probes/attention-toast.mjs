@@ -6,6 +6,7 @@
 const TOAST = (kind) => `[data-testid="attention-toast"][data-kind="${kind}"]`
 const ANY_TOAST = '[data-testid="attention-toast"]'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const nextFrames = (t) => t.js('new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done())))')
 
 const visibleExpr = (sel) =>
   `[...document.querySelectorAll('${sel}')].some((el) => el.checkVisibility({ opacityProperty: true, visibilityProperty: true }))`
@@ -37,7 +38,7 @@ export default async function (t) {
   t.check('Goal 续跑：没有发完成提醒', (await eventsSince(t, mark)).filter((e) => e.startsWith('notify:done')), [])
   t.check('Goal 续跑：没有提示', await t.countVisible(ANY_TOAST), 0)
 
-  // —— 后台会话完成：宽限后出提示，8 秒内自己收起 ——
+  // —— 后台会话完成：宽限走真实定时器，出现后才开始 8 秒的通知倒计时 ——
   mark = (await t.events()).length
   await t.act('finish', 'B')
   t.ok('完成：2.5 秒内出现提示', await t.waitFor(TOAST('done'), 2500))
@@ -53,7 +54,25 @@ export default async function (t) {
     await tokenColorIn(t, TOAST('done'), 'color-bg-elevated')
   )
   await t.shot('done')
-  t.ok('完成：10 秒内自己收起', await t.waitUntil(`!(${visibleExpr(TOAST('done'))})`, 10_000))
+  // 观察真实组件何时进入退出态，而不是把“此时 DOM 仍在做退出动画”误判为尚未关闭。
+  // 观察器先挂好；即使主进程繁忙、错过一帧，也能读到开始关闭时的业务时间。
+  await t.js(`(() => {
+    const notice = document.querySelector('${TOAST('done')}')
+    window.__attentionLeaveAt = null
+    const observer = new MutationObserver(() => {
+      if (!notice.classList.contains('ant-notification-fade-leave')) return
+      window.__attentionLeaveAt = Date.now()
+      observer.disconnect()
+    })
+    observer.observe(notice, { attributes: true, attributeFilter: ['class'] })
+  })()`)
+  await t.clock.advanceBy(7999)
+  await nextFrames(t)
+  t.check('完成：7,999ms 真实帧处理后提示仍可见', await t.countVisible(TOAST('done')), 1)
+  t.check('完成：7,999ms 尚未开始退出', await t.js('window.__attentionLeaveAt'), null)
+  const deadline = await t.clock.advanceBy(1)
+  t.ok('完成：8,000ms 开始退出', await t.waitUntil(`window.__attentionLeaveAt === ${deadline}`, 2000))
+  t.ok('完成：真实退出动画后移除提示', await t.waitUntil(`!document.querySelector('${TOAST('done')}')`, 2000))
 
   // —— 失败：带报错，「前往」打开会话并收起 ——
   mark = (await t.events()).length
@@ -74,8 +93,11 @@ export default async function (t) {
   t.ok('审批：正文是审批标题', ((await t.text(TOAST('approval'))) ?? '').includes('执行 npm publish？'))
   t.ok('审批：标题写「等待批准」', ((await t.text(TOAST('approval'))) ?? '').includes(`${titles.B} · 等待批准`))
   t.ok('审批：任务栏计数变成 1', (await eventsSince(t, mark)).includes('badge:1'))
-  await sleep(9000)
+  await nextFrames(t)
+  await t.clock.advanceBy(9000)
+  await nextFrames(t)
   t.check('审批：9 秒后仍在', await t.countVisible(TOAST('approval')), 1)
+  t.ok('审批：答复前仍可操作', await t.hitTest(`${TOAST('approval')} [data-testid="attention-go"]`))
   await t.act('answer', 'B')
   t.ok('审批：答复后收起', await t.waitUntil(`!(${visibleExpr(TOAST('approval'))})`, 3000))
   t.ok('审批：任务栏计数回到 0', (await eventsSince(t, mark)).includes('badge:0'))

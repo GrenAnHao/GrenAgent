@@ -1,19 +1,19 @@
 import { posix, win32 } from 'node:path';
 
-/** Snapshot of CodeGraph 1.6.2 NODE_KINDS. A protocol test compares this to the SDK export. */
+/** Snapshot of CodeGraph 1.6.4 NODE_KINDS. A protocol test compares this to the SDK export. */
 export const CODEGRAPH_NODE_KINDS = [
   'file', 'module', 'class', 'struct', 'interface', 'trait', 'protocol', 'function', 'method',
   'property', 'field', 'variable', 'constant', 'enum', 'enum_member', 'type_alias', 'namespace',
   'parameter', 'import', 'export', 'route', 'component', 'union',
 ] as const;
 
-/** Snapshot of CodeGraph 1.6.2 EDGE_KINDS. */
+/** Snapshot of CodeGraph 1.6.4 EDGE_KINDS. */
 export const CODEGRAPH_EDGE_KINDS = [
   'contains', 'calls', 'imports', 'exports', 'extends', 'implements', 'references',
   'type_of', 'returns', 'instantiates', 'overrides', 'decorates', 'navigates',
 ] as const;
 
-/** Snapshot of CodeGraph 1.6.2 LANGUAGES. */
+/** Snapshot of CodeGraph 1.6.4 LANGUAGES. */
 export const CODEGRAPH_LANGUAGES = [
   'typescript', 'javascript', 'tsx', 'jsx', 'arkts', 'python', 'go', 'rust', 'java', 'c', 'cpp',
   'csharp', 'razor', 'php', 'ruby', 'swift', 'kotlin', 'dart', 'svelte', 'vue', 'astro', 'liquid',
@@ -22,13 +22,13 @@ export const CODEGRAPH_LANGUAGES = [
 ] as const;
 
 const toolArguments = {
-  codegraph_search: ['query', 'kind', 'kinds', 'languages', 'includePatterns', 'excludePatterns', 'limit', 'offset', 'caseSensitive', 'mode', 'excludePrefix', 'words'],
-  codegraph_explore: ['query', 'maxFiles', 'limit', 'searchLimit', 'traversalDepth', 'maxNodes', 'minScore', 'edgeKinds', 'nodeKinds', 'seedNames'],
+  codegraph_search: ['query', 'kind', 'kinds', 'languages', 'includePatterns', 'excludePatterns', 'limit', 'offset', 'caseSensitive', 'mode', 'excludePrefix', 'words', 'hideIgnored'],
+  codegraph_explore: ['query', 'maxFiles', 'limit', 'searchLimit', 'traversalDepth', 'maxNodes', 'minScore', 'edgeKinds', 'nodeKinds', 'seedNames', 'hideIgnored'],
   codegraph_callers: ['symbol', 'file', 'limit', 'depth'],
   codegraph_callees: ['symbol', 'file', 'limit', 'depth'],
   codegraph_impact: ['symbol', 'file', 'depth', 'limit'],
   codegraph_node: ['symbol', 'file', 'includeCode', 'offset', 'limit', 'symbolsOnly', 'line', 'depth', 'includeMetrics'],
-  codegraph_files: ['path', 'pattern', 'format', 'includeMetadata', 'maxDepth', 'limit', 'offset'],
+  codegraph_files: ['path', 'pattern', 'format', 'includeMetadata', 'maxDepth', 'limit', 'offset', 'hideIgnored', 'sort', 'languageCounts'],
   codegraph_status: [],
   codegraph_usages: ['symbol', 'file', 'limit', 'line'],
   codegraph_path: ['from', 'to', 'fromFile', 'toFile', 'edgeKinds', 'limit'],
@@ -53,7 +53,7 @@ const LANGUAGE_SET = new Set<string>(CODEGRAPH_LANGUAGES);
 const SEARCH_MODES = new Set(['search', 'prefix', 'substring', 'kind', 'name', 'segment']);
 const DEPS_DIRECTIONS = new Set(['dependencies', 'dependents', 'both']);
 const TRAVERSE_DIRECTIONS = new Set(['outgoing', 'incoming', 'both']);
-const FILE_FORMATS = new Set(['tree', 'flat', 'grouped']);
+const FILE_FORMATS = new Set(['tree', 'flat', 'grouped', 'children']);
 const CONTEXT_FORMATS = new Set(['markdown', 'json']);
 const QUERY_OPTIONAL = new Set(['codegraph_files', 'codegraph_status', 'codegraph_changed', 'codegraph_cycles', 'codegraph_dead_code', 'codegraph_routes']);
 const SYMBOL_TOOLS = new Set(['codegraph_callers', 'codegraph_callees', 'codegraph_impact', 'codegraph_usages', 'codegraph_hierarchy', 'codegraph_call_graph', 'codegraph_metrics']);
@@ -107,7 +107,8 @@ export function validateCodeRetrievalArgs(workspace: string, tool: CodeRetrieval
       throw new Error('minScore must be a number between 0 and 1');
     }
   }
-  for (const key of ['includeCode', 'symbolsOnly', 'includeMetadata', 'caseSensitive', 'excludePrefix', 'includeStart', 'includeMetrics']) {
+  if (args.sort !== undefined && args.sort !== 'name' && args.sort !== 'references') throw new Error('Invalid file sort');
+  for (const key of ['includeCode', 'symbolsOnly', 'includeMetadata', 'caseSensitive', 'excludePrefix', 'includeStart', 'includeMetrics', 'hideIgnored', 'languageCounts']) {
     if (args[key] !== undefined && typeof args[key] !== 'boolean') throw new Error(`${key} must be a boolean`);
   }
 

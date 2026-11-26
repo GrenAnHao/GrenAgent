@@ -20,6 +20,8 @@ import { SessionUiAdapter, type UiEnvelope } from "../../electron-agent/electron
 import { toRendererEvent } from "../../electron-agent/electron/agent/streamingEvent.js";
 import { adaptPiEvent } from "../../electron-agent/electron/pi/eventAdapter.js";
 import headerPlaceholders from "../header-placeholders/index.js";
+import { defaultLedgerPath, sharedLedger } from "../usage-ledger/ledger.js";
+import { sharedOriginRegistry } from "../usage-ledger/originRegistry.js";
 import { sessionCwdController } from "./session-cwd.js";
 import { batchToolRefresh } from "./tool-refresh-batch.js";
 
@@ -41,6 +43,10 @@ async function fixture(extraFactories: ExtensionFactory[] = []) {
   const agentDir = join(dir, "agent");
   await mkdir(cwd);
   await mkdir(agentDir);
+  cleanups.push(() => {
+    sharedLedger(defaultLedgerPath(agentDir)).close();
+    sharedOriginRegistry(agentDir).close();
+  });
   const requests: Request[] = [];
   const server: Server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];

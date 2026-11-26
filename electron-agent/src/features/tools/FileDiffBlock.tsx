@@ -7,7 +7,7 @@ import { CodeCard } from './CodeCard';
 
 /**
  * lobe 的 getLobeDiffOptions 会用 diffOptions.unsafeCSS 整段换掉自己的主题覆盖，
- * 所以这里带上原来的透明底。横纵滚动都在 diff 的 [data-code] 上，滚动条悬停渐显。
+ * 所以这里带上原来的透明底。横纵滚动都在 diff 的 [data-code] 上，由外层滑块负责拖动。
  * 最大高度可配：会话卡用默认值，「查看改动」弹窗传自己的面板高度。
  */
 const DEFAULT_MAX_HEIGHT = 'min(50vh, 360px)';
@@ -43,21 +43,11 @@ const diffUnsafeCSS = (maxHeight: string) => `
     padding-bottom: 0 !important;
     overflow: auto !important;
     scrollbar-gutter: auto !important;
-    scrollbar-width: thin !important;
-    scrollbar-color: transparent transparent !important;
-    transition: scrollbar-color 180ms ease !important;
-  }
-
-  :host(:hover) [data-code] {
-    scrollbar-color: color-mix(in srgb, CanvasText 42%, transparent) transparent !important;
+    scrollbar-width: none !important;
   }
 
   [data-gutter] {
     backdrop-filter: blur(16px) !important;
-  }
-
-  [data-code] {
-    scrollbar-width: none !important;
   }
 
   [data-code]::-webkit-scrollbar,
@@ -92,26 +82,21 @@ const overlayStyles = createStaticStyles(({ css }) => ({
     position: relative;
     width: 100%;
     min-width: 0;
-
-    &:hover .diff-overlay-thumb {
-      opacity: 1;
-    }
   `,
   dragging: css`
     .diff-overlay-thumb {
-      opacity: 1;
+      background: var(--gren-scrollbar-thumb-hover);
     }
   `,
   thumb: css`
     position: absolute;
     z-index: 2;
     display: none;
-    opacity: 0;
     border-radius: 999px;
-    background: color-mix(in srgb, CanvasText 42%, transparent);
+    background: var(--gren-scrollbar-thumb);
+    &:hover { background: var(--gren-scrollbar-thumb-hover); }
     cursor: default;
     touch-action: none;
-    transition: opacity 180ms ease;
   `,
   y: css`
     top: 32px;

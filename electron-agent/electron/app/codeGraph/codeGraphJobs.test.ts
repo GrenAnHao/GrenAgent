@@ -20,10 +20,12 @@ describe('CodeGraph SDK jobs', () => {
     engine.runSync.mockImplementationOnce(async (_id, _workspace, progress) => {
       const emit = progress as (value: unknown) => void;
       emit({ phase: 'scanning', current: 0, total: 0 });
+      emit({ phase: 'scanning', current: 178, total: 0 });
       emit({ phase: 'resolving', current: 6, total: 5 });
     });
     await jobs.run('job', '/repo');
     expect(callbacks.stage).toHaveBeenCalledWith('job', '扫描文件');
+    expect(callbacks.stage).toHaveBeenCalledWith('job', '扫描文件', 178);
     expect(callbacks.stage).toHaveBeenCalledWith('job', '解析引用');
     expect(callbacks.complete).toHaveBeenCalled();
   });

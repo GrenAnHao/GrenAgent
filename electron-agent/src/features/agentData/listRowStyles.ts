@@ -29,22 +29,24 @@ export const listRowStyles = createStaticStyles(({ css }) => ({
   /** 行标题单行截断；全文在路径行或详情面板。 */
   title: css`
     display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-size: 13px; line-height: 1.5;
+    font-size: var(--gren-font-body); line-height: 1.5;
   `,
   path: css`
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-size: 11px; color: ${cssVar.colorTextTertiary}; line-height: 1.5;
+    font-size: var(--gren-font-caption); color: ${cssVar.colorTextTertiary}; line-height: 1.5;
   `,
   /** 行内次级元信息（行号、类型、snippet）：一条横向紧凑行，snippet 吃掉剩余宽度。 */
   meta: css`
     display: flex; align-items: center; gap: 8px; min-width: 0;
-    font-size: 11px; color: ${cssVar.colorTextTertiary}; line-height: 1.6;
+    font-size: var(--gren-font-caption); color: ${cssVar.colorTextTertiary}; line-height: 1.6;
   `,
   metaItem: css`flex: none; min-width: 0;`,
   kind: css`
     flex: none; padding: 0 6px; border-radius: 4px;
     background: ${cssVar.colorFillTertiary}; color: ${cssVar.colorTextSecondary};
-    font-size: 10px; line-height: 1.7;
+    font-size: var(--gren-font-caption); line-height: 1.7;
   `,
   snippet: css`
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

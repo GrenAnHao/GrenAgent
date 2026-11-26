@@ -5,6 +5,7 @@ import { filterSecretEnv, withGitSafeDirectory } from "./env.js";
 import { isStrictWidening } from "./escalate.js";
 import { SandboxUnavailableError } from "./errors.js";
 import { windowsSystemExe } from "./windows/elevate.js";
+import { lookupWinHelper } from "./provider.js";
 import { isConfined } from "./resolvePreset.js";
 import { isLegacyWslBashPath, resolveBashShell, type BashShell } from "./shellPath.js";
 import type { ConfinedArgv, SandboxExecutionPolicy, SandboxPolicy, SandboxRunFacts } from "./types.js";
@@ -17,13 +18,19 @@ export type SpawnImpl = (
   command: string,
   args: readonly string[],
   options?: SpawnOptions,
-) => Pick<ChildProcess, "pid" | "stdout" | "stderr" | "on" | "kill">;
+) => Pick<ChildProcess, "pid" | "stdout" | "stderr" | "kill"> & {
+  on(event: "error", listener: (error: NodeJS.ErrnoException) => void): void;
+  on(event: "close", listener: (code: number | null) => void): void;
+  on(event: "spawn", listener: () => void): void;
+};
 
 export interface ExecOptions {
   onData?: (data: Buffer) => void;
   signal?: AbortSignal;
   timeout?: number;
   env?: NodeJS.ProcessEnv;
+  /** For owned background drain only. True means the launched process tree has exited. */
+  onExitConfirmed?: (confirmed: boolean) => void;
 }
 
 /**
@@ -41,14 +48,14 @@ export interface SandboxedBashOperations {
 
 export interface SandboxedBashOperationsDeps {
   getPolicy: () => SandboxExecutionPolicy;
-  confine: (argv: string[], policy: SandboxPolicy) => Promise<ConfinedArgv>;
+  confine: (argv: string[], policy: SandboxPolicy, signal?: AbortSignal) => Promise<ConfinedArgv>;
   spawnImpl?: SpawnImpl;
   /** settings.json 的 shellPath（pi 的 SettingsManager.getShellPath）；没有就照 pi 的默认顺序找。 */
   shellPath?: () => string | undefined;
   /** 只为可测性：把 shellPath 解析成壳。生产用 pi 的 getShellConfig。给字符串时按 `-c` 传命令。 */
   resolveShell?: (shellPath: string | undefined) => Promise<BashShell | string> | BashShell | string;
   platform?: NodeJS.Platform;
-  kill?: (pid: number, signal?: NodeJS.Signals) => void;
+  kill?: (pid: number, signal?: NodeJS.Signals | 0) => void;
 }
 
 interface RunResult {
@@ -114,7 +121,7 @@ export function createSandboxedBashOperations(
   deps: SandboxedBashOperationsDeps,
 ): SandboxedBashOperations {
   const spawnImpl: SpawnImpl = deps.spawnImpl
-    ?? ((command, args, options) => defaultSpawn(command, [...args], options));
+    ?? ((command, args, options) => defaultSpawn(command, [...args], options ?? {}));
   const platform = deps.platform ?? process.platform;
   const kill = deps.kill ?? ((pid, signal) => {
     process.kill(pid, signal);
@@ -146,6 +153,7 @@ export function createSandboxedBashOperations(
     options: ExecOptions,
     input?: string,
     msysGroup?: { shell: string; pidFile: string },
+    trackedWindows = false,
   ): Promise<RunResult> {
     if (options.signal?.aborted) {
       if (msysGroup) rmSync(msysGroup.pidFile, { force: true });
@@ -162,6 +170,8 @@ export function createSandboxedBashOperations(
       let pendingAbort = false;
       let timedOut = false;
       let aborted = false;
+      let controlOutput = "";
+      let groupCheck: ReturnType<typeof setInterval> | undefined;
       /** 停止后还在盯 pid 文件：文件交给盯的那边删。 */
       let watchingPidFile = false;
 
@@ -218,6 +228,7 @@ export function createSandboxedBashOperations(
         settled = true;
         options.signal?.removeEventListener("abort", onAbort);
         if (timer) clearTimeout(timer);
+        if (groupCheck) clearInterval(groupCheck);
         // 正常结束就删 pid 文件；停止后由 stopMsysGroup 盯完再删。
         if (msysGroup && !watchingPidFile) rmSync(msysGroup.pidFile, { force: true });
         if (timedOut) {
@@ -238,16 +249,28 @@ export function createSandboxedBashOperations(
 
       const onAbort = () => {
         aborted = true;
+        if (trackedWindows) {
+          const stdin = (child as ChildProcess | undefined)?.stdin;
+          stdin?.end();
+          return;
+        }
         terminate();
-        if (!pendingAbort) finish(null);
+        if (!pendingAbort && !options.onExitConfirmed) finish(null);
       };
 
       child = spawnImpl(argv[0] ?? "", argv.slice(1), {
         cwd,
         env: options.env,
-        stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        stdio: trackedWindows ? ["pipe", "pipe", "pipe", "pipe"] : [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         detached: platform !== "win32",
+        ...(trackedWindows ? { windowsHide: true } : {}),
       });
+      if (trackedWindows) {
+        const proc = child as ChildProcess;
+        proc.stdin?.on("error", () => {});
+        proc.stdio[3]?.on("data", (data: Buffer) => { controlOutput = (controlOutput + data.toString()).slice(0, 32); });
+        proc.stdio[3]?.on("error", () => {});
+      }
       if (input !== undefined) {
         const stdin = (child as Partial<ChildProcess>).stdin;
         stdin?.on("error", () => { /* 进程没读完就退出了 */ });
@@ -256,6 +279,7 @@ export function createSandboxedBashOperations(
 
       child.on("error", (err: NodeJS.ErrnoException) => {
         spawnError = err.code ?? err.message;
+        options.onExitConfirmed?.(false);
         finish(null);
       });
       child.stdout?.on("data", (data: Buffer) => {
@@ -269,13 +293,32 @@ export function createSandboxedBashOperations(
         options.onData?.(decoded);
       });
       child.on("close", (code) => {
-        finish(typeof code === "number" ? code : null);
+        const exitCode = typeof code === "number" ? code : null;
+        const confirmed = options.onExitConfirmed;
+        if (settled) return;
+        if (confirmed && platform !== "win32" && child?.pid !== undefined && aborted) {
+          const pid = child.pid;
+          const checkGroup = () => {
+            try {
+              kill(-pid, 0);
+            } catch (error) {
+              confirmed((error as NodeJS.ErrnoException).code === "ESRCH");
+              finish(exitCode);
+            }
+          };
+          groupCheck = setInterval(checkGroup, 100);
+          groupCheck.unref?.();
+          checkGroup();
+          return;
+        }
+        confirmed?.(trackedWindows && controlOutput === "exit\n");
+        finish(exitCode);
       });
       child.on("spawn", () => {
         if (!pendingAbort) return;
         pendingAbort = false;
         terminate();
-        if (aborted || timedOut) finish(null);
+        if ((aborted || timedOut) && !options.onExitConfirmed) finish(null);
       });
 
       options.signal?.addEventListener("abort", onAbort);
@@ -324,6 +367,13 @@ export function createSandboxedBashOperations(
         return { exitCode: null, sandbox: facts({ runnerFailed: "unavailable", detail: `${detail}\nThe command was not executed.` }) };
       }
       if (!isConfined(policy.mode)) {
+        if (platform === "win32" && options.onExitConfirmed && shell.commandTransport !== "stdin" && !isLegacyWslBashPath(shell.shell)) {
+          const helper = lookupWinHelper({});
+          if (helper) {
+            const result = await run([helper, "--tracked-bash", ...shellArgv(shell, command).argv], cwd, { ...options, env }, undefined, undefined, true);
+            return { exitCode: result.exitCode, sandbox: result.spawnError ? shellFailed(result) : facts() };
+          }
+        }
         const msys = platform === "win32" && shell.commandTransport !== "stdin" && !isLegacyWslBashPath(shell.shell);
         if (!msys) {
           const { argv, input } = shellArgv(shell, command);
@@ -370,7 +420,10 @@ export function createSandboxedBashOperations(
         throw error;
       }
 
-      const result = await run(confined.argv, cwd, { ...options, env: confinedEnv });
+      const trackLogon = platform === "win32" && Boolean(options.onExitConfirmed) && confined.argv[1] === "--logon-user";
+      const result = trackLogon
+        ? await run([confined.argv[0]!, "--track-logon-bash", ...confined.argv.slice(1)], cwd, { ...options, env: confinedEnv }, undefined, undefined, true)
+        : await run(confined.argv, cwd, { ...options, env: confinedEnv });
       forgetShellOnSpawnError(result);
       const kind = attributeRun(result, confined);
       if (kind.kind === "denial") return { exitCode: result.exitCode, sandbox: facts({ denied: true }) };

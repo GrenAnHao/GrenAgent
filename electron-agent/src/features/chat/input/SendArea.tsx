@@ -1,4 +1,5 @@
-import { Button, Flexbox, Icon } from '@lobehub/ui';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../../components/WorkbenchButton';
 import { ArrowUp, Square } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { actionMap, type ActionKey } from './config';
@@ -67,7 +68,7 @@ export function SendArea({ actions }: SendAreaProps) {
         data-testid={stopping ? 'composer-stop' : 'composer-send'}
         title={stopping ? '停止' : sendBehavior === 'steer' ? '引导' : sendBehavior === 'followUp' ? '跟进' : '发送'}
         icon={<Icon icon={stopping ? Square : ArrowUp} size={stopping ? 14 : 16} />}
-        onClick={stopping ? stop : send}
+        onClick={stopping ? stop : () => send()}
       />
     </Flexbox>
   );

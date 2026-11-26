@@ -1,7 +1,7 @@
 // 规则文件：全局 <agentDir>/rules/*.md，项目 <cwd>/.pi/rules/*.md。一条一个文件，frontmatter 有 title 和 enabled，
 // 可选 modes（适用的 AgentMode 列表；缺省或空 = 所有模式）。
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, posix, relative, resolve } from "node:path";
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { AGENT_MODES, type AgentMode } from "../agent-mode/modes.js";
 
@@ -16,6 +16,7 @@ export interface RuleFile {
   body: string;
   /** 适用模式；undefined = 所有模式（旧规则文件即此情形）。 */
   modes?: AgentMode[];
+  globs?: string[];
   error?: string;
 }
 
@@ -33,10 +34,11 @@ function errorText(error: unknown): string {
 
 export function parseRule(id: string, scope: RuleScope, path: string, content: string): RuleFile {
   try {
-    const { frontmatter, body } = parseFrontmatter<{ title?: unknown; enabled?: unknown; modes?: unknown }>(content);
+    const { frontmatter, body } = parseFrontmatter<{ title?: unknown; enabled?: unknown; modes?: unknown; globs?: unknown }>(content);
     const title = typeof frontmatter.title === "string" && frontmatter.title.trim() ? frontmatter.title.trim() : id;
     const modes = normalizeRuleModes(frontmatter.modes);
-    return { id, scope, path, title, enabled: frontmatter.enabled !== false, body, modes };
+    const globs = normalizeRuleGlobs(frontmatter.globs);
+    return { id, scope, path, title, ...(globs && { globs }), enabled: frontmatter.enabled !== false, body, modes };
   } catch (error) {
     return { id, scope, path, title: id, enabled: false, body: "", error: errorText(error) };
   }
@@ -66,6 +68,28 @@ export function normalizeRuleModes(raw: unknown): AgentMode[] | undefined {
 export function ruleAppliesToMode(rule: Pick<RuleFile, "modes">, mode: AgentMode | undefined): boolean {
   if (!mode || !rule.modes || rule.modes.length === 0) return true;
   return rule.modes.includes(mode);
+}
+
+/** Empty means unrestricted. Reject malformed filters rather than widening them. */
+export function normalizeRuleGlobs(raw: unknown): string[] | undefined {
+  if (raw == null) return undefined;
+  const list = typeof raw === "string" ? [raw] : raw;
+  if (!Array.isArray(list) || list.some((item) => typeof item !== "string" || !item.trim())) throw new Error("Glob 必须是非空的项目相对匹配式");
+  const patterns: string[] = [...new Set<string>(list.map((item: string) => item.trim().replaceAll("\\", "/")))];
+  if (patterns.some((p) => p.startsWith("/") || /^[A-Za-z]:/.test(p) || p.split("/").includes(".."))) throw new Error("Glob 必须相对于项目目录");
+  return patterns.length ? patterns : undefined;
+}
+
+export function referencedRuleFiles(prompt: string, cwd: string): string[] {
+  const paths: string[] = [];
+  const text = prompt.replace(/<pi:attachment\s+([^>]+)>[\s\S]*?<\/pi:attachment>/g, (_block, attrs: string) => {
+    const path = /\bpath="([^"]+)"/.exec(attrs)?.[1];
+    if (path && /\btype="file"/.test(attrs)) paths.push(path.replaceAll("&quot;", '"').replaceAll("&amp;", "&"));
+    return " ";
+  });
+  for (const hit of text.matchAll(/(?:^|\s)@(?:"([^"]+)"|([^\s，。；,;]+))/gu)) paths.push(hit[1] || hit[2]);
+  return paths.map((p) => relative(cwd, resolve(cwd, p)).replaceAll("\\", "/"))
+    .filter((p) => p && p !== ".." && !p.startsWith("../") && !isAbsolute(p));
 }
 
 export function listRuleIds(dir: string): string[] {
@@ -131,8 +155,10 @@ export function createRuleCache(
 export function activeRuleContextFiles(
   rules: readonly RuleFile[],
   mode?: AgentMode,
+  files: readonly string[] = [],
 ): Array<{ path: string; content: string }> {
   return rules
-    .filter((rule) => rule.enabled && !rule.error && rule.body.trim() && ruleAppliesToMode(rule, mode))
+    .filter((rule) => rule.enabled && !rule.error && rule.body.trim() && ruleAppliesToMode(rule, mode)
+      && (!rule.globs?.length || rule.globs.some((glob) => files.some((file) => posix.matchesGlob(file, glob)))))
     .map((rule) => ({ path: rule.path, content: rule.body }));
 }

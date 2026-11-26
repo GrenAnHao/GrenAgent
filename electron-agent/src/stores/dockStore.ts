@@ -23,6 +23,11 @@ export interface TerminalPayload {
   /** 运行时 shell 会话 id，不持久化。 */
   shellId?: string;
   status: TerminalStatus;
+  /**
+   * 启动这个 shell 时的项目根，不持久化。会话跨项目移动后，一个已经跑起来的终端仍留在
+   * 原来的目录，不会被当成目标项目的终端重启。
+   */
+  originWorkspace?: string;
 }
 
 export interface PagePayload {
@@ -69,6 +74,12 @@ export interface FilePayload {
   openFiles?: string[];
   /** 当前看的那个；null / 缺省 = 没有打开文件。 */
   activeFile?: string | null;
+  /**
+   * 打开这个文件管理器时所属的聊天项目根。会话跨项目移动后，旧标签保留在这里（含脏编辑、
+   * 打开着的旧文件），新入口用目标根另开一个；不把旧标签直接重绑到目标同名文件。
+   * 旧数据没有这一项。
+   */
+  sessionWorkspace?: string;
 }
 
 /** 文件管理器 dock 标签的名字。旧版本存下来的「文件」在读回和写盘时统一改成它。 */
@@ -841,8 +852,7 @@ export const useDockStore = create<DockState>()(
       },
 
       dropSessionTabs: (sessionPath, wasViewed = false) => {
-        if (!sessionPath) return;
-        const s = get();
+        if (!sessionPath) return;        const s = get();
         const doomed = new Set(
           s.tabs
             .filter((t) => t.ownerSessionPath && pathsEquivalent(t.ownerSessionPath, sessionPath))

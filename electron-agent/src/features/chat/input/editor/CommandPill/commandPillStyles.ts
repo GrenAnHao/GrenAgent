@@ -27,6 +27,8 @@ export const pillStyles = createStaticStyles(({ css }) => ({
     }
   `,
   command: css`
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     display: inline-flex;
     gap: 3px;
     align-items: center;

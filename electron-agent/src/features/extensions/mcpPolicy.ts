@@ -37,7 +37,7 @@ function toolsOf(raw: Record<string, unknown>): Record<string, unknown> {
 export function getToolPerm(raw: Record<string, unknown>, fullName: string): Perm {
   const entry = toolsOf(raw)[fullName];
   const p = isRecord(entry) ? entry.permission : undefined;
-  return PERMS.includes(p as Perm) ? (p as Perm) : 'auto';
+  return PERMS.includes(p as Perm) ? (p as Perm) : PERMS.includes(raw.defaultPermission as Perm) ? raw.defaultPermission as Perm : 'auto';
 }
 
 export function getToolRules(raw: Record<string, unknown>, fullName: string): RuleItem[] {

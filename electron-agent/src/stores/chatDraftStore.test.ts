@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatDraftStore } from './chatDraftStore';
+import { resetDraftHandoffs } from '../features/sessions/sessionProjectTransferDraft';
 
 const store = () => useChatDraftStore.getState();
 const json = { root: { type: 'root', children: [{ type: 'command-pill', name: 'refactor' }] } };
@@ -77,5 +78,48 @@ describe('chatDraftStore', () => {
     store().clearDraft('a');
     expect(store().getDraft('a').text).toBe('');
     expect(store().getDraft('b').text).toBe('y');
+  });
+});
+
+describe('chatDraftStore transfer handoff', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useChatDraftStore.setState({ drafts: {}, adoptions: {}, removed: {} });
+    resetDraftHandoffs();
+  });
+
+  it('absolutizes file tags of the moved session only, and only once', () => {
+    useChatDraftStore.getState().setDraft('D:/s/repo/a.jsonl', {
+      text: '改一下 @src/app.ts',
+      json: {
+        root: {
+          children: [
+            {
+              children: [
+                { type: 'chat-tag', category: 'file', label: 'app.ts', value: 'src/app.ts', version: 1 },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    useChatDraftStore.getState().setDraft('D:/s/repo/b.jsonl', '另一个会话 @src/app.ts');
+
+    useChatDraftStore.getState().handoff('D:/s/repo/a.jsonl', 'D:/repo');
+
+    const moved = useChatDraftStore.getState().getDraft('D:/s/repo/a.jsonl');
+    expect(moved.text).toBe('改一下 @D:/repo/src/app.ts');
+    expect(JSON.stringify(moved.json)).toContain('D:/repo/src/app.ts');
+    expect(useChatDraftStore.getState().getDraft('D:/s/repo/b.jsonl').text).toBe('另一个会话 @src/app.ts');
+
+    // 已过户的那一份再 handoff 不会重复改写（排队项已消费）
+    useChatDraftStore.getState().handoff('D:/s/repo/a.jsonl', 'D:/repo');
+    expect(useChatDraftStore.getState().getDraft('D:/s/repo/a.jsonl').text).toBe('改一下 @D:/repo/src/app.ts');
+  });
+
+  it('keeps a draft with only text untouched', () => {
+    useChatDraftStore.getState().setDraft('/s/a.jsonl', '纯文字');
+    useChatDraftStore.getState().handoff('/s/a.jsonl', 'D:/repo');
+    expect(useChatDraftStore.getState().getDraft('/s/a.jsonl').text).toBe('纯文字');
   });
 });

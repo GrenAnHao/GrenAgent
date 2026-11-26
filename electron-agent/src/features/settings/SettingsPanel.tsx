@@ -89,8 +89,10 @@ const useStyles = createStyles(({ css, token }) => ({
     padding: 20px 24px;
   `,
   pageTitle: css`
-    font-size: 18px;
+    letter-spacing: -0.02em;
+    font-size: var(--gren-font-heading);
     font-weight: 600;
+    line-height: 1.3;
     color: ${token.colorText};
     margin-block-end: 16px;
   `,

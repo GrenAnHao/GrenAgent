@@ -11,7 +11,7 @@ Status: implemented
 
 ## Decision
 
-- 滚动挪到外层：新增 `skill-catalog-scroll` 包住目录，由它负责 `flex: 1 1 0px`、保底 120px 和 `overflow-y: auto`。里面的列表 / 网格回到按内容长高，网格恢复 `overflow: visible`。
+- 滚动挪到外层：新增 `skill-catalog-scroll` 包住目录，由它负责 `flex: 1 1 0px`、零最小高度 和 `overflow-y: auto`。里面的列表 / 网格回到按内容长高，网格恢复 `overflow: visible`。
 - 技能头部先用 `yaml`（主进程已在用）解析，取字符串型的 `name` / `description`，再压成一行。解析失败时退回原来的逐行读法，以前能读出来的手写头部照样能读。
 
 ## Related notes
@@ -26,7 +26,7 @@ Status: implemented
 
 ## Consequences
 
-网格和列表在任意数量的技能下都按内容高，只有外层滚动。技能说明支持合法 YAML 的所有字符串写法；非法头部还按旧逻辑读。卡片 DOM 多了一层，原来的 `skill-catalog` 测试标识和 `data-view` 不变。
+网格和列表在任意数量的技能下都按内容高，只有目录外的滚动容器滚动。技能说明支持合法 YAML 的所有字符串写法；非法头部还按旧逻辑读。卡片 DOM 多了一层，原来的 `skill-catalog` 测试标识和 `data-view` 不变。
 
 ## Verification
 

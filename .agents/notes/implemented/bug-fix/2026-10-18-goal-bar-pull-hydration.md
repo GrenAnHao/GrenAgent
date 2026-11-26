@@ -2,6 +2,8 @@
 
 Status: implemented
 
+只读按路径补拉继续有效；旧的同 revision 后到覆盖先到由[生命周期修复](2026-11-17-visual-review-and-goal-lifecycle.md)的 ownerEpoch／sequence、clear 墓碑与 mutation fence 部分取代。编辑成功依据实际 operationId 回执，不依据补拉文字相同。
+
 ## Problem
 
 两个现象，同一个根子：
@@ -20,7 +22,7 @@ Status: implemented
 - 返回的信封和扩展推送是同一份形状，由 `extensions/goal/status.ts` 的 `buildGoalStatus` 生成，扩展的 `pushStatus` 也改用它。
 - 武装态（armed / disarmed）仍不落盘，存在 `globalThis[Symbol.for("gren.goal.activations")]`：扩展经 jiti 加载、主进程直接 import，两份模块实例看到同一张表，补拉才能拿到真实的武装态。不在 handle 上的会话一律 disarmed，与重开默认一致。
 - 渲染层 `goalStore` 记「会话路径（`sessionControlKey`）→ sessionId」：推送信封带 `sessionPath`，补拉结果也带，都会登记。`GoalPill` 按 `activeSessionPath` 查 sessionId，不再调 `getState`；挂载和每次切换会话都补拉一次；Goal 条、详情抽屉、输入栏 `/goal` 命令返回后再补拉一次。
-- `goalStore.setSnapshot` 对同一 goalId 改为只拒更旧的 revision，同 revision 也覆盖：武装 / 解除武装不写事件、不涨 revision，原来的 `<=` 会把只改了 activation 的推送丢掉。
+- 旧信封冷初始化仍保留同 revision 的 activation 兼容；当前 live 信封由 `acceptStatus` 按 ownerEpoch／sequence 接受，不能凭 revision 相同就覆盖，迟到补拉还须通过 mutation fence。
 - 解析信封的 `parseGoalStatus` 从 `ExtensionUiHost` 挪到 `features/extensionUi/goalStatus.ts`，推送和补拉共用。
 
 ### 涉及文件
@@ -42,7 +44,7 @@ Status: implemented
 
 - Goal 条不再依赖推送是否送达：打开、切换、命令返回都会按路径对一次账，推送只是更快的增量。
 - 武装态放进进程级全局表，同一进程里的扩展实例共享它；测试之间要清，用 `__resetGoalActivationsForTest`。
-- 补拉响应和推送在同一 revision 上竞争时，后到的覆盖先到的；武装态可能短暂回退，下一次写事件（续跑轮次）会纠正。
+- 补拉响应和推送在同一 revision 上竞争时仍按 owner 水位排序，旧读、旧 owner 与 clear 前状态不能复活；不再等待下一次 round 来纠正 activation。
 
 ## Verification
 

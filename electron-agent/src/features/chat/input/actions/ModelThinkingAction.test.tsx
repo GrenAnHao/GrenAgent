@@ -1,3 +1,4 @@
+import type { SessionPreferences } from '../../../../lib/sessionPreferences';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -115,7 +116,7 @@ import ModelThinkingAction, {
   resetModelThinkingCacheForTests,
 } from './ModelThinkingAction';
 
-const prefs = (patch: Record<string, unknown> = {}) => ({
+const prefs = (patch: Partial<SessionPreferences> = {}): SessionPreferences => ({
   model: { provider: 'anthropic', id: 'm' },
   thinkingLevel: 'medium',
   mode: 'agent',

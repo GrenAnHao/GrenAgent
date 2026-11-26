@@ -92,7 +92,7 @@ export function formatWaitResult(
     case "none":
       return "No background sub-agents are running; nothing to wait for.";
     case "settled": {
-      const lines = result.settled.map((s) => `- ${withLabel(s.childId, labelOf)}: ${s.stopReason}`);
+      const lines = result.settled.map((s) => `- ${withLabel(s.childId, labelOf)}: ${s.stopReason}${s.reason === "background-bash-timeout" ? " (reply completed; background command timed out)" : ""}`);
       return `Wait completed. Settled:\n${lines.join("\n")}\nEach result arrives as a separate subagent-settled notice.\n${running}`;
     }
     case "timeout":
@@ -155,7 +155,9 @@ export function registerWaitAgent(
         details: {
           outcome: result.outcome,
           timeoutMs,
-          settled: result.settled.map((s) => ({ childId: s.childId, stopReason: s.stopReason })),
+          settled: result.settled.map((s) => ({
+            childId: s.childId, stopReason: s.stopReason, ...(s.reason ? { reason: s.reason } : {}),
+          })),
           running: result.running,
         },
       };

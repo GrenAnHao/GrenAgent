@@ -58,9 +58,8 @@ export default async function (t) {
   await t.waitUntil(finalReasonMounted, 8000)
   await t.js(`Array.from(document.querySelectorAll('${list} [data-testid="reasoning-inline"]')).at(-1).setAttribute('data-case', 'last-reasoning')`)
   const finalReason = `${list} [data-case="last-reasoning"]`
-  // 虚拟列表的缓冲条目可能已挂载但仍在视口外，点击前先将目标滚到视口内、等滚动停下。
-  t.ok('完成思考：展开按钮滚动停下后可以被点中', await settleHit(t, `${finalReason} button`, 20))
-  await t.click(`${finalReason} button`, 20)
+  // 缓冲条目可能已挂载但在滚动中；在实际偏移处稳定命中后才发送一次点击。
+  t.ok('完成思考：展开按钮滚动停下后可以被点中', !!await t.clickReady(`${finalReason} button`, { dx: 20 }))
   await t.waitForText(finalReason, reasoningLastLine, 12000)
   const body = `${finalReason} [data-testid="reasoning-body"]`
   const geometry = await t.js(`(() => {

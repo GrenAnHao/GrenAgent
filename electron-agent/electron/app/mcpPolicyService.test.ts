@@ -66,6 +66,22 @@ describe('McpPolicyService', () => {
     );
   });
 
+  it('checks disabled and argument approval rules before dispatching a Test Call', async () => {
+    const home=await mkdtemp(join(tmpdir(),'mcp-call-')); directories.push(home);
+    const run=vi.fn(async()=>({content:[]})), confirm=vi.fn(async()=>false);
+    const service=new McpPolicyService(home,{testCall:run,confirmTest:confirm});
+    const name='mcp__demo__read';
+    await service.writePolicy(JSON.stringify({tools:{[name]:{permission:'disabled'}}}));
+    await expect(service.testCall('/w','demo',name,{})).rejects.toThrow('禁用');
+    await service.writePolicy(JSON.stringify({tools:{[name]:{rules:[{match:{query:'private*'},policy:'required'}]}}}));
+    await expect(service.testCall('/w','demo',name,{query:'private'})).rejects.toThrow('未发送');
+    expect(run).not.toHaveBeenCalled();
+    confirm.mockResolvedValue(true);
+    await service.testCall('/w','demo',name,{query:'private-data'});
+    expect(run).toHaveBeenCalledWith('/w','demo',name,{query:'private-data'});
+    expect(await service.readAudit()).not.toContain('private-data');
+  });
+
   it('audits policy changes and calls through PermissionManager', async () => {
     const home = await mkdtemp(join(tmpdir(), 'electron-agent-mcp-'));
     directories.push(home);

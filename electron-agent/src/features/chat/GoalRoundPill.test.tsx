@@ -6,6 +6,14 @@ import { GoalRoundPill, goalRoundTitle } from './GoalRoundPill';
 afterEach(() => cleanup());
 
 describe('GoalRoundPill', () => {
+  it('uses new batch details while leaving the original hidden message readable', async () => {
+    const content = buildGoalRoundPrompt({ condition: 'new batch condition', round: 3, maxRounds: 2, runNumber: 2, runRound: 1 });
+    render(<GoalRoundPill content={content} details={{ runNumber: 2, runRound: 1, roundId: 'r3' }} />);
+    const heading = screen.getByText('目标续跑 · 第 2 批 · 第 1 轮');
+    fireEvent.click(heading);
+    expect(await screen.findByText(/new batch condition/)).toBeTruthy();
+  });
+
   it('turns the model-facing first line into the round number, without the budget', () => {
     expect(goalRoundTitle('Goal Round 4/256。')).toBe('目标续跑 · 第 4 轮');
     expect(goalRoundTitle('something else')).toBe('目标续跑');

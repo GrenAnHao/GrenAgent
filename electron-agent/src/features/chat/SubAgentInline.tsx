@@ -1,4 +1,5 @@
 import { Icon } from '@lobehub/ui';
+import { bashTimeoutDescription, bashTimeoutOf, subagentBashLabel } from '@extensions/multi-agent/background-bash';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Bot, PanelRightOpen } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
@@ -21,7 +22,9 @@ import {
   modelWithThinking,
   thinkingLevelFromResult,
   subAgentCardTitle,
+  subAgentHasResponded,
   subAgentStats,
+  subAgentStartupPhase,
   subAgentStepCount,
   taskFromAgentResult,
 } from '../panels/subagentUtils';
@@ -31,7 +34,7 @@ import { dockOwnerFromStore, useDockStore } from '../../stores/dockStore';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi } from '../../lib/pi';
 import type { SubAgentItem } from '../../lib/pi';
-import { selectSubAgentById, useSubAgentLiveStore } from '../../stores/subagentLiveStore';
+import { selectSubAgentObservation, subAgentObservationUnconfirmed, useSubAgentLiveStore } from '../../stores/subagentLiveStore';
 import { useProviderNames } from '../settings/providerListCache';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -121,7 +124,7 @@ interface SubAgentInlineProps {
 }
 
 function mapRegistryStatus(status: string | undefined): ConvStatus {
-  if (status === 'running') return 'running';
+  if (status === 'running' || status === 'starting' || status === 'status-unconfirmed') return 'running';
   if (status === 'error' || status === 'cancelled' || status === 'interrupted') return 'error';
   return 'done';
 }
@@ -139,40 +142,50 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, model,
   const [bgError, setBgError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
-  const registryRow = useSubAgentLiveStore(selectSubAgentById(workspace, agentId));
-  const registryLoaded = useSubAgentLiveStore((s) => s.itemsByWorkspace.has(workspace));
+  const ownerPath = store.getLoadedSessionPath() ?? '';
+  const observation = useSubAgentLiveStore(selectSubAgentObservation(workspace, ownerPath, agentId));
+  const registryRow = observation.item;
+  const listGeneration = useSubAgentLiveStore((s) => s.listQueries.get(workspace)?.generation ?? 0);
+  const [startGeneration] = useState(() => listGeneration);
   const [remembered, setRemembered] = useState<SubAgentItem | undefined>();
-  const [registryRead, setRegistryRead] = useState(false);
   const providerNames = useProviderNames();
   // 参数里的 cheap / strong 只是别名：结果没写实际路由时（中途出错、运行中）去注册表取，别把别名当模型名。
   const savedModel = modelFromResult(result) || (isModelAlias(model) ? undefined : model);
   const missingTask = !task.trim() || task === '子代理任务';
-  const needsMetadata = Boolean(agentId && !registryRead && (!savedModel || missingTask));
+  const needsMetadata = Boolean(agentId && !registryRow && (!savedModel || missingTask));
   const shownTask = missingTask ? taskFromAgentResult(result) || remembered?.task || task : task;
   const effectiveStatus = useMemo<ConvStatus>(() => {
     if (status === 'running') return 'running';
-    if (background && bgStatus === 'running') return 'running';
-    if (background && bgStatus) return mapRegistryStatus(bgStatus);
+    if (background) {
+      if (bgStatus === 'cancelled') return 'error';
+      return mapRegistryStatus(bgStatus ?? 'running');
+    }
     const child = subAgentRecordStatus(result);
     if (child === 'error' || child === 'cancelled') return 'error';
     return status;
   }, [status, background, bgStatus, result]);
 
   useEffect(() => {
-    if (!registryLoaded || !agentId) return;
-    if (registryRow) setRemembered(registryRow);
-    setRegistryRead(true);
+    if (!registryRow) return;
+    setRemembered(registryRow);
     if (background) {
       setBgStatus(backgroundRegistryStatus(registryRow));
-      setBgError(typeof registryRow?.error === 'string' ? registryRow.error : null);
+      setBgError(typeof registryRow.error === 'string' ? registryRow.error : null);
     }
-  }, [registryLoaded, registryRow, background, agentId]);
+  }, [registryRow, background]);
 
   const running = effectiveStatus === 'running';
+  const bashRow = registryRow ?? remembered;
+  const bashLabel = background && bgStatus ? subagentBashLabel(bgStatus, bashRow?.bashState) : undefined;
+  const bashTimeout = bgStatus === 'error' ? bashTimeoutOf(bashRow?.bashState) : undefined;
 
   // 运行中轮询 registry 取模型与状态（通过单例 store，多卡片共享一次轮询）。
   // 旧历史缺字段时只共享首包查询；回包后保留这行、释放订阅，不为每张完成卡单独轮询。
-  const live = useSubAgentLive(workspace, agentId, running || needsMetadata);
+  const live = useSubAgentLive(workspace, agentId, (running && (status === 'running' || (agentId ? true : listGeneration - startGeneration < 3))) || (needsMetadata && observation.attempts < 3), ownerPath);
+  const phase = subAgentStartupPhase({ parentStatus: status, background, registry: registryRow ?? remembered,
+    hasResponse: subAgentHasResponded(registryRow) || subAgentHasResponded(remembered),
+    unconfirmed: background && (agentId ? subAgentObservationUnconfirmed(observation)
+      : listGeneration - startGeneration >= 3 && !remembered) });
   const seenModel = useRef<string | undefined>(undefined);
   if (live.model) seenModel.current = live.model;
   const seenLevel = useRef<string | undefined>(undefined);
@@ -239,16 +252,18 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, model,
       thinkingLevelFromResult(result) || remembered?.thinkingLevel || (running ? live.thinkingLevel : undefined) || seenLevel.current || thinkingLevel,
       providerNames,
     ) ?? '';
-  const line2 = running ? (
-    <PendingResponseStatus label="正在处理…" startedAt={live.createdAt ?? undefined} />
+  const line2 = bashLabel ?? (running ? (
+    phase === 'status-unconfirmed' ? '状态待确认'
+      : <PendingResponseStatus label={phase === 'starting' ? '启动中…' : phase === 'awaiting-first-response' ? '等待首响应…' : '正在处理…'} startedAt={live.createdAt ?? undefined} />
   ) : (
     badge || (effectiveStatus === 'error' ? '出错' : '')
-  );
+  ));
 
   return (
     <div className={styles.root} data-testid="subagent-inline">
       <ConvStrip
         status={effectiveStatus}
+        warning={Boolean(bashTimeout)}
         icon={Bot}
         title={`子代理 #${index}`}
         role={role}
@@ -264,8 +279,8 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, model,
         <div className={styles.body}>
           <div className={styles.statRow}>
             {modelLabel ? <ModelNameTag name={modelLabel} testId="subagent-inline-model" /> : null}
-            <span>{running ? '运行中' : badge || '已结束'}</span>
-            {statsText ? <span>· {statsText}</span> : null}
+            {!bashLabel ? <span>{running ? '运行中' : badge || '已结束'}</span> : null}
+            {statsText ? <span className="font-mono">· {statsText}</span> : null}
             <button type="button" className={styles.openLink} onClick={openInDock}>
               <Icon icon={PanelRightOpen} size={12} />
               打开完整对话
@@ -273,9 +288,13 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, model,
           </div>
           <div>
             <div className={styles.sectionLabel} style={{ marginBlockEnd: 4 }}>
-              结果
+              {bashLabel ? '最终回复' : '结果'}
             </div>
-            {running ? (
+            {bashLabel && bashRow?.output ? (
+              <div className={styles.resultBox}>
+                <LazyMarkdown variant="chat" tone="secondary">{bashRow.output}</LazyMarkdown>
+              </div>
+            ) : running ? (
               <div className={styles.hint}>运行中…（点「打开完整对话」在右侧面板看实时进度）</div>
             ) : finalText ? (
               <div className={styles.resultBox}>
@@ -287,6 +306,7 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, model,
               <div className={styles.hint}>（无输出）</div>
             )}
           </div>
+          {bashTimeout ? <div className={styles.hint} style={{ whiteSpace: 'pre-wrap' }}>{bashTimeoutDescription(bashTimeout)}</div> : null}
           <button type="button" className={styles.toggleLink} onClick={() => setShowPrompt((v) => !v)}>
             {showPrompt ? '收起指令' : '查看指令'}
           </button>

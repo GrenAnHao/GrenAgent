@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>业务时钟自检</title>
+<script type="module">
+  import { installScenarioClock } from '../probeClock.mjs'
+
+  window.nativeClock = { now: Date.now, timer: setTimeout, raf: requestAnimationFrame, perf: performance.now }
+  window.restoreClock = installScenarioClock(location.hash.slice(1))
+</script>

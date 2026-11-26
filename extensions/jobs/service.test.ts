@@ -63,6 +63,74 @@ describe("JobsService", () => {
     expect(jobs.list("s1").map((j) => j.id)).toEqual([id]);
   });
 
+  it("measures new bytes and changed progress per live owner, not polling or repeat progress", async () => {
+    vi.useFakeTimers();
+    try {
+      let handle!: JobHandle;
+      const before = Date.now();
+      const first = startJob({ onRun: (job) => { handle = job; } });
+      const second = startJob();
+      startJob({ owner: "s2" });
+      await vi.advanceTimersByTimeAsync(10);
+      handle.append("new bytes");
+      handle.updateProgress("busy");
+      await vi.advanceTimersByTimeAsync(10);
+      handle.updateProgress("busy");
+      expect(jobs.liveWithActivity("s1").map((j) => [j.id, j.lastActivityAt])).toEqual([
+        [first.id, before + 10], [second.id, before],
+      ]);
+      first.done.resolve({ status: "completed" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(jobs.liveWithActivity("s1").map((j) => j.id)).toEqual([second.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops only the exact running instance and keeps exit confirmation separate from job outcome", async () => {
+    const exit = deferred<boolean>();
+    const done = deferred<JobOutcome>();
+    const cancel = vi.fn();
+    const id = jobs.start({
+      kind: "bash", label: "tracked", owner: "s1", workspace: "/ws",
+      run: () => ({ cancel, done: done.promise, exitConfirmed: exit.promise }),
+    });
+    const { startedAt } = jobs.snapshot(id)!;
+    expect(jobs.stopForSubagentTimeout(id, "other", startedAt)).toBeUndefined();
+    expect(jobs.stopForSubagentTimeout(id, "s1", startedAt - 1)).toBeUndefined();
+    expect(cancel).not.toHaveBeenCalled();
+    const stop = jobs.stopForSubagentTimeout(id, "s1", startedAt)!;
+    const observed = vi.fn();
+    void stop.confirmed.then(observed);
+    expect(jobs.stopForSubagentTimeout(id, "s1", startedAt)).toBeUndefined();
+    done.resolve({ status: "killed" });
+    expect((await jobs.wait(id, 1000, "s1")).status).toBe("killed");
+    expect(observed).not.toHaveBeenCalled();
+    exit.resolve(true);
+    expect(await stop.confirmed).toBe(true);
+  });
+
+  it("reports a failed stop as unconfirmed without removing the live job; leaves a user stop alone", async () => {
+    const failed = startJob({ cancel: () => { throw new Error("stop failed"); } });
+    const normal = startJob();
+    expect(await jobs.stopForSubagentTimeout(failed.id, "s1", jobs.snapshot(failed.id)!.startedAt)?.confirmed).toBe(false);
+    expect(jobs.snapshot(failed.id)?.status).toBe("running");
+    jobs.kill(normal.id, "s1", "user");
+    expect(jobs.stopForSubagentTimeout(normal.id, "s1", jobs.snapshot(normal.id)!.startedAt)).toBeUndefined();
+    expect(normal.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not claim a timeout for a naturally finished producer while its output is draining", async () => {
+    const source = liveSource();
+    const job = startJob({ output: [source.source] });
+    job.done.resolve({ status: "completed" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(jobs.stopForSubagentTimeout(job.id, "s1", jobs.snapshot(job.id)!.startedAt)).toBeUndefined();
+    expect(job.cancel).not.toHaveBeenCalled();
+    expect((await jobs.wait(job.id, 1000, "s1")).status).toBe("completed");
+  });
+
   it("unknown id throws NOT_FOUND", async () => {
     await expect(jobs.read("bash-99", "s1")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });

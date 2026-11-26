@@ -1,6 +1,6 @@
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Check, Loader2, Square, X } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, Square, X } from 'lucide-react';
 import { memo, type MouseEvent } from 'react';
 import { convStyles } from './convTokens';
 
@@ -28,9 +28,11 @@ const styles = createStaticStyles(({ css }) => ({
 /** 行首状态图标；运行且可停止时，父行 hover 切换为红色停止键。 */
 export const StatusGlyph = memo(function StatusGlyph({
   status,
+  warning,
   onStop,
 }: {
   status: ConvStatus;
+  warning?: boolean;
   onStop?: (e: MouseEvent) => void;
 }) {
   if (status === 'running' && onStop) {
@@ -53,9 +55,9 @@ export const StatusGlyph = memo(function StatusGlyph({
       </span>
     );
   }
-  const icon = status === 'running' ? Loader2 : status === 'error' ? X : Check;
+  const icon = warning ? AlertTriangle : status === 'running' ? Loader2 : status === 'error' ? X : Check;
   return (
-    <span className={convStyles.lead} data-status={status} style={{ color: COLOR[status] }}>
+    <span className={convStyles.lead} data-status={warning ? 'warning' : status} style={{ color: warning ? cssVar.colorWarning : COLOR[status] }}>
       <Icon icon={icon} size={13} spin={status === 'running'} />
     </span>
   );

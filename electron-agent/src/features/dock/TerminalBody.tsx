@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from 'antd-style';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
@@ -20,6 +20,17 @@ export function TerminalBody({ tab, active }: DockBodyProps) {
   const disposeRef = useRef<{ dispose: () => void } | null>(null);
   const shellIdRef = useRef<string | undefined>((tab.payload as TerminalPayload).shellId);
   const pendingRef = useRef<string[]>([]);
+  // xterm measures its character cells only when opened or reconfigured. Don't
+  // measure a fallback on cold restore; PTY output is buffered by write() meanwhile.
+  const fontSpec = '13px "JetBrains Mono"';
+  const [fontReady, setFontReady] = useState(() => !document.fonts || document.fonts.check(fontSpec));
+  useEffect(() => {
+    if (fontReady) return;
+    let current = true;
+    const ready = () => { if (current) setFontReady(true); };
+    void document.fonts.load(fontSpec).then(ready, ready);
+    return () => { current = false; };
+  }, [fontReady]);
 
   const xtermTheme = useMemo(
     () => ({
@@ -65,13 +76,13 @@ export function TerminalBody({ tab, active }: DockBodyProps) {
   // 创建 xterm（仅一次），卸载时销毁。
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || termRef.current) return;
+    if (!fontReady || !host || termRef.current) return;
     const term = new XTerm({
       allowTransparency: false,
       cursorBlink: true,
       cursorInactiveStyle: 'outline',
       cursorStyle: 'block',
-      fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace',
+      fontFamily: getComputedStyle(host).getPropertyValue('--font-mono').trim(),
       fontSize: 13,
       theme: xtermTheme,
     });
@@ -99,16 +110,25 @@ export function TerminalBody({ tab, active }: DockBodyProps) {
       disposeRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fontReady]);
 
-  // 懒启动 shell：workspace 就绪且当前 tab 仍是 idle。
+  // 懒启动 shell：用这个标签自己的项目根，不是当前上下文。会话跨项目移动后，一个已启动的终端继续留在原目录；
+  // 目标项目里新开的终端是另一个标签，不会把旧的当成目标终端。
+  const originWorkspace = (tab.payload as TerminalPayload).originWorkspace;
+  const shellWorkspace = originWorkspace || workspace;
   useEffect(() => {
     if (!workspaceReady) return;
     if ((tab.payload as TerminalPayload).status !== 'idle') return;
+    if (!originWorkspace) {
+      // 记下启动目录：迁移后不再把旧 shell 当目标项目的终端。
+      useDockStore.getState().updateTab(tab.id, {
+        payload: { ...(tab.payload as TerminalPayload), originWorkspace: shellWorkspace },
+      });
+    }
     let cancelled = false;
     setTerminalStatus(tab.id, 'starting');
     void terminal
-      .shellStart(workspace)
+      .shellStart(shellWorkspace)
       .then(({ session_id }) => {
         if (cancelled) {
           void terminal.shellStop(session_id);
@@ -127,7 +147,7 @@ export function TerminalBody({ tab, active }: DockBodyProps) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceReady, workspace, tab.id]);
+  }, [workspaceReady, shellWorkspace, tab.id]);
 
   // 监听本 shell 的输出/退出。
   useEffect(() => {
@@ -182,7 +202,7 @@ export function TerminalBody({ tab, active }: DockBodyProps) {
       safeFit();
       termRef.current?.focus();
     });
-  }, [active, safeFit]);
+  }, [active, safeFit, fontReady]);
 
   // 容器尺寸变化时 refit（仅激活态）。
   useEffect(() => {

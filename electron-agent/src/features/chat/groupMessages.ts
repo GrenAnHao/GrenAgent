@@ -11,10 +11,12 @@ export type ToolSegment = {
   status: 'running' | 'done' | 'error';
   argsComplete?: boolean;
   /**
-   * 这次调用发生时会话的工作目录。只有被 working_directory / create_worktree 切走过才有值；
-   * undefined 表示还在项目工作区。相对路径按它解析，不是按项目根。
+   * 这次调用发生时会话的工作目录。迁移历史用后端固化的 sourceCwd，
+   * 普通会话仍跟踪 working_directory / create_worktree；undefined 表示当前项目根。
    */
   cwd?: string;
+  entryId?: string;
+  sourceRefs?: Record<string, string>;
   /** 开始执行的时刻；运行中据此实时计时。 */
   startedAt?: number;
   /** 执行耗时（ms），结束后定格。 */
@@ -46,12 +48,14 @@ export type TextSegment = {
   id: string;
   content: string;
   streaming: boolean;
+  entryId?: string;
+  sourceCwd?: string;
 };
 
 export type TimelineSegment = ThinkingSegment | TextSegment | ToolSegment;
 
 export type DisplayMessage =
-  | { kind: 'user'; id: string; text: string; images?: UserImage[]; steering?: boolean; steerState?: SteerState; timestamp?: number; entryId?: string; promptFrame?: boolean }
+  | { kind: 'user'; id: string; text: string; images?: UserImage[]; steering?: boolean; steerState?: SteerState; timestamp?: number; entryId?: string; sourceCwd?: string; promptFrame?: boolean }
   | { kind: 'turn'; id: string; segments: TimelineSegment[]; timestamp?: number }
   | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error'; argsComplete?: boolean; startedAt?: number; durationMs?: number }
   | Extract<ChatMessage, { kind: 'notice' }>
@@ -111,6 +115,8 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
             id: `${msg.id}-text`,
             content: msg.text,
             streaming: msg.streaming,
+            entryId: msg.entryId,
+            sourceCwd: msg.sourceCwd,
           });
         }
         break;
@@ -144,11 +150,17 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
             argsComplete: msg.argsComplete,
             startedAt: msg.startedAt,
             durationMs: msg.durationMs,
-            ...(sessionCwd ? { cwd: sessionCwd } : {}),
+            ...(msg.sourceCwd ? { cwd: msg.sourceCwd } : sessionCwd ? { cwd: sessionCwd } : {}),
+            ...(msg.entryId ? { entryId: msg.entryId } : {}),
+            ...(msg.sourceRefs ? { sourceRefs: msg.sourceRefs } : {}),
             ...(msg.parentToolCallId ? { parentToolCallId: msg.parentToolCallId } : {}),
           });
           // 嵌套调用（子代理里的工具）有自己的会话目录，不改主会话的。
-          if (!msg.parentToolCallId) sessionCwd = cwdAfterTool(msg.toolName, msg.status, msg.result) ?? sessionCwd;
+          if (!msg.parentToolCallId) {
+            // Historical projection carries its own frozen cwd; never leak its last cd into
+            // a newly sent message after transfer (which starts at the target workspace).
+            sessionCwd = msg.sourceCwd ? undefined : cwdAfterTool(msg.toolName, msg.status, msg.result) ?? sessionCwd;
+          }
         }
         break;
       default:

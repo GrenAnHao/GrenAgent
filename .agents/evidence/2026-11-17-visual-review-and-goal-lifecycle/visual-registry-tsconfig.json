@@ -1,0 +1,5 @@
+{
+  "extends": "../../../electron-agent/tsconfig.json",
+  "compilerOptions": { "composite": false, "noEmit": true, "types": ["node"], "typeRoots": ["../../../electron-agent/node_modules/@types"] },
+  "include": ["../../../extensions/visual-companion/reviewRegistry.ts"]
+}

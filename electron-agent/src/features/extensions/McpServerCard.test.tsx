@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openUrl } from '../../platform/runtime';
 import { McpServerCard } from './McpServerCard';
@@ -13,6 +13,30 @@ describe('McpServerCard', () => {
   it.each(['connected', 'connecting', 'needs-login'] as const)('uses the live %s empty state instead of an obsolete probe error', (runtimeStatus) => {
     render(<McpServerCard detail name="fs" config={{ command: 'node' }} enabled runtimeStatus={runtimeStatus} runtimeToolNames={[]} probeError="obsolete error" onToggle={() => {}} onEdit={() => {}} onDelete={() => {}} />);
     expect(screen.getByTestId('mcp-server-fs')).not.toHaveTextContent('obsolete error');
+  });
+
+  it('shows the slow handshake actions at 15 seconds from the host attempt, then removes them on readiness', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-25T00:00:14Z'));
+      const props = {name:'deepwiki', detail:true, enabled:true, config:{url:'https://fixture.invalid/mcp'}, diagnostics:{attemptId:'one',attemptedAt:'2026-11-25T00:00:00Z',stderr:[]}, onToggle:()=>{},onEdit:()=>{},onDelete:()=>{}};
+      const { rerender } = render(<McpServerCard {...props} runtimeStatus="connecting"/>);
+      expect(screen.queryByText('终止重试')).toBeNull();
+      act(()=>vi.advanceTimersByTime(1000));
+      expect(screen.getByTestId('mcp-slow-handshake')).toHaveTextContent('15 秒');
+      act(()=>vi.advanceTimersByTime(2000));
+      expect(screen.getByTestId('mcp-slow-handshake')).toHaveTextContent('17 秒');
+      rerender(<McpServerCard {...props} runtimeStatus="connected"/>);
+      expect(screen.queryByText('终止重试')).toBeNull();
+    } finally {vi.useRealTimers();}
+  });
+
+  it('redacts old cached diagnostic values in the card and in the logs', () => {
+    render(<McpServerCard detail name="fs" config={{command:'node',env:{API_KEY:'fixture-private'}}} enabled probeError="handshake failed: fixture-private"
+      diagnostics={{attemptedAt:'2026-11-25T00:00:00Z',stderr:['trace: fixture-private']}} onToggle={()=>{}} onEdit={()=>{}} onDelete={()=>{}}/>);
+    expect(screen.getByLabelText('错误诊断')).toHaveTextContent('••••••••');
+    fireEvent.click(screen.getByText('查看实时日志'));
+    expect(document.body).not.toHaveTextContent('fixture-private');
   });
 
   it('keeps tool permissions visible in the selected server detail', () => {
@@ -32,7 +56,7 @@ describe('McpServerCard', () => {
     );
     expect(screen.getByTestId('mcp-tool-mcp__fs__read_file')).toBeInTheDocument();
     expect(screen.queryByTestId('mcp-expand-fs')).toBeNull();
-    fireEvent.click(screen.getByText('需审批'));
+    fireEvent.click(within(screen.getByTestId('mcp-perm-mcp__fs__read_file')).getByText('需审批'));
     expect(onPermChange).toHaveBeenCalledWith('mcp__fs__read_file', 'needs_approval');
   });
 
@@ -57,11 +81,13 @@ describe('McpServerCard', () => {
     expect(onDelete).toHaveBeenCalled();
   });
 
-  it('detail: sets every tool permission in one call', () => {
+  it('detail: sets every tool permission in one call', async () => {
     const onPermChangeMany = vi.fn();
     const tools = ['mcp__fs__a', 'mcp__fs__b'];
     render(<McpServerCard detail name="fs" config={{ command: 'npx' }} enabled cachedTools={tools} onToggle={() => {}} onEdit={() => {}} onDelete={() => {}} onPermChangeMany={onPermChangeMany} />);
-    fireEvent.click(screen.getByTestId('mcp-perm-all-disabled'));
+    expect(screen.queryByTestId('mcp-perm-all-disabled')).toBeNull();
+    fireEvent.click(screen.getByTestId('mcp-bulk-settings'));
+    fireEvent.click(await screen.findByTestId('mcp-perm-all-disabled'));
     expect(onPermChangeMany).toHaveBeenCalledTimes(1);
     expect(onPermChangeMany).toHaveBeenCalledWith(tools, 'disabled');
   });

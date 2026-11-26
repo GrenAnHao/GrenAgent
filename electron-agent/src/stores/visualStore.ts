@@ -12,6 +12,7 @@ export interface VisualOwner {
 /** 一个会话名下的视觉设计：页面、等待中的确认请求都跟着发起它的会话走。 */
 export interface VisualEntry extends VisualOwner {
   html: string;
+  previewId?: string;
   mode: 'inline' | 'panel';
   /** 每次 setVisual 全局递增：换页面时 iframe 重挂、已提交标记按它区分。 */
   rev: number;
@@ -25,7 +26,7 @@ export interface VisualState {
   seq: number;
   /** 已提交过的 rev 集合——会话内持久，防止切回对话后卡片 / 面板变成可点击 */
   submittedIds: Set<number>;
-  setVisual: (owner: VisualOwner, html: string, mode: 'inline' | 'panel') => void;
+  setVisual: (owner: VisualOwner, html: string, mode: 'inline' | 'panel', previewId?: string) => void;
   setPending: (owner: VisualOwner, pending: boolean, requestId?: string) => void;
   markSubmitted: (rev: number) => void;
   clearVisual: (owner: VisualOwner) => void;
@@ -55,11 +56,10 @@ export const useVisualStore = create<VisualState>()((set) => ({
   seq: 0,
   submittedIds: new Set(),
 
-  // 不动 pending / requestId：read_visual_choice 的请求可能先于或后于换页到达，各自独立。
-  setVisual: (owner, html, mode) =>
+  // 只记录预览身份；旧视觉 pending 不从页面恢复为有效评审来源。
+  setVisual: (owner, html, mode, previewId) =>
     set((s) => {
       const key = visualKeyOf(owner);
-      const prev = s.entries[key];
       const rev = s.seq + 1;
       const entry: VisualEntry = {
         sessionPath: owner.sessionPath,
@@ -67,8 +67,9 @@ export const useVisualStore = create<VisualState>()((set) => ({
         html,
         mode,
         rev,
-        pending: prev?.pending ?? false,
-        requestId: prev?.requestId ?? null,
+        ...(previewId ? { previewId } : {}),
+        pending: false,
+        requestId: null,
       };
       return { seq: rev, entries: { ...s.entries, [key]: entry } };
     }),

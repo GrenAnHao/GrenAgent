@@ -74,6 +74,29 @@ describe('buildSessionMenuItems', () => {
     item.onClick!();
     expect(onRegenerateTitle).toHaveBeenCalledOnce();
   });
+
+  it('move to project only appears when wired and fires without deleting', () => {
+    const common = { pinned: false, onPinToggle: vi.fn(), onRename: vi.fn(), onDelete: vi.fn() };
+    expect((buildSessionMenuItems(common) as ClickItem[]).some((i) => i.key === 'transfer')).toBe(false);
+
+    const onTransfer = vi.fn();
+    const onDelete = vi.fn();
+    const items = buildSessionMenuItems({
+      ...common,
+      onRegenerateTitle: vi.fn(),
+      onDelete,
+      onTransfer,
+    }) as ClickItem[];
+    const keys = items.map((i) => i.key).filter(Boolean);
+    const item = items.find((i) => i.key === 'transfer')!;
+    expect(item.label).toBe('移动到项目…');
+    expect(item.danger).toBeFalsy();
+    expect(keys.indexOf('transfer')).toBe(keys.indexOf('regenerate-title') + 1);
+    expect(keys.indexOf('delete')).toBeGreaterThan(keys.indexOf('transfer'));
+    item.onClick!();
+    expect(onTransfer).toHaveBeenCalledOnce();
+    expect(onDelete).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildProjectMenuItems', () => {

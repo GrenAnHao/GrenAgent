@@ -5,6 +5,7 @@
  * 纯逻辑：SDK 调用经 SyncExecutor 注入，时钟、定时器、随机数可替换，便于单测。
  * 见 .agents/notes/implemented/architecture/2026-10-18-codegraph-auto-sync-and-stale-reads.md。
  */
+import { indexStageProgress, type IndexStageProgress } from './codeGraphProgress';
 import type { IndexProgress } from '@colbymchenry/codegraph';
 import type { SyncMode, SyncOutcome, SyncPlan } from './codeGraphEngine';
 
@@ -61,7 +62,7 @@ export interface SyncView {
   phase: SyncPhase;
   mode?: SyncMode;
   trigger?: SyncTrigger;
-  progress?: { stage: string; processed?: number; total?: number };
+  progress?: IndexStageProgress;
   queuedAt?: number;
   startedAt?: number;
   lastAttemptAt?: number;
@@ -76,6 +77,8 @@ export interface SyncView {
 }
 
 export interface SyncRequest {
+  /** A manual waiter can explicitly require a full rebuild of a healthy index. */
+  rebuild?: boolean;
   trigger: SyncTrigger;
   /** 项目内相对路径；不给或 null 表示整棵树比对。 */
   paths?: readonly string[] | null;
@@ -109,6 +112,7 @@ export interface SyncSchedulerOptions {
 }
 
 interface Waiter {
+  rebuild?: boolean;
   resolve: (outcome: SyncOutcome) => void;
   reject: (error: Error) => void;
   onProgress?: (progress: IndexProgress) => void;
@@ -159,7 +163,6 @@ interface Slot {
 const PRIORITY: Record<SyncTrigger, number> = {
   manual: 5, branch_switch: 4, watch: 3, activate: 2, poll: 1, startup: 1, retry: 1,
 };
-const STAGES: Record<string, string> = { scanning: '扫描文件', parsing: '解析代码', resolving: '解析引用', linking: '关联符号' };
 export const SYNC_CLOSED = 'CodeGraph engine is closed';
 
 export class SyncScheduler {
@@ -214,7 +217,7 @@ export class SyncScheduler {
     let result: Promise<SyncOutcome> | undefined;
     if (request.jobId !== undefined) {
       const jobId = request.jobId;
-      result = new Promise<SyncOutcome>((resolve, reject) => { batch.waiters.set(jobId, { resolve, reject, onProgress: request.onProgress }); });
+      result = new Promise<SyncOutcome>((resolve, reject) => { batch.waiters.set(jobId, { resolve, reject, onProgress: request.onProgress, rebuild: manual && request.rebuild }); });
     }
     if (manual) this.clearBackoff(slot);
     this.pump();
@@ -249,11 +252,7 @@ export class SyncScheduler {
   progress(runId: string, progress: IndexProgress): void {
     const entry = this.runs.get(runId);
     if (!entry) return;
-    const { phase, current, total } = progress as { phase: string; current?: number; total?: number };
-    entry.run.progress = {
-      stage: STAGES[phase] ?? phase,
-      ...(Number.isSafeInteger(current) && Number.isSafeInteger(total) && (total as number) > 0 ? { processed: current, total } : {}),
-    };
+    entry.run.progress = indexStageProgress(progress);
     if (!entry.run.stalled) this.armStall(entry.slot, entry.run);
     for (const waiter of entry.run.waiters.values()) waiter.onProgress?.(progress);
   }
@@ -370,7 +369,8 @@ export class SyncScheduler {
     const executor = this.options.executor;
     try {
       const manual = run.triggers.has('manual');
-      const plan = await executor.plan(slot.workspace);
+      const rebuild = [...run.waiters.values()].some((waiter) => waiter.rebuild);
+      const plan = rebuild ? 'full' : await executor.plan(slot.workspace);
       if (run.cancelled) throw cancelledError();
       if (plan === 'uninitialized' && !manual) {
         // 只维护已有索引：自动触发不替用户建 .codegraph/。

@@ -2,13 +2,13 @@ import { getConfig as realGetConfig, watchConfig as realWatchConfig } from '../.
 import { onResourceReloadRequested as realOnResourceReload } from '../../../extensions/_shared/resource-reload.js';
 import type { WorkspaceHandle } from './workspaceHandle.js';
 
-interface Reloadable { dispose(): Promise<void>; reload(): Promise<void> }
-
 export interface AgentHostOptions {
   createHandle: (workspace: string, cwd: string, candidatePath?: string) => Promise<WorkspaceHandle>;
   watchConfig?: typeof realWatchConfig;
   onResourceReloadRequested?: typeof realOnResourceReload;
   getConfig?: typeof realGetConfig;
+  /** Resource reload is another session writer and must share the transfer lease. */
+  withSessionOperation?: (handle: WorkspaceHandle, operation: () => Promise<void>) => Promise<void>;
 }
 
 /**
@@ -187,10 +187,12 @@ export class AgentHost {
 
   private reloadAll(): Promise<void> {
     if (this.reloading) return this.reloading;
-    const all = new Set<Reloadable>();
+    const all = new Set<WorkspaceHandle>();
     for (const list of this.groups.values()) for (const handle of list) all.add(handle);
     for (const handle of this.handles.values()) all.add(handle);
-    this.reloading = Promise.allSettled([...all].map((h) => h.reload())).then(() => undefined).finally(() => { this.reloading = undefined; });
+    this.reloading = Promise.allSettled([...all].map((handle) =>
+      this.options.withSessionOperation ? this.options.withSessionOperation(handle, () => handle.reload()) : handle.reload(),
+    )).then(() => undefined).finally(() => { this.reloading = undefined; });
     return this.reloading;
   }
 }

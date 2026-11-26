@@ -1,0 +1,84 @@
+{
+  "label": "baseline-3",
+  "ok": true,
+  "timing": {
+    "entry": 172,
+    "window": 2249,
+    "domReady": 2830
+  },
+  "marks": {
+    "html": 2559,
+    "splashDom": 2563,
+    "domLoaded": 2829,
+    "editor": 3096,
+    "splashLeaving": 5971,
+    "splashRemoved": 6422,
+    "active": 6638
+  },
+  "input": {
+    "attempt": 6652,
+    "point": {
+      "x": 750,
+      "y": 667
+    },
+    "confirmed": 6679
+  },
+  "shown": false,
+  "blockedRendererNetwork": 4,
+  "errors": [
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-mono/1.0.0/files/css/index.css",
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-harmony-sans/1.0.0/files/css/index-full.css",
+    "Failed to load font from https://registry.npmmirror.com/@lobehub/webfont-harmony-sans-sc/1.0.0/files/css/index.css",
+    "Failed to load font from https://registry.npmmirror.com/katex/0.18.1/files/dist/katex.min.css",
+    "ResizeObserver loop completed with undelivered notifications."
+  ],
+  "commands": [
+    {
+      "command": "list_all_sessions",
+      "start": 3071,
+      "count": 365,
+      "activeListed": true,
+      "end": 5310
+    },
+    {
+      "command": "list_all_sessions",
+      "start": 3119,
+      "count": 365,
+      "activeListed": true,
+      "end": 5311
+    },
+    {
+      "command": "open_workspace",
+      "start": 5413,
+      "end": 5618
+    },
+    {
+      "command": "list_pi_sessions",
+      "start": 5619,
+      "count": 5,
+      "end": 5803
+    },
+    {
+      "command": "agent_switch_session",
+      "start": 5619,
+      "end": 5919
+    },
+    {
+      "command": "agent_get_messages",
+      "start": 5920,
+      "snapshot": {
+        "keys": [
+          "leafId",
+          "messages"
+        ],
+        "messages": 1
+      },
+      "end": 5932
+    },
+    {
+      "command": "ui_history_read",
+      "start": 5921,
+      "end": 5924
+    }
+  ]
+}

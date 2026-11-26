@@ -36,7 +36,7 @@ function SubagentSettledPillInner({
       data-testid="subagent-settled-pill"
     >
       {hasClosing ? (
-        <TaskNoticeText label={model.outcome === 'aborted' ? '已保留的回复' : failed ? '已有的输出' : '收尾消息'} testId="subagent-settled-body">
+        <TaskNoticeText label={model.replyCompleted ? '最终回复' : model.outcome === 'aborted' ? '已保留的回复' : failed ? '已有的输出' : '收尾消息'} testId="subagent-settled-body">
           {model.closing}
         </TaskNoticeText>
       ) : null}

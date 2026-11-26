@@ -12,6 +12,7 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: ${cssVar.borderRadius};
     background: ${cssVar.colorFillQuaternary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 13px;
     line-height: 1.7;
     color: ${cssVar.colorText};

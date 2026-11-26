@@ -5,7 +5,7 @@ import { emptyContextStats, type ContextStats } from '../../../lib/sessionStats'
 const { compact, getSettings, setSettings, statsBox, messageCount, sessionPath } = vi.hoisted(() => ({
   compact: vi.fn(),
   getSettings: vi.fn(() => Promise.resolve({} as Record<string, string>)),
-  setSettings: vi.fn(() => Promise.resolve()),
+  setSettings: vi.fn<typeof import('../../../lib/pi').pi.setSettings>(() => Promise.resolve()),
   statsBox: { current: null as ContextStats | null },
   messageCount: { current: 1 },
   sessionPath: { current: '/s/a.jsonl' as string | null },
@@ -137,7 +137,7 @@ describe('ContextUsageTag compact button', () => {
     const follow = await screen.findByRole('button', { name: '跟随全局设置（70%）' });
     fireEvent.click(follow);
     await waitFor(() => expect(setSettings).toHaveBeenCalled());
-    const next = setSettings.mock.calls[0][0] as Record<string, string>;
+    const next = setSettings.mock.calls[0][0];
     expect(next.AUTO_COMPACT_OVERRIDES).toBeUndefined();
     expect(next.AUTO_COMPACT_PERCENT).toBe('70');
   });

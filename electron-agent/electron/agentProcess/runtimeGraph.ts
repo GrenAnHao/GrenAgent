@@ -3,10 +3,15 @@ import {RequestObservationService,warmingSnapshot} from '../app/requestObservati
 import { join } from 'node:path';
 import { ModelRuntime } from '../../../cli/src/pi-sdk.js';
 import { subscribeSessionTitleWritten } from '../../../extensions/auto-title/notify.js';
+import { installGoalOwnerLossPort } from '../../../extensions/goal/owner-loss.js';
+import { GOAL_WORKSLOT_CHANNEL } from './contract';
 import { jobs as backgroundJobs } from '../../../extensions/jobs/service.js';
 import { killAllSubagents } from '../../../extensions/multi-agent/subagentProcessRegistry.js';
 import { releaseChildForDelete, releaseSubagentControlPlane } from '../../../extensions/multi-agent/controlPlane.js';
-import { reconcileMcpManager, reloadMcpServer, setLiveWorkspaceMcpConfig } from '../../../extensions/mcp/manager.js';
+import { readTransferRegistryRows, applyTransferRegistryDiff, rollbackTransferRegistryDiff, checkTransferFamilyActivity, drainTransferFamily } from '../../../extensions/multi-agent/session-project-transfer.js';
+import { installSessionOperationGuard, installSessionOperationReadGate, installSessionOperationBlockedSnapshot } from '../../../extensions/multi-agent/session-operation-guard.js';
+import { inspectMcp, callInspectedTool } from '../../../extensions/mcp/inspection.js';
+import { findMcpManager, reconcileMcpManager, reloadMcpServer, setLiveWorkspaceMcpConfig } from '../../../extensions/mcp/manager.js';
 import { probeServer } from '../../../extensions/mcp/probe.js';
 import { writeToolsCacheEntry } from '../../../extensions/mcp/toolsCache.js';
 import type { McpServerConfig } from '../../../extensions/mcp/config.js';
@@ -20,7 +25,10 @@ import { ModelRuntimeHost } from '../agent/modelRuntimeHost';
 import { snapshotSessionModel } from '../agent/workspaceHandle';
 import { PiRuntimeService } from '../app/piRuntimeService';
 import { SubagentService } from '../app/subagentService';
+import { readCallQuery, readUsageFilters } from '../../src/lib/usageReport';
 import { UsageService } from '../app/usageService';
+import { withSessionOperationLease, sessionOperationLeases } from '../app/sessionOperationLease.js';
+import { readTransferJournalBlocks, readTransferJournalManifest } from '../app/sessionProjectTransferJournal.js';
 import { SandboxManager } from '../app/sandbox/sandboxManager';
 import { startJobsBridge } from '../app/jobsBridge';
 import type { ActiveModel, AgentMethod, ExtensionCatalogEntry, HostApi } from './contract';
@@ -45,6 +53,11 @@ export interface RuntimeGraph {
  */
 export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
   const { host, broadcast, agentDir } = options;
+  installGoalOwnerLossPort({
+    publish: (notice) => broadcast(GOAL_WORKSLOT_CHANNEL, notice),
+    claim: (sessionPath, sessionId) => host.goalLossClaim(sessionPath, sessionId),
+    ack: (loss) => host.goalLossAck(loss),
+  });
   const modelRuntimeHost = new ModelRuntimeHost({
     modelsPath: join(agentDir, 'models.json'),
     create: async () => {
@@ -55,8 +68,27 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
     },
   });
   let piRuntime: PiRuntimeService | undefined;
+  let blockedTransferPaths: string[] = [];
+  let transferScopeUnknown = false;
+  const refreshTransferReadState = async (): Promise<void> => {
+    const blocks = await readTransferJournalBlocks(agentDir);
+    blockedTransferPaths = [...new Set(blocks.flatMap(block => block.sessionPaths))];
+    transferScopeUnknown = blocks.some(block => block.sessionPaths.length === 0);
+  };
+  installSessionOperationGuard((paths, operation) => withSessionOperationLease(agentDir, [...paths], operation));
+  installSessionOperationReadGate(query => sessionOperationLeases(agentDir).probe({
+    paths: query.paths ? [...query.paths] : undefined, workspaces: query.workspaces ? [...query.workspaces] : undefined,
+  }));
+  installSessionOperationBlockedSnapshot(() => {
+    if (transferScopeUnknown) throw new Error('SESSION_TRANSFER_BLOCKED: 无法定位未完成迁移的会话族');
+    return blockedTransferPaths;
+  });
 
   const agentHost: AgentHost = new AgentHost({
+    withSessionOperation: async (handle, operation) => {
+      const path = handle.session.sessionFile;
+      return path ? withSessionOperationLease(agentDir, [path], operation) : operation();
+    },
     createHandle: async (workspace, cwd, candidatePath) => createWorkspaceHandle({
       candidatePath,
       stageFork: (handle, entryId, forkOptions) => piRuntime!.stagedFork(workspace, handle, entryId, forkOptions),
@@ -75,6 +107,7 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
         });
       },
       onEvent: (event, meta) => {
+        if (piRuntime && !piRuntime.acceptsSessionEvent(workspace, meta)) return;
         const envelope = piRuntime?.eventEnvelope(workspace, event, meta) ?? {
           workspace,
           event,
@@ -136,6 +169,42 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
     allowedPluginIds: () => host.allowedPluginIds(),
     // 后台任务属于启动它的会话：有存活任务的会话换走时停靠，不原地销毁。
     hasLiveJobs: (sessionId) => backgroundJobs.hasLive(sessionId),
+    sessionTransferPorts: {
+      registry: {
+        read: readTransferRegistryRows,
+        apply: async diff => { await applyTransferRegistryDiff(diff); },
+        rollback: async diff => { await rollbackTransferRegistryDiff(diff); },
+      },
+      activity: { busy: async ({ family }) => {
+        const reason = checkTransferFamilyActivity(family.members.map(member => ({ ...member, workspace: family.sourceWorkspace })));
+        return reason ? { busyReason: 'subagent-unsettled', detail: reason } : undefined;
+      } },
+      writers: {
+        release: async ({ family }) => {
+          const members = family.members.map(member => ({ ...member, workspace: family.sourceWorkspace }));
+          const reason = checkTransferFamilyActivity(members);
+          if (reason) throw new Error(`SESSION_TRANSFER_BUSY: ${reason}`);
+          const drained = await drainTransferFamily(members);
+          if (drained.busy.length > 0) throw new Error('SESSION_TRANSFER_BUSY: 子代理尚未安全释放');
+        },
+        registerProject: async ({ operationId, targetWorkspace }) => {
+          // The commit already changed ownership, even if project registration/open
+          // fails. Location follows that durable fact; usage identity and calls do not change.
+          const manifest = await readTransferJournalManifest(agentDir, operationId);
+          if (!manifest) throw new Error('SESSION_TRANSFER_JOURNAL_MISSING');
+          const members = new Map([{ sessionId: manifest.sessionId, sessionPath: manifest.sessionPath }, ...manifest.family].map(member => [member.sessionId, member]));
+          await usage.updateSessionLocation([...members.values()].map(member => ({ ...member, cwd: targetWorkspace })));
+          await host.resolveWorkspace(targetWorkspace);
+        },
+        invalidate: async ({ operationId }) => {
+          const manifest = await readTransferJournalManifest(agentDir, operationId);
+          if (!manifest) throw new Error('SESSION_TRANSFER_JOURNAL_MISSING');
+          const members = new Map([{ sessionId: manifest.sessionId, sessionPath: manifest.sessionPath }, ...manifest.family].map(member => [member.sessionId, member]));
+          await host.invalidateSessionRecords([...members.values()].map(member => member.sessionPath));
+          broadcast('pi://event', { workspace: '', source: 'interactive', event: { type: 'session_info_changed' } });
+        },
+      },
+    },
     threadStore: host.thread,
   });
   const pi = piRuntime;
@@ -145,6 +214,7 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
   });
   const subagents = new SubagentService(new SandboxManager({}));
   const usage = new UsageService(agentDir);
+  usage.setRecoveryGate(async () => { await pi.recoverSessionTransfers(); });
   const observations=new RequestObservationService({warming:(p)=>{
     const handles=typeof p.workspace==='string'?agentHost.list(p.workspace):agentHost.workspaces().flatMap(w=>agentHost.list(w));
     const handle=handles.find(h=>typeof p.sessionId==='string'?h.session.sessionId===p.sessionId:typeof p.sessionPath==='string'?h.session.sessionFile===p.sessionPath:false);
@@ -169,6 +239,10 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
     'pi.respondUi': (p) => pi.respondUi(str(p, 'workspace'), record(p, 'response')),
     'pi.send': (p) => pi.send(str(p, 'workspace'), str(p, 'command'), record(p, 'args')),
     'pi.sessionWorkflow': (p) => pi.sessionWorkflow(str(p, 'workspace'), record(p, 'request') as unknown as import('../app/sessionWorkflowContracts').SessionWorkflowRequest),
+    // 来源一致性已在 IPC 层按外部 workspace 参数校验并归一，这里只做路由；宿主会再复核。
+    'pi.sessionProjectTransfer': (p) => pi.sessionProjectTransfer(str(p, 'workspace'), record(p, 'request') as unknown as import('../app/sessionProjectTransferContracts').SessionProjectTransferRequest),
+    // 冷启动恢复未完成事务。ready gate 由 PiRuntimeService 自己负责；这里不建全局包装层。
+    'pi.recoverSessionTransfers': () => pi.recoverSessionTransfers(),
     'pi.permissionProfile': (p) => pi.permissionProfile(str(p, 'workspace'), optionalStr(p, 'sessionId')) ?? null,
     'pi.refreshModelRegistry': () => pi.refreshModelRegistry(),
     'pi.syncModelCompactionBudgets': () => pi.syncModelCompactionBudgets(),
@@ -187,6 +261,7 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
       return provider && modelId ? { provider, modelId } : null;
     },
     'subagent.list': (p) => subagents.list(str(p, 'workspace'), optionalStr(p, 'sessionPath')),
+    'subagent.lookup': (p) => subagents.lookup(str(p, 'workspace'), str(p, 'agentId'), str(p, 'parentSessionPath')),
     'subagent.transcript': (p) => subagents.transcript(str(p, 'workspace'), str(p, 'agentId')),
     'subagent.sessionMessages': (p) => subagents.sessionMessages(str(p, 'sessionPath')),
     'subagent.catalog': (p) => subagents.catalog(str(p, 'parentSessionPath')),
@@ -206,6 +281,9 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
       return null;
     },
     'mcp.reload': (p) => reloadMcpServer(str(p, 'workspace'), str(p, 'name')),
+    'mcp.cancelAttempt': (p) => findMcpManager(str(p, 'workspace'))?.cancelAttempt(str(p, 'name'), str(p, 'attemptId')) ?? false,
+    'mcp.inspect': (p) => inspectMcp(findMcpManager(str(p, 'workspace')), str(p, 'name'), optionalStr(p, 'since')),
+    'mcp.testCall': (p) => callInspectedTool(findMcpManager(str(p, 'workspace')), str(p, 'name'), str(p, 'fullName'), record(p, 'args')),
     'mcp.probe': (p) => probeMcpServer(typeof p.configJson === 'string' ? p.configJson : ''),
     'mcp.workspaceForCwd': (p) => agentHost.workspaceForCwd(str(p, 'cwd')),
     'controlPlane.release': (p) => releaseSubagentControlPlane(str(p, 'path')),
@@ -220,17 +298,43 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
       ...(entry.manifest ? { manifest: { id: entry.manifest.id } } : {}),
     })),
     'observations.command':(p)=>observations.command(p),
-    'usage.report': () => usage.report(),
+    'usage.calls': (p) => usage.calls(readCallQuery(p.query)),
+    'usage.report': (p) => usage.report(readUsageFilters(p.filters)),
     'usage.reconcile': () => usage.reconcile(),
   };
+
+  // All read/restore entrypoints (including sub-agent/usage paths) wait for cold
+  // transaction recovery, not just renderer session commands. No runtime is
+  // constructed by this gate for a clean store.
+  // Host callbacks during recovery/startup need these memory-only queries. They
+  // never resume/read session files; waiting here would deadlock recovery on itself.
+  const recoveryExempt = new Set<AgentMethod>(['pi.recoverSessionTransfers', 'pi.ownsSession', 'pi.permissionProfile', 'pi.activeModel', 'pi.listRunningTurns', 'mcp.workspaceForCwd']);
+  // These service methods own their gate, after parsing an explicit retry/commit.
+  // Do not race that operation by scheduling a second background open first.
+  const selfGated = new Set<AgentMethod>(['pi.send', 'pi.sessionProjectTransfer']);
+  for (const name of Object.keys(methods) as AgentMethod[]) {
+    if (recoveryExempt.has(name)) continue;
+    const method = methods[name];
+    methods[name] = async params => {
+      if (!selfGated.has(name)) await pi.recoverSessionTransfers();
+      await refreshTransferReadState();
+      try { return await method(params); }
+      finally { await refreshTransferReadState(); }
+    };
+  }
 
   return {
     methods,
     async shutdown() {
       stopAutoTitleNotice();
+      installSessionOperationGuard(undefined);
+      installSessionOperationReadGate(undefined);
+      installSessionOperationBlockedSnapshot(undefined);
       stopObservations();observations.clear();
       jobsBridge.stop();
+      // Normal session shutdown releases its workslot before removing the sink.
       await agentHost.closeAll();
+      installGoalOwnerLossPort(undefined);
       killAllSubagents();
     },
   };

@@ -10,7 +10,6 @@ const styles = createStaticStyles(({ css }) => ({
     margin-block-start: 4px;
     overflow: auto;
     padding-inline-end: 4px;
-    scrollbar-width: thin;
     font-size: var(--pi-font-size-secondary, 13px);
     color: ${cssVar.colorTextSecondary};
 

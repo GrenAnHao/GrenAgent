@@ -19,10 +19,13 @@ export function AppLinkGuard(): null {
       if (event.type === 'auxclick' && event.button !== 1) return;
       const href = anchorHrefOf(event.target);
       if (href === null) return;
+      const element = event.target instanceof Element ? event.target : null;
+      const sourceCwd = element?.closest<HTMLElement>('[data-source-cwd]')?.dataset.sourceCwd;
       event.preventDefault();
       void routeAppLink(href, {
         system: event.ctrlKey || event.metaKey,
         workspace: useSessionStore.getState().activeWorkspace ?? null,
+        sourceCwd,
         notify: (text) => void message.warning(text),
       });
     };

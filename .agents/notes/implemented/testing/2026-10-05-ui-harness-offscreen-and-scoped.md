@@ -16,7 +16,7 @@ AGENTS.md 要求「先单独跑这个场景，再跑一遍全量，然后才算�
 
 ### ui-harness 默认离屏渲染 + CDP 焦点模拟静默运行，不再抢系统焦点
 
-窗口一律 `show: false` + `webPreferences.offscreen: !visible`（`UI_SHOW=1` / `--show` 时才 `showInactive()` 显示，同样不抢焦点）；静默时 `setFrameRate` 跟主显示器刷新率（上限 240）。`loadFile` 之后按实测 `innerWidth` / `innerHeight` 校正视口（离屏会大 1~2px），再用 `webContents.debugger` 发 CDP `Emulation.setFocusEmulationEnabled`。probe 去掉所有抢焦点代码，`t.resize` 改成按视口校正。`check.mjs` 支持 `--show`、`scenarios/` 为空时以 1 退出。`run.mjs` / `probe.mjs` / `check.mjs` 与 skill 模板逐字一致，项目定制只留在 `harness.config.mjs`、`HarnessRoot.tsx`、`main.tsx`、`stubs.ts`、`index.html`、`vite.config.mjs`（dedupe）。
+窗口一律 `show: false` + `webPreferences.offscreen: !visible`（`UI_SHOW=1` / `--show` 时才 `showInactive()` 显示，同样不抢焦点）；静默时 `setFrameRate` 跟主显示器刷新率（上限 240）。`loadFile` 之后按实测 `innerWidth` / `innerHeight` 校正视口（离屏会大 1~2px），再用 `webContents.debugger` 发 CDP `Emulation.setFocusEmulationEnabled`。probe 去掉所有抢焦点代码，`t.resize` 改成按视口校正。`check.mjs` 支持 `--show`、`scenarios/` 为空时以 1 退出。原版 `run.mjs` / `probe.mjs` / `check.mjs` 从 skill 模板引入；[首错取证与交互控制](2026-11-24-ui-harness-failure-and-controls.md)在本仓库扩展了运行器和 probe，升级时应保留接点。其余渲染适配位于 `harness.config.mjs`、`HarnessRoot.tsx`、`main.tsx`、`stubs.ts`、`index.html`、`vite.config.mjs`（dedupe）。
 
 ### ui:check 日常只点名跑当前需求的场景，构建按源文件签名复用，--changed 只用来查波及范围
 

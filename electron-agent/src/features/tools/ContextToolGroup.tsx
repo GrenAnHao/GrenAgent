@@ -21,7 +21,6 @@ const styles = createStaticStyles(({ css }) => ({
 
     max-height: min(50vh, 480px);
     overflow-y: auto;
-    scrollbar-width: thin;
   `,
   summary: css`
     overflow: hidden;

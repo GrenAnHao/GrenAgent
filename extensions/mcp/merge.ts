@@ -2,10 +2,9 @@ import { execSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { authProviderError, authProviderName } from "./oauthRules.js";
 
-export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
+import { normalizeExposure } from "./exposure.js";
+export { normalizeExposure, exposureForTool, type McpExposure } from "./exposure.js";
 export type McpConfigSource = "desktop" | "global" | "project" | "extension";
-
-const EXPOSURES = new Set<McpExposure>(["codemode", "deferred", "direct", "hidden"]);
 
 export interface McpMergeServer {
   name: string;
@@ -60,13 +59,6 @@ export interface ExpandConfigContext {
   [name: string]: string | undefined;
 }
 
-export function normalizeExposure(value: unknown): McpExposure | undefined {
-  if (value === undefined) return "codemode";
-  if (value === "codemode-deferred") return "codemode";
-  if (typeof value === "string" && EXPOSURES.has(value as McpExposure)) return value as McpExposure;
-  return undefined;
-}
-
 export function mergeMcpLayers(input: McpMergeLayersInput): McpMergeResult {
   const map = new Map<string, McpMergeServer>();
   const errors: string[] = [];
@@ -106,25 +98,6 @@ export function mergeMcpLayers(input: McpMergeLayersInput): McpMergeResult {
   };
 }
 
-export function exposureForTool(
-  toolName: string,
-  server: { exposure?: string; toolExposure?: Record<string, string> },
-): McpExposure {
-  const table = server.toolExposure;
-  if (table && Object.prototype.hasOwnProperty.call(table, toolName)) {
-    const exact = normalizeListedExposure(table[toolName]);
-    if (exact) return exact;
-  }
-  if (table) {
-    for (const [pattern, value] of Object.entries(table)) {
-      if (!pattern.includes("*") || !exposurePatternMatches(pattern, toolName)) continue;
-      const matched = normalizeListedExposure(value);
-      if (matched) return matched;
-    }
-  }
-  return normalizeListedExposure(server.exposure) ?? "codemode";
-}
-
 export function expandConfigValues<T extends ExpandConfigInput>(config: T, context: ExpandConfigContext): T {
   const expand = (value: string) => expandConfigString(value, context);
   const next = { ...config };
@@ -153,20 +126,6 @@ function applyProjectEntry(map: Map<string, McpMergeServer>, entry: McpMergeServ
   if (entry.toolExposure !== undefined) next.toolExposure = entry.toolExposure;
   if (entry.description !== undefined) next.description = entry.description;
   map.set(entry.name, next);
-}
-
-function normalizeListedExposure(value: string | undefined): McpExposure | undefined {
-  if (value === undefined) return undefined;
-  return normalizeExposure(value);
-}
-
-function exposurePatternMatches(pattern: string, toolName: string): boolean {
-  const body = pattern.split("*").map(escapeRegExp).join("[^/]*");
-  return new RegExp(`^${body}$`).test(toolName);
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function expandConfigString(value: string, env: ExpandConfigContext): string {

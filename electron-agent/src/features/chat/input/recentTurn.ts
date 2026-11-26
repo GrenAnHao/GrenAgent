@@ -8,7 +8,7 @@ export const RECENT_TURN_MAX_CHARS = 4000;
  * 不含思考和工具卡。被移出上下文的消息不取。没有助手正文时返回空串，调用方写成「没有更早的对话」。
  */
 export function formatRecentTurn(messages: readonly ChatMessage[], excluded: ReadonlySet<number>): string {
-  const visible = messages.filter((message) => message.timestamp == null || !excluded.has(message.timestamp));
+  const visible = messages.filter((message) => !('timestamp' in message) || message.timestamp == null || !excluded.has(message.timestamp));
   let assistantAt = -1;
   for (let index = visible.length - 1; index >= 0; index -= 1) {
     const message = visible[index];

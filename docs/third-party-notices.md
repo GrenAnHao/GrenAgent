@@ -2,7 +2,7 @@
 
 本仓库自身的许可见根目录 [LICENSE](../LICENSE)（PolyForm Noncommercial 1.0.0，商业用途需另行授权）。本文件说明随安装包分发的第三方组件及其许可义务，**不改变、也不限制**这些组件各自的许可。
 
-安装包（`app.asar` 之外的 `resources/licenses/`）随附了每个生产依赖的许可原文与本仓库的许可文本，索引在该目录的 `INDEX.md`。该目录由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 pnpm 安装的生产依赖图生成，逐包条目见 [third-party-dependencies.md](./third-party-dependencies.md)。同一包存在多个版本时，许可分别放在 `<包名>/<版本>/`。
+安装包在 `app.asar` 之外的 `resources/licenses/` 存放本仓库的许可文本及生产依赖随包提供的许可文件，索引在该目录的 `INDEX.md`。上游包没有附许可文件时，对应的 `LICENSE-MISSING.txt` 记录包名、版本、声明的许可证和出处。该目录由 `electron-agent/scripts/collect-third-party-licenses.cjs` 从 pnpm 安装的生产依赖图生成，逐包条目见 [third-party-dependencies.md](./third-party-dependencies.md)。同一包存在多个版本时，许可分别放在 `<包名>/<版本>/`。
 
 ## 分发的许可类型
 
@@ -21,12 +21,12 @@
 
 ### MPL-2.0 OR Apache-2.0：dompurify
 
-- 包：`dompurify@3.4.14`（Mermaid）和 `dompurify@3.4.17`，上游给出双许可。本项目按 **Apache-2.0** 使用，相应履行 Apache-2.0 义务（随附许可文本、保留版权声明、不改动其文件内声明）。
-- 引入路径：`mermaid@11.17.2` → `dompurify` 的 SVG 净化，打进渲染进程分块。
+- 桌面端直接依赖与 `mermaid@11.17.2` 用于 SVG 净化的依赖均解析为 `dompurify@3.5.0`。上游给出双许可，本项目按 **Apache-2.0** 使用。两份许可原文随附于 `resources/licenses/dompurify/LICENSE` 和 `LICENSE-MPL`。
 
-### OFL-1.1：Inter 字体
+### OFL-1.1：Inter 和 JetBrains Mono 字体
 
 - 包：`@fontsource/inter@5.3.0`，字体本身是 SIL Open Font License 1.1（Copyright 2016 The Inter Project Authors）。
+- 桌面界面使用 `@fontsource-variable/inter@5.3.0` 与 `@fontsource-variable/jetbrains-mono@5.3.0` 中未经修改的 Latin 可变 WOFF2。两份字体的版权声明和 OFL 原文分别随附于 `resources/licenses/fonts/inter-OFL.txt` 和 `resources/licenses/fonts/jetbrains-mono-OFL.txt`。
 - 随包分发字体文件时附上 OFL 原文与版权行，不单独售卖字体，不使用 "Inter" 作为本项目字体产品的名称。
 
 ### BSD-3-Clause AND Apache-2.0：chroma-js
@@ -74,7 +74,7 @@
 
 ### CodeGraph（@colbymchenry/codegraph）
 
-- 包：`@colbymchenry/codegraph@1.6.2`，MIT。
+- 包：`@colbymchenry/codegraph@1.6.4`，MIT。
 - 用途：`codegraph-host` 加载内置 CodeGraph SDK，为桌面「代码索引」和 Agent 的 `code_explore` 提供检索；不启动 CodeGraph MCP 服务。
 - 边界：本项目不复制或修改 CodeGraph 的 Rust 索引器；平台二进制随包提供（`asarUnpack`），许可为 MIT。
 

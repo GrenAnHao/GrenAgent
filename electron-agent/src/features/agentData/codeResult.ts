@@ -7,6 +7,7 @@ export const CODE_PAGE_SIZE = 100;
 export type CodeResultRow = CodeRetrievalRow;
 export interface CodeResultView {
   rows: CodeResultRow[];
+  languages?: Record<string, number>;
   text?: string;
   raw: unknown;
   isError: boolean;
@@ -43,7 +44,9 @@ export function decodeCodeResult(_tool: CodeTool, raw: unknown): CodeResultView 
   if (sdk?.schemaVersion === 1 && Array.isArray(sdk.rows)) {
     const decoded = decodeRows(sdk.rows);
     const page = readPage(sdk.extra);
-    if (decoded) return { ...base, ...decoded, ...(page ? { page } : {}), recognition: 'rows' };
+    const langs = asObject(asObject(sdk.extra)?.languages);
+    const languages = langs && Object.values(langs).every((n) => Number.isSafeInteger(n) && Number(n) >= 0) ? langs as Record<string, number> : undefined;
+    if (decoded) return { ...base, ...decoded, ...(languages ? { languages } : {}), ...(page ? { page } : {}), recognition: 'rows' };
   }
   if (Array.isArray(structured)) {
     const decoded = decodeRows(structured);
@@ -77,6 +80,8 @@ function decodeRows(values: unknown[]): Pick<CodeResultView, 'rows' | 'message'>
       ...(stringValue(entry.kind) ? { kind: stringValue(entry.kind) } : {}),
       ...(typeof entry.line === 'number' && Number.isInteger(entry.line) && entry.line > 0 ? { line: entry.line } : {}),
       ...(typeof entry.endLine === 'number' && Number.isInteger(entry.endLine) && entry.endLine > 0 ? { endLine: entry.endLine } : {}),
+      ...(typeof entry.incomingFiles === 'number' ? { incomingFiles: entry.incomingFiles } : {}),
+      ...(typeof entry.fileCount === 'number' ? { fileCount: entry.fileCount } : {}),
       ...(typeof entry.snippet === 'string' ? { snippet: entry.snippet } : {}),
     }];
   });

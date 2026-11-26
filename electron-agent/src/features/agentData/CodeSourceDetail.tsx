@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Input, Tooltip, Typography } from 'antd';
 import { Copy, ExternalLink } from 'lucide-react';
 import { files } from '../../lib/files';
-import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
+import { sourcePath } from './codeSourcePath';
 import { openPath } from '../../platform/runtime';
 import { codeStyles as styles } from './codeStyles';
 import { CodeSourceLines, type CodeSourceLinesHandle } from './CodeSourceLines';
 
-export interface CodeSourceDetailProps { workspace: string; file: string; line?: number; visible?: boolean; reloadVersion?: number; onClose?: () => void }
+export interface CodeSourceDetailProps { workspace: string; file: string; line?: number; visible?: boolean; reloadVersion?: number; onClose?: () => void; headerActions?: boolean }
 interface ReadSource { key: string; content: string; absolute: string; relative: string }
 
-export function CodeSourceDetail({ workspace, file, line, visible = true, reloadVersion = 0, onClose }: CodeSourceDetailProps) {
+export function CodeSourceDetail({ workspace, file, line, visible = true, reloadVersion = 0, onClose, headerActions }: CodeSourceDetailProps) {
   const key = `${workspace}\0${file}`;
   const [source, setSource] = useState<ReadSource>();
   const [readState, setReadState] = useState<{ key: string; loading: boolean; error?: string }>({ key, loading: false });
@@ -92,7 +92,7 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, reload
       <Button size="small" onClick={jumpToLine} disabled={!currentSource}>跳转到行</Button>
       <span className={styles.toolbarSpacer} />
       {validatedSource ? <>
-        <Tooltip title="复制相对路径"><Button type="text" size="small" aria-label="复制相对路径" icon={<Copy size={14} />} onClick={() => void copyPath()} /></Tooltip>
+        {!headerActions && <Tooltip title="复制相对路径"><Button type="text" size="small" aria-label="复制相对路径" icon={<Copy size={14} />} onClick={() => void copyPath()} /></Tooltip>}
         <Tooltip title="使用系统打开文件（不保证定位行号）"><Button type="text" size="small" aria-label="使用系统打开文件" icon={<ExternalLink size={14} />} onClick={() => void openFile()} /></Tooltip>
       </> : null}
       {onClose ? <Button size="small" onClick={onClose}>关闭源码</Button> : null}
@@ -106,16 +106,3 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, reload
 }
 
 function errorText(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause); }
-
-function sourcePath(workspace: string, file: string): { absolute: string; relative: string } | undefined {
-  const normalize = (value: string) => value.replace(/\\/g, '/').replace(/^\/\/\?\/UNC\//i, '//').replace(/^\/\/\?\//, '');
-  const root = normalize(workspace).replace(/\/+$/, '');
-  const requested = normalize(file);
-  const isAbsolute = (value: string) => /^(?:[a-z]:\/|\/\/[^/]+\/[^/]+\/|\/)/i.test(value);
-  if (!root || !isAbsolute(root) || !requested || /[\0-\x1f]/.test(requested)) return undefined;
-  if (requested.split('/').includes('..') || root.split('/').includes('..')) return undefined;
-  if (/^[a-z]:(?!\/)/i.test(requested) || /:/.test(requested.replace(/^[a-z]:/i, ''))) return undefined;
-  const absolute = isAbsolute(requested) ? requested : `${root}/${requested.replace(/^(?:\.\/)+/, '')}`;
-  if (!isUnder(absolute, root) || pathsEquivalent(absolute, root)) return undefined;
-  return { absolute, relative: absolute.slice(root.length + 1) };
-}

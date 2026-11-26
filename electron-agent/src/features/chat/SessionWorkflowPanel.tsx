@@ -45,7 +45,7 @@ export function SessionWorkflowPanel({tree,request,onApplied,tab='tree',readDraf
     {tree.busy&&<Alert type="warning" title="会话正在处理请求，结构操作暂不可用" style={{marginBottom:12}}/>}
     {tree.needsReload&&<Alert type="error" title="修改已保存；请重开原会话后再发送" style={{marginBottom:12}}/>}
     {error&&<Alert type="error" showIcon title={error} style={{marginBottom:12}}/>}
-    <Tabs activeKey={active} onChange={setActive} items={[
+    <Tabs activeKey={active} onChange={(key) => { if (key === 'context' || key === 'tree' || key === 'portability') setActive(key); }} items={[
       {key:'tree',label:'会话树',children:<>
         <Paragraph type="secondary">同文件导航保留所有旁支。分叉和复制只保留所选路径，生成独立会话。</Paragraph>
         <div style={{maxHeight:320,overflow:'auto',border:'1px solid var(--ant-color-border-secondary)',borderRadius:8,padding:8}}><Tree aria-label="会话树节点" treeData={data(tree.nodes)} defaultExpandedKeys={nodes.filter(n=>n.onBranch).map(n=>n.id)} selectedKeys={selected?[selected]:[]} onSelect={choose}/></div>

@@ -65,7 +65,7 @@ function themeExtension(isDark: boolean): Extension {
       {
         '&': { height: '100%', fontSize: '13px', color: cssVar.colorText, backgroundColor: 'transparent' },
         '&.cm-focused': { outline: 'none' },
-        '.cm-scroller': { fontFamily: cssVar.fontFamilyCode, lineHeight: '1.6' },
+        '.cm-scroller': { fontFamily: cssVar.fontFamilyCode, fontVariantLigatures: 'none', lineHeight: '1.6' },
         '.cm-content': { caretColor: cssVar.colorText },
         '.cm-cursor, .cm-dropCursor': { borderLeftColor: cssVar.colorText },
         '.cm-gutters': { backgroundColor: 'transparent', color: cssVar.colorTextQuaternary, border: 'none' },

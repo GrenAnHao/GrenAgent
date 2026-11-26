@@ -4,9 +4,9 @@ export const workbenchStyles = createStaticStyles(({ css }) => ({
   header: css`
     display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
     min-height: 40px; margin-block-end: 16px;
-    h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+    h2 { margin: 0; font-size: var(--gren-font-heading); font-weight: 600; line-height: 1.3; letter-spacing: -0.02em; }
   `,
-  subtitle: css`color: ${cssVar.colorTextTertiary}; font-size: 13px;`,
+  subtitle: css`color: ${cssVar.colorTextTertiary}; font-size: var(--gren-font-body);`,
   actions: css`display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-inline-start: auto;`,
   banner: css`margin-block-end: 12px;`,
   panel: css`
@@ -22,7 +22,11 @@ export const workbenchStyles = createStaticStyles(({ css }) => ({
   split: css`
     container: workbench-split / inline-size;
     display: grid; grid-template-columns: 280px minmax(0, 1fr); flex: 1; min-height: 440px; min-width: 0;
-    > [data-split-side] { overflow: auto; padding: 6px; border-inline-end: 1px solid ${cssVar.colorBorderSecondary}; min-width: 0; }
+    > [data-split-side] {
+      overflow: auto; padding: 6px; min-width: 0;
+      border-inline-end: 1px solid var(--gren-master-divider, ${cssVar.colorBorderSecondary});
+      background: var(--gren-master-bg, transparent);
+    }
     > [data-split-main] { overflow: auto; padding: 16px 24px; min-width: 0; }
     @container workbench-split (max-width: 799px) {
       grid-template-columns: minmax(0, 1fr);
@@ -38,8 +42,8 @@ export const workbenchStyles = createStaticStyles(({ css }) => ({
     display: grid; place-items: center; width: 44px; height: 44px; margin-block-end: 6px;
     border-radius: 50%; background: ${cssVar.colorFillTertiary}; color: ${cssVar.colorTextTertiary};
   `,
-  emptyTitle: css`color: ${cssVar.colorTextSecondary}; font-size: 13px; font-weight: 500;`,
-  emptyText: css`max-width: 320px; color: ${cssVar.colorTextTertiary}; font-size: 12px; line-height: 1.6;`,
-  meta: css`display: flex; flex-wrap: wrap; gap: 6px 14px; margin-block-end: 14px; color: ${cssVar.colorTextTertiary}; font-size: 12px;`,
+  emptyTitle: css`color: ${cssVar.colorTextSecondary}; font-size: var(--gren-font-body); font-weight: 500;`,
+  emptyText: css`max-width: 320px; color: ${cssVar.colorTextTertiary}; font-size: var(--gren-font-secondary); line-height: 1.6;`,
+  meta: css`display: flex; flex-wrap: wrap; gap: 6px 14px; margin-block-end: 14px; color: ${cssVar.colorTextTertiary}; font-size: var(--gren-font-secondary);`,
   spacer: css`margin-inline-start: auto;`,
 }));

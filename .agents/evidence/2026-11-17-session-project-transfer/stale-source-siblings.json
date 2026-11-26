@@ -1,0 +1,82 @@
+[
+  {
+    "source": "cli/src/gren-runtime.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\cli\\src\\gren-runtime.d.ts"
+  },
+  {
+    "source": "extensions/_shared/session-cwd.js",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\_shared\\session-cwd.js"
+  },
+  {
+    "source": "extensions/_shared/session-cwd.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\_shared\\session-cwd.d.ts"
+  },
+  {
+    "source": "extensions/multi-agent/activation.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\multi-agent\\activation.d.ts"
+  },
+  {
+    "source": "extensions/multi-agent/adjacent-tools.js",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\multi-agent\\adjacent-tools.js"
+  },
+  {
+    "source": "extensions/multi-agent/adjacent-tools.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\multi-agent\\adjacent-tools.d.ts"
+  },
+  {
+    "source": "extensions/multi-agent/registry.js",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\multi-agent\\registry.js"
+  },
+  {
+    "source": "extensions/multi-agent/registry.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\multi-agent\\registry.d.ts"
+  },
+  {
+    "source": "extensions/usage-ledger/ledger.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\extensions\\usage-ledger\\ledger.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/app/piRuntimeService.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\app\\piRuntimeService.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/app/subagentService.js",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\app\\subagentService.js"
+  },
+  {
+    "source": "electron-agent/electron/app/subagentService.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\app\\subagentService.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/agent/agentHost.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\agent\\agentHost.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/agentProcess/runtimeGraph.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\agentProcess\\runtimeGraph.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/agentProcess/mainBindings.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\agentProcess\\mainBindings.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/agentProcess/contract.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\agentProcess\\contract.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/ipc/register.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\ipc\\register.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/main.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\main.d.ts"
+  },
+  {
+    "source": "electron-agent/electron/app/messagesWithEntryIds.js",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\app\\messagesWithEntryIds.js"
+  },
+  {
+    "source": "electron-agent/electron/app/messagesWithEntryIds.d.ts",
+    "backup": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\gren-transfer-stale-siblings-14lkwm1i\\electron-agent\\electron\\app\\messagesWithEntryIds.d.ts"
+  }
+]

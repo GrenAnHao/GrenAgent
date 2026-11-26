@@ -1,4 +1,5 @@
-import { Button, Flexbox, Icon } from '@lobehub/ui';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../components/WorkbenchButton';
 import { Modal, Switch } from 'antd';
 import { cssVar } from 'antd-style';
 import { MessageSquare, Settings2 } from 'lucide-react';

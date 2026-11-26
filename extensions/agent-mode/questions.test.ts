@@ -8,7 +8,7 @@ import {
   normalizeQuestions,
   truncationNotice,
   type RawQuestion,
-} from "./questions.js";
+} from "./questions.ts";
 
 describe("makeQuestionsId", () => {
   it("formats as q-<base36 timestamp>-<rand>", () => {
@@ -32,9 +32,10 @@ describe("normalizeQuestions", () => {
           options: [
             { id: "o1", label: "A方案" },
             { id: "o2", label: "B方案" },
+            { id: CUSTOM_OPTION_ID, label: "其他（自定义）" },
           ],
           allowMultiple: true,
-          allowCustom: false,
+          allowCustom: true,
         },
       ],
     });
@@ -42,7 +43,16 @@ describe("normalizeQuestions", () => {
 
   it("keeps explicit option ids", () => {
     const raw: RawQuestion[] = [{ question: "Q", options: [{ id: "yes", label: "是" }] }];
-    expect(normalizeQuestions(raw, "q-1")?.questions[0].options).toEqual([{ id: "yes", label: "是" }]);
+    expect(normalizeQuestions(raw, "q-1")?.questions[0].options).toEqual([
+      { id: "yes", label: "是" },
+      { id: CUSTOM_OPTION_ID, label: "其他（自定义）" },
+    ]);
+  });
+
+  it("keeps a truly closed question without a custom choice", () => {
+    const question = normalizeQuestions([{ question: "批准？", options: [{ id: "yes", label: "通过" }], allowCustom: false }], "q-1")?.questions[0];
+    expect(question?.allowCustom).toBe(false);
+    expect(question?.options).toEqual([{ id: "yes", label: "通过" }]);
   });
 
   it("appends custom option when allowCustom", () => {
@@ -68,6 +78,25 @@ describe("normalizeQuestions", () => {
     ]);
   });
 
+  it("prepends a closed visual review with stable outcome IDs and no preselection", () => {
+    const out = normalizeQuestions([{ question: "方案？", options: [{ id: "a", label: "A" }] }], "q-1", {
+      visualReview: { previewId: "preview-1" }, allowExtra: true,
+    });
+    expect(out?.visualReview).toEqual({ previewId: "preview-1" });
+    expect(out?.questions[0]).toEqual({ id: "visual-review", title: "这版视觉产出是否通过评审？", options: [
+      { id: "approve", label: "通过" }, { id: "redo", label: "打回重做" },
+    ], allowMultiple: false, allowCustom: false });
+    expect(out?.questions[1].options).toContainEqual({ id: CUSTOM_OPTION_ID, label: "其他（自定义）" });
+    expect(out?.allowExtra).toBe(true);
+    expect(out).not.toHaveProperty("selected");
+  });
+
+  it("always offers a review supplement even when the caller explicitly disables it", () => {
+    const out = normalizeQuestions([], "q-review", { visualReview: { previewId: "preview-review" }, allowExtra: false });
+    expect(out).toMatchObject({ allowExtra: true, allowExtraImages: true });
+    expect(out?.questions[0].allowCustom).toBe(false);
+  });
+
   it("passes card-level allowExtra flags", () => {
     const raw: RawQuestion[] = [{ question: "Q", options: [{ label: "A" }] }];
     expect(
@@ -79,7 +108,7 @@ describe("normalizeQuestions", () => {
       allowExtraImages: false,
       extraPlaceholder: "备注",
       questions: [
-        { id: "q1", title: "Q", options: [{ id: "o1", label: "A" }], allowMultiple: false, allowCustom: false },
+        { id: "q1", title: "Q", options: [{ id: "o1", label: "A" }, { id: CUSTOM_OPTION_ID, label: "其他（自定义）" }], allowMultiple: false, allowCustom: true },
       ],
     });
   });
@@ -94,9 +123,9 @@ describe("normalizeQuestions", () => {
     expect(out?.questions[0]).toEqual({
       id: "q1",
       title: "有效",
-      options: [{ id: "o1", label: "ok" }],
+      options: [{ id: "o1", label: "ok" }, { id: CUSTOM_OPTION_ID, label: "其他（自定义）" }],
       allowMultiple: false,
-      allowCustom: false,
+      allowCustom: true,
     });
   });
 

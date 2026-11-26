@@ -1,12 +1,17 @@
 // 一次性探测：连接单个 MCP server、listTools、回传/缓存工具名。复用 mcp 扩展同款 SDK + 名称规则。
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { sanitize, type McpServerConfig } from "./config.js";
+import { allToolPages, catalogTools, type CatalogTool } from "./catalog.js";
+import { connectionError, stderrTail } from "./diagnostics.js";
+import { type McpServerConfig } from "./config.js";
 import { createMcpTransport } from "./transport.js";
 import { writeToolsCacheEntry } from "./toolsCache.js";
 
 export interface ProbeResult {
   ok: boolean;
   toolNames: string[];
+  catalog?: CatalogTool[];
+  stderr?: string[];
+  exit?: string;
   error?: string;
 }
 
@@ -47,16 +52,18 @@ export function killProbeChild(pid: number): void {
 
 export async function probeServer(s: McpServerConfig, timeoutMs = PROBE_TIMEOUT_MS): Promise<ProbeResult> {
   const client = new Client({ name: "grenagent-probe", version: "0.1.0" });
-  const transport = createMcpTransport(s);
+  const tail = stderrTail(s);
+  let exit: string | undefined;
+  const transport = createMcpTransport(s, undefined, { onStderr: tail.append, onExit: (value) => { exit = value; } });
   let timedOut = false;
   const markTimeout = () => { timedOut = true; };
   try {
     await withTimeout(client.connect(transport), timeoutMs, markTimeout);
-    const { tools } = await withTimeout(client.listTools(), timeoutMs, markTimeout);
-    const toolNames = tools.map((t) => `mcp__${sanitize(s.name)}__${sanitize(t.name)}`);
-    return { ok: true, toolNames };
+    const { tools } = await withTimeout(allToolPages(cursor => client.listTools(cursor ? { cursor } : undefined)), timeoutMs, markTimeout);
+    const catalog = catalogTools(s.name, tools);
+    return { ok: true, toolNames: catalog.map(t => t.fullName), catalog };
   } catch (e) {
-    return { ok: false, toolNames: [], error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, toolNames: [], error: connectionError(s, e), stderr: tail.read(true), exit };
   } finally {
     await client.close().catch(() => {});
     // 未暴露 pid 时无法 killTree，只能依赖 client.close()。

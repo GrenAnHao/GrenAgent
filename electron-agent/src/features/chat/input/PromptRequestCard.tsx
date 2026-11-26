@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Icon } from '@lobehub/ui';
+import { Icon } from '@lobehub/ui';
+import { WorkbenchButton as Button } from '../../../components/WorkbenchButton';
 import { ShieldAlert, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { extensionUiRespond, pi } from '../../../lib/pi';

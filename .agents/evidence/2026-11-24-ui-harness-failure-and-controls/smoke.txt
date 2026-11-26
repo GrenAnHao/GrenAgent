@@ -1,0 +1,44 @@
+自检：临时拷入 harness-smoke，跑完自动删除
+构建：场景有增减
+场景已构建（生产模式，9.8s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+
+▸ harness-smoke
+  PASS 场景数据通道（exposeData → t.data）
+  PASS 列表渲染出全部行
+  PASS 静默模式没有可见窗口
+  PASS 页面可见（rAF 和动画照常跑）
+  PASS 页面有焦点（焦点模拟生效）
+  PASS 视口尺寸等于配置
+  PASS CSS 动画走完（animationend 触发）
+  PASS 关着的弹层仍在 DOM 里
+  PASS 关着的弹层不可见
+  PASS 点击打开弹层（position: fixed 也算可见）
+  PASS Esc 关闭弹层
+  PASS 点外面关闭弹层
+  PASS hover 变主色
+  PASS 挪开后恢复
+  PASS 输入 ASCII + 中文
+  PASS 退格
+  PASS 双击
+  PASS 右键
+  PASS Ctrl 点击带上修饰键
+  PASS 拖拽
+  PASS 滚轮向下滚动（scrollTop 400）
+  PASS JS focus() 触发 focus 事件
+  PASS 回车触发查询，桩没放行时停在查询中
+  PASS 放行后显示结果
+  INFO 收起采样  240,240,240,240,240,240,240,240,240,226,210,193,174,153,129,103,81,64,52,43,36,26,22,19,16,14,12,9,8,7,6,5,3,3,2,2,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+  PASS 收起有中间帧（28 种宽度）
+  PASS 宽度单调递减
+  PASS 收完宽度为 0
+  PASS 视口变窄
+  INFO 截图 narrow  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\harness-smoke-narrow.png
+  PASS 视口恢复
+  INFO 列表滚动 fps  158
+  ── 29 passed, 0 failed
+
+通过：harness-smoke（11.8s）。只跑了 1/64 个场景，其余 63 个没指定，未运行
+
+自检通过，已删除临时场景 harness-smoke（scenarios/、probes/ 恢复原样）

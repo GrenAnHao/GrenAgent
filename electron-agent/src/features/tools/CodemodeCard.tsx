@@ -30,7 +30,7 @@ import { parsePartialArgs } from '../../lib/streamingJson';
 /** 收起时最多露出几条调用；运行中露最新的几条，前面的折成一行。 */
 const VISIBLE_CALLS = 6;
 
-const codeStyle = { fontFamily: 'var(--pi-font-mono)', fontSize: 12.5 } as const;
+const codeStyle = { fontFamily: 'var(--font-mono)', fontVariantLigatures: 'none', fontSize: 12.5 } as const;
 
 const styles = createStaticStyles(({ css }) => ({
   calls: css`
@@ -95,6 +95,7 @@ const styles = createStaticStyles(({ css }) => ({
     overflow: hidden;
     min-width: 0;
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 11px;
     color: ${cssVar.colorTextQuaternary};
     text-overflow: ellipsis;

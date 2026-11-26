@@ -1,9 +1,42 @@
+import type { GoalControlRequest, GoalControlReceipt } from '../../../extensions/goal/control-contract';
+export type { GoalControlRequest, GoalControlReceipt } from '../../../extensions/goal/control-contract';
 import type { SessionWorkflowRequest, SessionWorkflowAck } from '../../electron/app/sessionWorkflowContracts';
+import type {
+  SessionProjectTransferAck,
+  SessionProjectTransferCommitRequest,
+  SessionProjectTransferPreviewRequest,
+  SessionProjectTransferRetryOpenRequest,
+  SessionProjectTransferStatusRequest,
+} from '../../electron/app/sessionProjectTransferContracts';
+export type {
+  SessionProjectTransferAckStatus,
+  SessionProjectTransferAck,
+  SessionProjectTransferAction,
+  SessionProjectTransferBusyReason,
+  SessionProjectTransferBusyAck,
+  SessionProjectTransferCommitRequest,
+  SessionProjectTransferCommittedNeedsOpenAck,
+  SessionProjectTransferFamilySummary,
+  SessionProjectTransferNoOpAck,
+  SessionProjectTransferOpenedAck,
+  SessionProjectTransferPhase,
+  SessionProjectTransferPolicySummary,
+  SessionProjectTransferPreviewAck,
+  SessionProjectTransferPreviewRequest,
+  SessionProjectTransferRecoveryRequiredAck,
+  SessionProjectTransferRequest,
+  SessionProjectTransferRetryOpenRequest,
+  SessionProjectTransferStaleAck,
+  SessionProjectTransferStaleReason,
+  SessionProjectTransferStatusRequest,
+} from '../../electron/app/sessionProjectTransferContracts';
 import type { ModelBudgetState, ModelCompactionPatch, BudgetSyncResult } from '../../../extensions/_shared/model-compaction-budgets';
+import type { SubagentBashState } from '../../../extensions/multi-agent/background-bash';
+import type { SubagentLookup } from '../../electron/app/subagentService';
 import { Channel, invoke, listen, type UnlistenFn } from '../platform/runtime';
 import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
-import type { UsageReport } from './usageReport';
+import type { CallPage, CallQuery, UsageFilters, UsageReport } from './usageReport';
 export type { UsageReport } from './usageReport';
 import type { PackageListItem, PackageSearchResult } from '../../electron/app/piPackageModel';
 export type { PackageListItem, PackageSearchResult, MarketplaceHit } from '../../electron/app/piPackageModel';
@@ -33,8 +66,19 @@ export interface PiUiRequestEnvelope {
   source?: 'interactive' | 'goal';
   request: ExtensionUiRequest;
 }
+export interface GoalOwnerLossNotice {
+  sessionPath: string;
+  sessionId: string;
+  ownerEpoch: string;
+  goalId: string;
+  revision: number;
+  runNumber: number;
+  conditionRevision: number;
+}
 export interface PiExitEnvelope {
   workspace: string;
+  /** Confirmed loss is not a durable pause receipt. */
+  confirmedGoalLosses?: GoalOwnerLossNotice[];
   code: number | null;
   sessionId?: string;
   sessionPath?: string;
@@ -48,18 +92,25 @@ export type AgentEvent =
   | { type: 'turn_start' }
   | { type: 'turn_end'; message: AgentMessage; toolResults: unknown[] }
   | { type: 'message_start'; message: AgentMessage }
-  | { type: 'message_update'; message?: AgentMessage; assistantMessageEvent: AssistantMessageEvent; usage?: unknown }
+  | { type: 'message_update'; message?: AgentMessage; assistantMessageEvent: AssistantMessageEvent; usage?: unknown; responseAttempt?: { runId: number; attempt: number } }
   | { type: 'message_end'; message: AgentMessage }
   | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown; parentToolCallId?: string }
   | { type: 'tool_execution_update'; toolCallId: string; toolName: string; partialResult: unknown; parentToolCallId?: string }
   | { type: 'tool_execution_end'; toolCallId: string; toolName: string; result: unknown; isError: boolean; parentToolCallId?: string }
   | { type: 'queue_update'; steering: string[]; followUp: string[] }
-  | { type: 'compaction_start'; reason: string }
-  | { type: 'compaction_end'; reason: string; aborted: boolean; willRetry: boolean; errorMessage?: string }
+  | { type: 'compaction_start'; reason: string; compaction?: { ownerEpoch: string; operationId: string; phase: 'preparing' | 'running'; startedAt: number; sequence: number }; contextRevision?: number }
+  | { type: 'compaction_end'; reason: string; aborted: boolean; willRetry: boolean; errorMessage?: string; compaction?: { ownerEpoch: string; operationId: string; phase: 'preparing' | 'running'; startedAt: number; sequence: number }; contextRevision?: number }
   | { type: 'auto_retry_start'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
   | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
   | { type: 'extension_error'; error: string }
   | { type: string; [k: string]: unknown };
+
+export interface SessionMessagesSnapshot {
+  messages: AgentMessage[];
+  /** Authoritative current selection; null is the empty root, not missing history. */
+  leafId?: string | null;
+  transfer?: { fromWorkspace: string; toWorkspace: string; operationId: string };
+}
 
 export interface AgentMessage {
   role: 'user' | 'assistant' | 'toolResult' | string;
@@ -110,6 +161,7 @@ export interface ProviderConfigPayload {
 }
 
 /** 凭据状态、OAuth 能力与登录事件的类型与主进程服务共用同一份定义。 */
+import type { ProviderCredentialStatus, ProviderOAuthCapability, ProviderLoginUiEvent } from '../../electron/app/providerService';
 export type {
   ProviderCredentialStatus,
   ProviderOAuthCapability,
@@ -169,6 +221,7 @@ export interface EnhancePromptResult {
 }
 
 export interface SubAgentItem {
+  bashState?: SubagentBashState;
   id: string;
   task: string;
   status: 'running' | 'done' | 'error' | 'cancelled' | string;
@@ -184,6 +237,8 @@ export interface SubAgentItem {
   exitCode?: number | null;
   /** 原始 `--mode json` JSONL transcript（运行期增量写入），前端据此实时回放子代理完整工具调用+文本流。 */
   transcript?: string | null;
+  /** 运行期已观察到首个实质活动（正文/思考/工具调用）；结算后回到 0。旧库缺列时为 0。 */
+  responseStarted?: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -268,8 +323,35 @@ function target(sessionPath?: string | null): { targetSessionPath?: string } {
   return sessionPath ? { targetSessionPath: sessionPath } : {};
 }
 
+/**
+ * 会话跨项目迁移。sourceWorkspace 恒取外部 workspace 参数：请求体里的来源只用于宿主复核，
+ * 渲染层不能靠它把操作指向另一个项目。preview 只收 sessionPath + targetWorkspace；
+ * commit 只收宿主题发的 ticket/operationId 与预期身份、确认 leaf（null 为空根）、revision。
+ */
+function sessionProjectTransferCall(
+  workspace: string,
+  request: SessionProjectTransferPreviewRequest | SessionProjectTransferCommitRequest | SessionProjectTransferStatusRequest | SessionProjectTransferRetryOpenRequest,
+): Promise<SessionProjectTransferAck> {
+  return invoke<SessionProjectTransferAck>('agent_session_project_transfer', { workspace, ...request });
+}
+
 export const pi = {
   sessionWorkflow: (workspace: string, request: SessionWorkflowRequest) => invoke<SessionWorkflowAck>('agent_session_workflow', {workspace,...request}),
+  sessionProjectTransfer: {
+    preview: (workspace: string, input: { sessionPath: string; targetWorkspace: string }) =>
+      sessionProjectTransferCall(workspace, { action: 'preview', sourceWorkspace: workspace, ...input }),
+    commit: (
+      workspace: string,
+      input: {
+        sessionPath: string; operationId: string; ticket: string;
+        expectedSessionId: string; expectedLeafId: string | null; expectedRevision: string;
+      },
+    ) => sessionProjectTransferCall(workspace, { action: 'commit', sourceWorkspace: workspace, ...input }),
+    status: (workspace: string, input: { sessionPath: string; operationId: string }) =>
+      sessionProjectTransferCall(workspace, { action: 'status', sourceWorkspace: workspace, ...input }),
+    retryOpen: (workspace: string, input: { sessionPath: string; operationId: string }) =>
+      sessionProjectTransferCall(workspace, { action: 'retry-open', sourceWorkspace: workspace, ...input }),
+  },
   openWorkspace:(workspace: string) =>
     invoke<OpenWorkspaceResult>('open_workspace', { workspace }),
   closeWorkspace: (workspace: string) => invoke<void>('close_workspace', { workspace }),
@@ -359,21 +441,30 @@ export const pi = {
    */
   getForkMessages: (workspace: string) =>
     invoke<{ messages: AgentMessage[] }>('agent_get_fork_messages', { workspace }),
-  compact: (workspace: string) => invoke<unknown>('agent_compact', { workspace }),
+  compact: (workspace: string, customInstructions?: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_compact', { workspace, ...(customInstructions ? { customInstructions } : {}), ...target(targetSessionPath) }),
   getState: (workspace: string, targetSessionPath?: string | null) =>
     invoke<unknown>('agent_get_state', { workspace, ...target(targetSessionPath) }),
   /** 主进程仍在跑的交互回合。渲染进程热更新后用来恢复停止按钮和侧边栏运行态。 */
   listRunningTurns: () =>
-    invoke<Array<{ workspace: string; sessionId?: string; sessionPath?: string }>>('agent_list_running_turns'),
+    invoke<Array<{ workspace: string; sessionId?: string; sessionPath?: string; isStreaming?: boolean; isCompacting?: boolean; compaction?: { ownerEpoch: string; operationId: string; phase: 'preparing' | 'running'; startedAt: number; sequence: number }; contextRevision?: number; ownerEpoch?: string; activitySequence?: number }>>('agent_list_running_turns'),
   getMessages: (workspace: string, targetSessionPath?: string | null) =>
-    invoke<{ messages: AgentMessage[] }>('agent_get_messages', { workspace, ...target(targetSessionPath) }),
+    invoke<SessionMessagesSnapshot>('agent_get_messages', { workspace, ...target(targetSessionPath) }),
+  getUserMessageEntries: (workspace: string, targetSessionPath: string) =>
+    invoke<{ messages: Pick<AgentMessage, 'role' | 'entryId' | 'timestamp'>[] }>('agent_get_messages', {
+      workspace, targetSessionPath, userEntriesOnly: true,
+    }),
   /** 按会话路径补拉 Goal 投影（和 setStatus("goal") 同一种信封）。会话跑着也立刻返回；没有返回 null。 */
   getGoal: (workspace: string, sessionPath: string) =>
     invoke<unknown>('agent_get_goal', { workspace, targetSessionPath: sessionPath }),
+  goalControl: (workspace: string, sessionPath: string, request: GoalControlRequest) =>
+    invoke<GoalControlReceipt>('agent_goal_control', { workspace, targetSessionPath: sessionPath, ...request }),
   switchSession: (workspace: string, sessionPath: string) =>
     invoke<unknown>('agent_switch_session', { workspace, sessionPath }),
   listSessions: (workspace: string) => invoke<SessionInfo[]>('list_pi_sessions', { workspace }),
   listAllSessions: () => invoke<SessionInfo[]>('list_all_sessions'),
+  lookupStartupSession: (sessionPath: string) => invoke<SessionInfo | null>('lookup_startup_session', { sessionPath }),
+  startupScratchHasSessions: (workspace: string) => invoke<boolean>('startup_scratch_has_sessions', { workspace }),
   /** 已打开但可能还没有会话文件的项目目录。 */
   listProjects: () => invoke<string[]>('list_projects'),
   setSessionName: (workspace: string, name: string) =>
@@ -403,17 +494,18 @@ export const pi = {
     invoke<unknown>('permission_resolve', { requestId: id, resolution }),
   getSessionStats: (workspace: string, targetSessionPath?: string | null) =>
     invoke<SessionStats>('agent_get_session_stats', { workspace, ...target(targetSessionPath) }),
-  readAskUserDraft: (workspace: string, toolCallId: string) =>
-    invoke<AskUserDraft | null>('ask_user_draft_read', { workspace, toolCallId }),
-  writeAskUserDraft: (workspace: string, draft: AskUserDraft) =>
-    invoke<void>('ask_user_draft_write', { workspace, draft }),
+  readAskUserDraft: (workspace: string, toolCallId: string, sessionPath?: string | null) =>
+    invoke<AskUserDraft | null>('ask_user_draft_read', { workspace, toolCallId, ...target(sessionPath) }),
+  writeAskUserDraft: (workspace: string, draft: AskUserDraft, sessionPath?: string, requestId?: string) =>
+    invoke<void>('ask_user_draft_write', { workspace, draft, ...target(sessionPath), ...(requestId ? { requestId } : {}) }),
   deleteAskUserDraft: (workspace: string) =>
     invoke<void>('ask_user_draft_delete', { workspace }),
   completeAskUser: (workspace: string, toolCallId: string, value?: string, cancelled?: boolean) =>
     invoke<'ok' | 'duplicate'>('agent_complete_ask_user', { workspace, toolCallId, value, cancelled }),
   requestObservation: <T=unknown>(params:Record<string,unknown>)=>invoke<T>('request_observation',params),
   exportRequestObservation:(previewId:string)=>invoke<{saved:boolean}>('export_request_observation',{previewId}),
-  getUsageReport: () => invoke<UsageReport>('usage_report'),
+  getUsageCalls: (query: CallQuery) => invoke<CallPage>('usage_calls', {query}),
+  getUsageReport: (filters?: UsageFilters) => invoke<UsageReport>('usage_report', { filters }),
   /** 把会话目录里账本没有的调用补进用量账本（命令行 pi、记账上线前的会话）。 */
   reconcileUsage: () => invoke<{ files: number; added: number }>('usage_reconcile'),
   getCommands: (workspace: string) => invoke<unknown>('agent_get_commands', { workspace }),
@@ -448,8 +540,16 @@ export const pi = {
     config: object,
     enabled: boolean,
   ) => invoke<void>('upsert_mcp_config', { workspace, scope, name, config, enabled }),
+  moveMcpConfig: (workspace: string, from: McpConfigScope, original: string, to: McpConfigScope, name: string, config: object, enabled: boolean) =>
+    invoke<void>('move_mcp_config', { workspace, from, original, to, name, config, enabled }),
   removeMcpConfig: (workspace: string, scope: McpConfigScope, name: string) =>
     invoke<void>('remove_mcp_config', { workspace, scope, name }),
+  cancelMcpAttempt: (workspace: string, name: string, attemptId: string) =>
+    invoke<boolean>('cancel_mcp_attempt', { workspace, name, attemptId }),
+  inspectMcpServer: (workspace: string, name: string, since?: string) =>
+    invoke<import('../../../extensions/mcp/inspection').McpInspection>('inspect_mcp_server', { workspace, name, since }),
+  testMcpTool: (workspace: string, name: string, fullName: string, args: Record<string, unknown>) =>
+    invoke<{ content?: unknown; isError?: boolean; structuredContent?: unknown }>('test_mcp_tool', { workspace, name, fullName, args }),
   reloadMcpServer: (workspace: string, name: string) =>
     invoke<void>('reload_mcp_server', { workspace, name }),
   getProviderConfig: () => invoke<ProviderConfigPayload>('get_provider_config'),
@@ -494,6 +594,9 @@ export const pi = {
   /** 给了 sessionPath 只列这份会话派出去的子代理（含孙级）；不给列整个项目。 */
   subagentList: (workspace: string, sessionPath?: string | null) =>
     invoke<SubAgentItem[]>('subagent_list', { workspace, ...(sessionPath ? { sessionPath } : {}) }),
+  /** 按稳定 ID 和原父会话确认单行状态；列表缺行不能充当终态。 */
+  subagentLookup: (workspace: string, agentId: string, parentSessionPath: string) =>
+    invoke<SubagentLookup>('subagent_lookup', { workspace, agentId, parentSessionPath }),
   /** 按需拉取单个子代理的完整 JSONL transcript（打开详情面板时调用，不在轮询路径中）。 */
   subagentGetTranscript: (workspace: string, agentId: string) =>
     invoke<string | null>('subagent_get_transcript', { workspace, agentId }),
@@ -520,10 +623,12 @@ export const pi = {
   ) => invoke<void>('subagent_prompt', { workspace, parentSessionPath, sessionPath, message, delivery }),
   subagentInterrupt: (workspace: string, parentSessionPath: string, sessionPath: string) =>
     invoke<void>('subagent_interrupt', { workspace, parentSessionPath, sessionPath }),
-  readUiHistory: (workspace: string, sessionKey: string) =>
-    invoke<string>('ui_history_read', { workspace, sessionKey }),
-  writeUiHistory: (workspace: string, sessionKey: string, content: string) =>
-    invoke<void>('ui_history_write', { workspace, sessionKey, content }),
+  readUiHistory: (workspace: string, sessionKey: string, checkpoint = false) =>
+    invoke<string | { content: string; revision?: string }>('ui_history_read', { workspace, sessionKey, ...(checkpoint ? { checkpoint } : {}) }),
+  writeUiHistory: (workspace: string, sessionKey: string, content: string, checkpoint = false) =>
+    invoke<string | undefined>('ui_history_write', { workspace, sessionKey, content, ...(checkpoint ? { checkpoint } : {}) }),
+  patchUiHistory: (workspace: string, sessionKey: string, revision: string, offset: number, content: string) =>
+    invoke<string | null>('ui_history_patch', { workspace, sessionKey, revision, offset, content }),
   deleteUiHistory: (workspace: string, sessionKey: string) =>
     invoke<void>('ui_history_delete', { workspace, sessionKey }),
   /** 执行扩展命令（/name args）。带会话路径时打到那份会话，不落到前景会话上。 */
@@ -574,8 +679,7 @@ export const pi = {
 export const extensionUiRespond = (workspace: string, response: Record<string, unknown>) =>
   pi.respondUi(workspace, response);
 
-export const writeAskUserDraft = (workspace: string, draft: AskUserDraft) =>
-  pi.writeAskUserDraft(workspace, draft);
+export const writeAskUserDraft = pi.writeAskUserDraft;
 
 export const deleteAskUserDraft = (workspace: string) => pi.deleteAskUserDraft(workspace);
 

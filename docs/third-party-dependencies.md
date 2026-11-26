@@ -8,18 +8,18 @@
 
 | 许可证 | 包数 |
 | --- | --- |
-| MIT | 764 |
-| ISC | 55 |
+| MIT | 787 |
+| ISC | 56 |
 | Apache-2.0 | 42 |
 | BSD-3-Clause | 33 |
+| apache-2.0 | 7 |
+| BlueOak-1.0.0 | 3 |
 | BSD-2-Clause | 3 |
-| apache-2.0 | 2 |
-| (MPL-2.0 OR Apache-2.0) | 2 |
 | Unlicense | 2 |
-| BlueOak-1.0.0 | 2 |
 | 0BSD | 2 |
 | OFL-1.1 | 1 |
 | (BSD-3-Clause AND Apache-2.0) | 1 |
+| (MPL-2.0 OR Apache-2.0) | 1 |
 | EPL-2.0 | 1 |
 | (MIT OR WTFPL) | 1 |
 | UNKNOWN | 1 |
@@ -35,8 +35,7 @@
 | --- | --- | --- | --- |
 | @fontsource/inter | 5.3.0 | OFL-1.1 | LICENSE |
 | chroma-js | 3.2.0 | (BSD-3-Clause AND Apache-2.0) | LICENSE |
-| dompurify | 3.4.14 | (MPL-2.0 OR Apache-2.0) | LICENSE、LICENSE-MPL |
-| dompurify | 3.4.17 | (MPL-2.0 OR Apache-2.0) | LICENSE、LICENSE-MPL |
+| dompurify | 3.5.0 | (MPL-2.0 OR Apache-2.0) | LICENSE、LICENSE-MPL |
 | elkjs | 0.11.1 | EPL-2.0 | LICENSE.md |
 | expand-template | 2.0.3 | (MIT OR WTFPL) | LICENSE |
 | khroma | 2.1.0 | UNKNOWN | license |
@@ -70,12 +69,11 @@
 - @babel/template@7.29.7
 - @babel/traverse@7.29.8
 - @babel/types@7.29.8
-- @base-ui/react@1.6.0
-- @base-ui/react@1.7.0
-- @base-ui/utils@0.3.1
-- @base-ui/utils@0.3.2
+- @base-ui/react@1.8.0
+- @base-ui/utils@0.4.0
 - @braintree/sanitize-url@7.1.2
 - @codemirror/autocomplete@6.20.3
+- @codemirror/autocomplete@6.20.4
 - @codemirror/commands@6.11.1
 - @codemirror/lang-angular@0.1.4
 - @codemirror/lang-cpp@6.0.3
@@ -102,26 +100,28 @@
 - @codemirror/language-data@6.5.2
 - @codemirror/legacy-modes@6.5.5
 - @codemirror/lint@6.9.7
-- @codemirror/merge@6.12.2
+- @codemirror/merge@6.12.3
 - @codemirror/search@6.7.2
 - @codemirror/state@6.7.6
 - @codemirror/streamparser@6.0.0
 - @codemirror/theme-one-dark@6.1.3
 - @codemirror/view@6.43.14
-- @colbymchenry/codegraph@1.6.2
-- @colbymchenry/codegraph-win32-x64@1.6.2
+- @codemirror/view@6.43.15
+- @colbymchenry/codegraph@1.6.4
+- @colbymchenry/codegraph-win32-x64@1.6.4
 - @dnd-kit/accessibility@3.1.1
 - @dnd-kit/core@6.3.1
 - @dnd-kit/modifiers@9.0.0
 - @dnd-kit/sortable@10.0.0
 - @dnd-kit/utilities@3.2.2
-- @earendil-works/pi-agent-core@1.4.0
-- @earendil-works/pi-ai@1.4.0
-- @earendil-works/pi-codemode@1.4.0
-- @earendil-works/pi-coding-agent@1.4.0
-- @earendil-works/pi-mcp@1.4.0
-- @earendil-works/pi-telemetry@1.4.0
-- @earendil-works/pi-tui@1.4.0
+- @earendil-works/pi-agent-core@1.6.0
+- @earendil-works/pi-ai@1.6.0
+- @earendil-works/pi-codemode@1.6.0
+- @earendil-works/pi-coding-agent@1.6.0
+- @earendil-works/pi-mcp@1.6.0
+- @earendil-works/pi-schema@1.6.0
+- @earendil-works/pi-telemetry@1.6.0
+- @earendil-works/pi-tui@1.6.0
 - @emoji-mart/data@1.2.1
 - @emoji-mart/react@1.1.1
 - @emotion/babel-plugin@11.13.5
@@ -144,8 +144,8 @@
 - @floating-ui/react@0.27.20
 - @floating-ui/react-dom@2.1.9
 - @floating-ui/utils@0.2.12
-- @headless-tree/core@1.7.0
-- @headless-tree/react@1.7.0
+- @headless-tree/core@1.8.0
+- @headless-tree/react@1.8.0
 - @homebridge/node-pty-prebuilt-multiarch@0.14.1
 - @hono/node-server@2.1.1
 - @iconify/types@2.0.0
@@ -186,18 +186,18 @@
 - @lezer/sass@1.1.0
 - @lezer/xml@1.0.6
 - @lezer/yaml@1.0.4
-- @lobehub/charts@5.5.1
-- @lobehub/editor@4.27.3
+- @lobehub/charts@5.7.2
+- @lobehub/editor@4.29.2
 - @lobehub/emojilib@1.0.0
 - @lobehub/fluent-emoji@4.1.1
-- @lobehub/icons@5.18.0
-- @lobehub/streamdown@1.0.0
-- @lobehub/ui@5.32.7
+- @lobehub/icons@5.23.1
+- @lobehub/streamdown@1.4.6
+- @lobehub/ui@5.64.3
 - @marijn/find-cluster-break@1.0.4
 - @mdx-js/mdx@3.1.1
 - @mdx-js/react@3.1.1
 - @mermaid-js/parser@1.2.1
-- @modelcontextprotocol/sdk@1.30.0
+- @modelcontextprotocol/sdk@1.32.2
 - @pierre/theme@1.1.0
 - @preact/signals-core@1.14.4
 - @primer/octicons@19.33.0
@@ -222,64 +222,80 @@
 - @radix-ui/react-visually-hidden@1.2.11
 - @radix-ui/rect@1.1.3
 - @rc-component/async-validator@6.0.0
-- @rc-component/cascader@1.22.0
+- @rc-component/cascader@1.26.0
 - @rc-component/checkbox@2.0.0
-- @rc-component/collapse@1.2.0
+- @rc-component/collapse@1.3.0
 - @rc-component/color-picker@3.1.1
 - @rc-component/context@2.0.2
 - @rc-component/dialog@1.10.0
 - @rc-component/drawer@1.4.2
-- @rc-component/dropdown@1.0.3
+- @rc-component/dropdown@2.0.1
 - @rc-component/form@1.8.6
 - @rc-component/image@1.10.0
-- @rc-component/input@1.3.1
-- @rc-component/input-number@1.6.2
-- @rc-component/listy@1.2.3
-- @rc-component/mentions@1.12.0
-- @rc-component/menu@1.5.0
+- @rc-component/input@1.4.1
+- @rc-component/input-number@1.8.0
+- @rc-component/listy@1.4.0
+- @rc-component/mentions@1.14.1
+- @rc-component/menu@1.6.2
 - @rc-component/mini-decimal@1.1.4
 - @rc-component/motion@1.3.3
+- @rc-component/motion@1.4.0
 - @rc-component/mutate-observer@2.0.1
-- @rc-component/notification@2.0.8
+- @rc-component/notification@2.1.1
 - @rc-component/overflow@1.0.1
-- @rc-component/pagination@1.4.0
+- @rc-component/pagination@1.7.0
 - @rc-component/picker@1.12.2
+- @rc-component/picker@1.17.0
 - @rc-component/portal@1.1.2
 - @rc-component/portal@2.2.1
-- @rc-component/progress@1.0.3
+- @rc-component/progress@1.1.0
 - @rc-component/qrcode@2.0.0
 - @rc-component/rate@1.0.1
 - @rc-component/resize-observer@1.1.2
 - @rc-component/segmented@1.4.0
-- @rc-component/select@1.10.1
-- @rc-component/slider@1.1.1
+- @rc-component/select@1.12.0
+- @rc-component/slider@1.2.1
 - @rc-component/steps@1.2.3
 - @rc-component/switch@1.0.3
 - @rc-component/table@1.11.1
-- @rc-component/tabs@1.13.0
+- @rc-component/table@1.12.0
+- @rc-component/tabs@2.0.0
 - @rc-component/tooltip@1.5.2
 - @rc-component/tour@2.4.0
-- @rc-component/tree@1.4.0
-- @rc-component/tree-select@1.16.1
+- @rc-component/tree@1.5.3
+- @rc-component/tree-select@1.19.0
 - @rc-component/trigger@2.3.1
 - @rc-component/trigger@3.10.1
 - @rc-component/upload@1.1.1
 - @rc-component/util@1.13.0
+- @rc-component/util@1.14.1
 - @rc-component/virtual-list@1.5.1
 - @shikijs/core@4.4.3
+- @shikijs/core@4.6.0
 - @shikijs/engine-javascript@4.4.3
+- @shikijs/engine-javascript@4.6.0
 - @shikijs/engine-oniguruma@4.4.3
+- @shikijs/engine-oniguruma@4.6.0
 - @shikijs/langs@4.4.3
+- @shikijs/langs@4.6.0
 - @shikijs/primitive@4.4.3
+- @shikijs/primitive@4.6.0
 - @shikijs/stream@4.4.3
 - @shikijs/themes@4.4.3
+- @shikijs/themes@4.6.0
 - @shikijs/transformers@4.4.3
 - @shikijs/types@4.4.3
+- @shikijs/types@4.6.0
 - @shikijs/vscode-textmate@10.0.2
+- @shikijs/vscode-textmate@10.1.0
 - @stablelib/base64@1.0.1
 - @stitches/react@1.2.8
-- @tanstack/react-virtual@3.14.14
-- @tanstack/virtual-core@3.18.0
+- @tanstack/devtools-event-client@0.4.4
+- @tanstack/form-core@1.33.5
+- @tanstack/pacer-lite@0.1.1
+- @tanstack/react-virtual@3.14.28
+- @tanstack/store@0.11.3
+- @tanstack/virtual-core@3.19.13
 - @types/d3@7.4.3
 - @types/d3-array@3.2.2
 - @types/d3-axis@3.0.6
@@ -321,7 +337,7 @@
 - @types/mdast@4.0.4
 - @types/mdx@2.0.14
 - @types/ms@2.1.0
-- @types/node@22.20.3
+- @types/node@25.9.6
 - @types/parse-json@4.0.2
 - @types/retry@0.12.0
 - @types/trusted-types@2.0.7
@@ -340,10 +356,11 @@
 - acorn-jsx@5.3.2
 - agent-base@7.1.4
 - agent-base@9.0.0
+- ahooks@3.11.0
 - ahooks@3.9.7
 - ajv@8.20.0
 - ajv-formats@3.0.1
-- antd@6.6.4
+- antd@6.7.1
 - antd-style@4.1.0
 - assign-symbols@1.0.0
 - astring@1.9.0
@@ -378,7 +395,7 @@
 - commander@15.0.0
 - commander@7.2.0
 - commander@8.3.0
-- compute-scroll-into-view@3.1.1
+- compute-scroll-into-view@3.2.2
 - content-disposition@1.1.0
 - content-type@1.0.5
 - content-type@2.1.0
@@ -446,7 +463,7 @@
 - fast-equals@5.4.1
 - fastdom@1.0.12
 - fetch-blob@3.2.0
-- fflate@0.8.2
+- fflate@0.8.3
 - file-selector@0.5.0
 - filter-obj@5.1.0
 - finalhandler@2.1.1
@@ -474,8 +491,10 @@
 - hast-util-is-element@3.0.0
 - hast-util-parse-selector@4.0.0
 - hast-util-raw@9.1.0
+- hast-util-sanitize@5.0.2
 - hast-util-to-estree@3.1.3
 - hast-util-to-html@9.0.5
+- hast-util-to-html@9.0.7
 - hast-util-to-jsx-runtime@2.3.6
 - hast-util-to-parse5@8.0.1
 - hast-util-to-text@4.0.2
@@ -490,7 +509,7 @@
 - https-proxy-agent@9.1.0
 - iconv-lite@0.6.3
 - iconv-lite@0.7.3
-- ignore@7.0.5
+- ignore@7.0.16
 - ignore@7.0.8
 - immer@11.1.18
 - import-fresh@3.3.1
@@ -678,6 +697,7 @@
 - react-error-boundary@6.1.4
 - react-fast-compare@3.2.2
 - react-hotkeys-hook@5.3.3
+- react-hotkeys-hook@5.4.0
 - react-is@16.13.1
 - react-is@18.3.1
 - react-is@19.3.0
@@ -697,9 +717,9 @@
 - regex-recursion@6.0.2
 - regex-utilities@2.3.0
 - rehype-github-alerts@4.2.0
-- rehype-katex@7.0.1
 - rehype-raw@7.0.0
 - rehype-recma@1.0.0
+- rehype-sanitize@6.0.0
 - remark@15.0.1
 - remark-breaks@4.0.0
 - remark-cjk-friendly@1.2.3
@@ -725,7 +745,7 @@
 - safer-buffer@2.1.2
 - scheduler@0.27.0
 - screenfull@5.2.0
-- scroll-into-view-if-needed@3.1.0
+- scroll-into-view-if-needed@3.2.1
 - semver-compare@1.0.0
 - send@1.2.1
 - serve-static@2.2.1
@@ -733,6 +753,7 @@
 - shebang-command@2.0.0
 - shebang-regex@3.0.0
 - shiki@4.4.3
+- shiki@4.6.0
 - side-channel@1.1.1
 - side-channel-list@1.0.1
 - side-channel-map@1.0.1
@@ -772,8 +793,8 @@
 - ts-md5@2.0.1
 - type-is@2.1.0
 - typebox@1.3.27
-- undici@8.10.2
-- undici-types@6.21.0
+- undici@8.12.4
+- undici-types@7.24.6
 - unified@11.0.5
 - unist-util-find-after@5.0.0
 - unist-util-is@5.2.1
@@ -787,6 +808,7 @@
 - unist-util-visit-parents@5.1.3
 - unist-util-visit-parents@6.0.2
 - unpipe@1.0.0
+- uqr@0.1.3
 - url-join@5.0.0
 - use-merge-value@1.2.0
 - use-sync-external-store@1.6.0
@@ -797,8 +819,8 @@
 - vfile@6.0.3
 - vfile-location@5.0.3
 - vfile-message@4.0.3
-- virtua@0.49.3
 - virtua@0.51.3
+- virtua@0.52.10
 - w3c-keyname@2.2.8
 - web-namespaces@2.0.1
 - web-streams-polyfill@3.3.3
@@ -809,7 +831,7 @@
 - yjs@13.6.32
 - zod@3.25.76
 - zustand@3.7.2
-- zustand@5.0.15
+- zustand@5.1.0
 - zwitch@2.0.4
 
 ### ISC
@@ -858,6 +880,7 @@
 - lucide-react@0.469.0
 - lucide-react@0.562.0
 - lucide-react@1.47.0
+- lucide-react@1.78.0
 - once@1.4.0
 - picocolors@1.1.1
 - semver@7.8.5
@@ -892,7 +915,7 @@
 - @aws-sdk/xml-builder@3.972.40
 - @aws/lambda-invoke-store@0.3.0
 - @chevrotain/types@11.1.2
-- @google/genai@2.21.0
+- @google/genai@2.32.0
 - @silvia-odwyer/photon-node@0.3.4
 - @smithy/core@3.33.3
 - @smithy/credential-provider-imds@4.5.2
@@ -908,10 +931,10 @@
 - gcp-metadata@8.1.2
 - google-auth-library@10.9.1
 - google-logging-utils@1.1.3
-- grok-mermaid@0.2.3
 - intersection-observer@0.12.2
 - long@5.3.2
-- openai@7.19.0
+- lovely-mermaid@0.3.3
+- openai@7.59.0
 - remend@1.3.1
 - tunnel-agent@0.6.0
 
@@ -951,31 +974,32 @@
 - source-map@0.5.7
 - source-map@0.7.6
 
+### apache-2.0
+
+- @pierre/diffs@1.2.12
+- @pierre/diffs@1.7.1
+- @pierre/highlights@0.5.2
+- @pierre/patches@0.0.1
+- @pierre/theme@2.1.0
+- @pierre/theming@0.0.2
+- @pierre/theming@1.0.2
+
+### BlueOak-1.0.0
+
+- @isaacs/nonrecursive-glob-match@1.1.0
+- lru-cache@11.5.2
+- minimatch@11.0.3
+
 ### BSD-2-Clause
 
 - entities@6.0.1
 - entities@7.0.1
 - json-schema-typed@8.0.2
 
-### apache-2.0
-
-- @pierre/diffs@1.2.12
-- @pierre/theming@0.0.2
-
-### (MPL-2.0 OR Apache-2.0)
-
-- dompurify@3.4.14
-- dompurify@3.4.17
-
 ### Unlicense
 
 - fast-sha256@1.3.0
 - robust-predicates@3.0.3
-
-### BlueOak-1.0.0
-
-- lru-cache@11.5.2
-- minimatch@10.2.6
 
 ### 0BSD
 
@@ -989,6 +1013,10 @@
 ### (BSD-3-Clause AND Apache-2.0)
 
 - chroma-js@3.2.0
+
+### (MPL-2.0 OR Apache-2.0)
+
+- dompurify@3.5.0
 
 ### EPL-2.0
 

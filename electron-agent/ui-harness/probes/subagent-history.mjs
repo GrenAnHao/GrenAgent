@@ -1,10 +1,16 @@
 const texts = (t, selector) => t.js(`[...document.querySelectorAll(${JSON.stringify(selector)})].map((element) => element.textContent)`)
+// 缺字段的历史卡按「原父会话 + 稳定 agentId」补查（subagent_lookup），不再共享一次全量列表：
+// 每张卡各自查自己的 ID；终态行到手后释放，不再重复查。
+const lookup = async (t, id) => (await t.events()).filter((event) => event === `registry-lookup:${id}`).length
 const queryCount = async (t) => (await t.events()).filter((event) => event === 'registry-list').length
 
 export default async function (t) {
   const expected = await t.data()
   await t.waitFor('#history-cards [data-testid="subagent-inline"]')
-  t.check('历史：两张单卡和组合卡共享一次 registry 查询', await queryCount(t), 1)
+  // 共享轮询约 2.5s 一拍：后挂上的 watcher 在下一拍才补查，等它跑过再断言。
+  await t.waitForText('#history-cards', '中转站 / ')
+  await t.sleep(2800)
+  t.check('历史：按 agentId 各补查一次，不拉全量列表', [await lookup(t, 'sa-a'), await lookup(t, 'sa-b'), await queryCount(t)], [1, 1, 0])
   await t.act('releaseRegistry')
   await t.waitForText('#history-cards', expected.titles[0])
   await t.waitForText('#history-cards', 'group-a')
@@ -19,11 +25,11 @@ export default async function (t) {
   await t.click('#reopen-history')
   await t.waitForText('#history-cards', expected.titles[0])
   await t.waitForText('#history-cards', 'group-a')
-  t.check('重开：再次共享一次查询', await queryCount(t), 2)
+  t.check('重开：已确认的终态行不再补查', [await lookup(t, 'sa-a'), await lookup(t, 'sa-b')], [1, 1])
   t.check('重开：标题不依赖上次挂载的内存', await texts(t, '[data-testid="conv-strip-role"]'), expected.titles)
   t.check('重开：模型和档位不依赖上次挂载的内存', await texts(t, '[data-testid="conv-strip-model"]'), expected.models)
   await t.sleep(2700)
-  t.check('终态：首包补齐后释放轮询', await queryCount(t), 2)
+  t.check('终态：首包补齐后释放轮询', [await lookup(t, 'sa-a'), await lookup(t, 'sa-b')], [1, 1])
   await t.shot('history-reopened')
 
   await t.click('#show-empty-arrays')

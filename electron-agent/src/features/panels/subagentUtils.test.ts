@@ -18,6 +18,8 @@ import {
   shouldBindChildSession,
   subAgentId,
   subAgentSessionPath,
+  subAgentHasResponded,
+  subAgentStartupPhase,
   rememberedSpawnTasks,
   resolveSpawnTask,
   subAgentUnitView,
@@ -125,11 +127,46 @@ describe('background spawn after restart', () => {
     expect(isBackgroundSpawn({ details: { status: 'done', agentId: 'sa-1' }, content: [{ type: 'text', text: '完成了' }] })).toBe(false);
   });
 
-  it('sidecar restarted 不是成功完成；列表里没有这一行也不是', () => {
+  it('sidecar restarted 是明确中断；列表缺行不是终态', () => {
     expect(backgroundRegistryStatus({ status: 'done', error: 'sidecar restarted' })).toBe('interrupted');
-    expect(backgroundRegistryStatus(undefined)).toBe('interrupted');
+    expect(backgroundRegistryStatus(undefined)).toBe('status-unconfirmed');
     expect(backgroundRegistryStatus({ status: 'done', error: null })).toBe('done');
     expect(backgroundRegistryStatus({ status: 'running' })).toBe('running');
+  });
+
+  it('父工具已返回/路径出现/正文到达分别保持启动、首响应等待、执行，明确终态优先', () => {
+    const phase = (registry?: { status: string; sessionPath?: string; output?: string; error?: string }, unconfirmed = false) =>
+      subAgentStartupPhase({ parentStatus: 'done', background: true, registry, unconfirmed });
+    expect(phase()).toBe('starting');
+    expect(phase({ status: 'running', sessionPath: '/s/child.jsonl' })).toBe('awaiting-first-response');
+    expect(phase({ status: 'running', output: 'first response' })).toBe('running');
+    expect(phase(undefined, true)).toBe('status-unconfirmed');
+    expect(phase({ status: 'running', output: '曾经有回复' }, true)).toBe('status-unconfirmed');
+    expect(phase({ status: 'done' }, true)).toBe('done');
+    expect(phase({ status: 'done', error: 'sidecar restarted' })).toBe('interrupted');
+    expect(phase({ status: 'cancelled' })).toBe('cancelled');
+    expect(subAgentStartupPhase({ parentStatus: 'error', background: false })).toBe('error');
+  });
+
+  it('运行中的行只要观察到首个实质活动就不再等待首响应（不等最终 output）', () => {
+    const phase = (registry?: { status: string; output?: string | null; responseStarted?: number }) =>
+      subAgentStartupPhase({ parentStatus: 'done', background: true, registry });
+    // 失败前：跑到几十个工具调用、最终 output 还没落盘 → 仍是「等待首响应」。
+    expect(phase({ status: 'running' })).toBe('awaiting-first-response');
+    // 修复后：登记行进度的首响应标记为 1 → 执行中。
+    expect(phase({ status: 'running', responseStarted: 1 })).toBe('running');
+    expect(phase({ status: 'running', output: null, responseStarted: 1 })).toBe('running');
+    // 终态不看标记。
+    expect(phase({ status: 'done', responseStarted: 0 })).toBe('done');
+    expect(phase({ status: 'error', responseStarted: 1 })).toBe('error');
+  });
+
+  it('subAgentHasResponded 接受 output 或运行期标记', () => {
+    expect(subAgentHasResponded(undefined)).toBe(false);
+    expect(subAgentHasResponded({})).toBe(false);
+    expect(subAgentHasResponded({ output: null, responseStarted: 0 })).toBe(false);
+    expect(subAgentHasResponded({ output: null, responseStarted: 1 })).toBe(true);
+    expect(subAgentHasResponded({ output: 'done text' })).toBe(true);
   });
 });
 

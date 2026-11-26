@@ -9,7 +9,7 @@ export type JobTerminalStatus = Extract<JobStatus, "completed" | "failed" | "kil
 export type JobChannel = "stdout" | "stderr" | "log";
 
 /** 结算原因：生产方自己结束、被 kill、或所有者/服务销毁（没人能读通知了）。 */
-export type JobSettleCause = "producer" | "kill" | "teardown";
+export type JobSettleCause = "producer" | "kill" | "teardown" | "subagent-timeout";
 
 export interface JobOutcome {
   status: JobTerminalStatus;
@@ -67,6 +67,8 @@ export interface JobHooks {
   cancel(reason?: string): void;
   /** 生产方释放资源后才 resolve。不应 reject；reject 视为 failed。 */
   done: Promise<JobOutcome>;
+  /** Independent of cancellation acceptance or a synthetic job outcome. */
+  exitConfirmed?: Promise<boolean>;
 }
 
 export interface JobStart {

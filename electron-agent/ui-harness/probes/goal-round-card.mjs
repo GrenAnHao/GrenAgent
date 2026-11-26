@@ -15,7 +15,7 @@ export default async function (t) {
 
   const titles = await t.texts(CARD)
   t.ok(`第一张写第 4 轮（${titles[0]}）`, titles[0].includes('目标续跑 · 第 4 轮'))
-  t.ok(`第二张写第 5 轮（${titles[1]}）`, titles[1].includes('目标续跑 · 第 5 轮'))
+  t.ok(`新 details 标明批次内第 2 轮（${titles[1]}）`, titles[1].includes('目标续跑 · 第 2 批 · 第 2 轮'))
   t.ok('标题不写轮次预算', !titles.some((title) => title.includes('256')))
   t.ok('默认收起：完成条件不露出来', !titles[0].includes('feat/kefu-m'))
   await t.shot('collapsed')
@@ -29,7 +29,7 @@ export default async function (t) {
 
   await t.act('pushLive', 6)
   t.ok('实时推来的第 6 轮也有卡片，且只出一张', await t.waitUntil(`document.querySelectorAll('${CARD}').length === 3`))
-  t.ok('实时那张写第 6 轮', (await t.texts(CARD))[2].includes('目标续跑 · 第 6 轮'))
+  t.ok('实时新 details 写第 2 批 · 第 3 轮', (await t.texts(CARD))[2].includes('目标续跑 · 第 2 批 · 第 3 轮'))
   t.info('完成条件', data.condition)
 
   await t.setTheme('light')

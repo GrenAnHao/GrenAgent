@@ -1,6 +1,10 @@
 import { remoteTransportKind, transportOf, type McpConfig, type McpRemoteConfig, type McpStdioConfig } from './mcpConfig';
 
+import type { CatalogTool } from '../../../../extensions/mcp/catalog';
 export interface CacheEntry {
+  catalog?: CatalogTool[];
+  stderr?: string[];
+  exit?: string;
   toolNames: string[];
   probedAt: string;
   ok: boolean;
@@ -35,6 +39,9 @@ export function parseToolsCache(json: string): Record<string, CacheEntry> {
     if (!isRecord(raw)) continue;
     out[name] = {
       toolNames: strArray(raw.toolNames),
+      ...(Array.isArray(raw.catalog) && { catalog: raw.catalog.filter((t): t is CatalogTool => isRecord(t) && typeof t.fullName === 'string' && typeof t.name === 'string' && (t.description === undefined || typeof t.description === 'string')) }),
+      ...(Array.isArray(raw.stderr) && { stderr: strArray(raw.stderr).slice(-10) }),
+      ...(typeof raw.exit === 'string' && { exit: raw.exit }),
       probedAt: typeof raw.probedAt === 'string' ? raw.probedAt : '',
       ok: raw.ok === true,
       ...(typeof raw.error === 'string' ? { error: raw.error } : {}),
@@ -48,13 +55,14 @@ export function getCacheEntry(cache: Record<string, CacheEntry>, name: string): 
 }
 
 export function getCachedTools(cache: Record<string, CacheEntry>, name: string): string[] {
-  return cache[name]?.toolNames ?? [];
+  const entry = cache[name];
+  return entry && !entry.ok && !entry.toolNames.length ? entry.catalog?.map(tool => tool.fullName) ?? [] : entry?.toolNames ?? [];
 }
 
 export function toProbeConfigJson(name: string, config: McpConfig): string {
   if (transportOf(config) === 'stdio') {
     const s = config as McpStdioConfig;
-    return JSON.stringify({ name, transport: 'stdio', command: s.command, args: s.args ?? [], env: s.env ?? {} });
+    return JSON.stringify({ name, transport: 'stdio', command: s.command, args: s.args ?? [], env: s.env ?? {}, ...(s.cwd && { cwd: s.cwd }) });
   }
   const r = config as McpRemoteConfig;
   const headers = r.headers && Object.keys(r.headers).length ? { headers: r.headers } : {};

@@ -65,14 +65,12 @@ describe('visualStore', () => {
     });
   });
 
-  it('请求先于页面到达时先占位，页面随后补上且不丢请求', () => {
+  it('新预览清掉旧等待标记并保留独立 previewId', () => {
     useVisualStore.getState().setPending(A, true, 'req-early');
     expect(useVisualStore.getState().entries[visualKeyOf(A)]).toMatchObject({ html: '', pending: true });
-    useVisualStore.getState().setVisual(A, '<p>late</p>', 'panel');
+    useVisualStore.getState().setVisual(A, '<p>late</p>', 'panel', 'preview-new');
     expect(useVisualStore.getState().entries[visualKeyOf(A)]).toMatchObject({
-      html: '<p>late</p>',
-      pending: true,
-      requestId: 'req-early',
+      html: '<p>late</p>', previewId: 'preview-new', pending: false, requestId: null,
     });
   });
 

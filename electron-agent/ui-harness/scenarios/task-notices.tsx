@@ -4,7 +4,7 @@ import type { AgentMessage, JobFrame, JobLiveSnapshot } from '../../src/lib/pi';
 import { groupMessages } from '../../src/features/chat/groupMessages';
 import { renderMessageBody } from '../../src/features/chat/ChatMessageItems';
 import { MessageTimelineContext } from '../../src/features/chat/MessageTimelineContext';
-import { formatSettlementNotice } from '@extensions/multi-agent/settlement-notice';
+import { formatSettlementNotice } from '@extensions/multi-agent/settlement-notice.ts';
 import { exposeActions, installBridge, track } from '../stubs';
 
 const snapshots = new Map<string, JobLiveSnapshot>();
@@ -58,6 +58,16 @@ child('sa-done', 'completed', '## 结果\n\n已修复 `date.ts`。\n\nDiagnostic
 child('sa-error', 'error', '已产出的部分结果。', 'uncaught error: boom');
 child('sa-abort', 'aborted', '审查工作已给出最终报告。');
 child('sa-timeout', 'error', '已保存部分结果。', 'hard timeout after 30s');
+const bashNotice = formatSettlementNotice({
+  childId: 'sa-bash-timeout', stopReason: 'error', output: '最终回复保持完整。\n\nDiagnostic: 这是回复内容。',
+  bashTimeout: { reason: 'background-bash-timeout', replyCompleted: true, jobs: [
+    { id: 'bash-1', label: '扫描目录', stopConfirmed: true },
+    { id: 'bash-2', label: '检查文件', stopConfirmed: false },
+  ] },
+});
+history.push({ role: 'custom', customType: 'subagent-settled', timestamp: 41500, display: true, content: bashNotice.content,
+  details: { childId: bashNotice.childId, stopReason: bashNotice.stopReason, bashTimeout: bashNotice.bashTimeout, reply: bashNotice.reply },
+} as unknown as AgentMessage);
 child('sa-long', 'completed', `${Array.from({ length: 70 }, (_, i) => `第 ${i + 1} 行：完整输出正文。`).join('\n\n')}\n\n最后一行仍然保留。`);
 history.push({ role: 'custom', customType: 'subagent-settled', content: '', details: { childId: 'sa-empty', stopReason: 'error' }, display: true, timestamp: 42000 } as unknown as AgentMessage);
 

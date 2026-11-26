@@ -20,6 +20,16 @@ describe("isFrontendHmrPath", () => {
   });
 });
 
+it("watches and delivers HMR for the shared usage contract, not the surrounding extension", () => {
+  const dir = "D:/app/extensions/usage-ledger";
+  expect(ignoreNonFrontendWatch(`${dir}/analytics.ts`, root)).toBe(false);
+  expect(isFrontendHmrPath(`${dir}/analytics.ts`, root)).toBe(true);
+  for (const file of [dir, "D:/app/extensions", `${dir}/report.ts`, `${dir}/analytics.test.ts`, "D:/other/extensions/usage-ledger/analytics.ts"]) {
+    expect(ignoreNonFrontendWatch(file, root)).toBe(true);
+    expect(isFrontendHmrPath(file, root)).toBe(false);
+  }
+});
+
 describe("ignoreNonFrontendWatch", () => {
   it("keeps the root, src directories, frontend files, and the vite config", () => {
     expect(ignoreNonFrontendWatch(root, root)).toBe(false);
@@ -30,7 +40,7 @@ describe("ignoreNonFrontendWatch", () => {
     expect(ignoreNonFrontendWatch(`${root}/electron.vite.config.ts`, root)).toBe(false);
   });
 
-  it("ignores tests and everything outside the frontend tree", () => {
+  it("ignores tests, agent implementations, and build output", () => {
     expect(ignoreNonFrontendWatch(`${root}/src/App.test.tsx`, root)).toBe(true);
     expect(ignoreNonFrontendWatch(`${root}/electron`, root)).toBe(true);
     expect(ignoreNonFrontendWatch(`${root}/electron/main.ts`, root)).toBe(true);

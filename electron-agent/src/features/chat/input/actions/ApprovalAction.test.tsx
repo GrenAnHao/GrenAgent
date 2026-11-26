@@ -1,3 +1,4 @@
+import type { SessionPreferences } from '../../../../lib/sessionPreferences';
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import type { ReactNode } from 'react';
@@ -5,8 +6,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { setApproval, getState, getSessionDefaults, setSessionDefaults, getSettings, messageError } = vi.hoisted(() => ({
-  setApproval: vi.fn(() => Promise.resolve({ ok: true, sessionPath: '/ws/a.jsonl' })),
-  getState: vi.fn(() =>
+  setApproval: vi.fn<typeof import('../../../../lib/pi').pi.setApproval>(() => Promise.resolve({ ok: true, sessionPath: '/ws/a.jsonl' })),
+  getState: vi.fn<() => Promise<{ sessionFile: string; preferences: SessionPreferences }>>(() =>
     Promise.resolve({
       sessionFile: '/ws/a.jsonl',
       preferences: {
@@ -180,7 +181,7 @@ import ApprovalAction from './ApprovalAction';
 
 const OWNER = '/ws/a.jsonl';
 
-function prefs(patch: Record<string, unknown> = {}) {
+function prefs(patch: Partial<SessionPreferences> = {}): SessionPreferences {
   return {
     model: { provider: 'anthropic', id: 'm' },
     thinkingLevel: 'medium',

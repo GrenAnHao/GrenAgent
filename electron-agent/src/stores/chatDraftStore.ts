@@ -4,6 +4,7 @@ import {
   normalizeComposerDraft,
   type ComposerDraft,
 } from '../features/chat/input/editor/composerDraft';
+import { applyQueuedDraftHandoff, queueDraftHandoff } from '../features/sessions/sessionProjectTransferDraft';
 
 /** 旧版本的整表存档只读兼容；新写入逐 owner 存，避免窗口之间覆盖无关草稿。 */
 const LEGACY_STORAGE_KEY = 'pi-chat-drafts';
@@ -49,6 +50,8 @@ interface ChatDraftState {
   removed: Record<string, true>;
   resolveKey: (key: string) => string | null;
   adopt: (from: string, to: string) => void;
+  /** 会话跨项目移动：之后第一次读/存它的草稿时把相对文件标签绝对化到来源项目。 */
+  handoff: (sessionPath: string, sourceWorkspace: string) => void;
   remove: (key: string) => void;
   getDraft: (key: string) => ComposerDraft;
   setDraft: (key: string, draft: ComposerDraft | string) => void;
@@ -75,6 +78,18 @@ export const useChatDraftStore = create<ChatDraftState>((set, get) => ({
     writeOwner(from, null);
     return { drafts, adoptions: { ...s.adoptions, [from]: to } };
   }),
+  handoff: (sessionPath, sourceWorkspace) => {
+    queueDraftHandoff(sessionPath, sourceWorkspace);
+    // 立刻按同一规则改内存里的这一份；编辑器里还没落盘的现行内容由已挂载的输入框自己处理。
+    set((s) => {
+      const key = s.resolveKey(sessionPath) ?? sessionPath;
+      const stored = normalizeComposerDraft(s.drafts[key] ?? readOwner(key));
+      const next = applyQueuedDraftHandoff(sessionPath, stored);
+      if (!next.text) return s;
+      writeOwner(key, next);
+      return { drafts: { ...s.drafts, [key]: next } };
+    });
+  },
   remove: (key) => set((s) => {
     const target = s.adoptions[key] ?? key;
     const drafts = { ...s.drafts };

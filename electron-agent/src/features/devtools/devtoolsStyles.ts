@@ -1,7 +1,5 @@
 import { createStaticStyles, cssVar } from 'antd-style';
 
-const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-
 export const styles = createStaticStyles(({ css }) => ({
   root: css`
     display: flex;
@@ -202,7 +200,8 @@ export const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorBgContainer};
     color: ${cssVar.colorText};
     font-size: 12px;
-    font-family: ${mono};
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
 
     &:focus {
       border-color: ${cssVar.colorPrimaryBorder};
@@ -218,7 +217,8 @@ export const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorBgContainer};
     color: ${cssVar.colorText};
     font-size: 12px;
-    font-family: ${mono};
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     line-height: 1.55;
     resize: vertical;
 
@@ -252,6 +252,7 @@ export const styles = createStaticStyles(({ css }) => ({
     margin-block-end: 8px;
   `,
   heading: css`
+    letter-spacing: -0.015em;
     margin: 0;
     font-size: 13px;
     font-weight: 600;
@@ -294,7 +295,8 @@ export const styles = createStaticStyles(({ css }) => ({
     flex: 1;
     overflow-wrap: anywhere;
     font-size: 12px;
-    font-family: ${mono};
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
   `,
 
   list: css`
@@ -322,7 +324,8 @@ export const styles = createStaticStyles(({ css }) => ({
     flex: 0 0 auto;
     color: ${cssVar.colorTextTertiary};
     font-size: 11px;
-    font-family: ${mono};
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
   `,
   tag: css`
     flex: 0 0 auto;
@@ -348,7 +351,8 @@ export const styles = createStaticStyles(({ css }) => ({
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: ${mono};
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
   `,
   rowBody: css`
     max-height: 320px;
@@ -358,7 +362,8 @@ export const styles = createStaticStyles(({ css }) => ({
     border-radius: 6px;
     background: ${cssVar.colorFillQuaternary};
     font-size: 11px;
-    font-family: ${mono};
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -388,7 +393,8 @@ export const styles = createStaticStyles(({ css }) => ({
   `,
 
   mono: css`
-    font-family: ${mono};
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
   `,
   muted: css`
     color: ${cssVar.colorTextTertiary};

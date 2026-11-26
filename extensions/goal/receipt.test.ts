@@ -4,7 +4,7 @@ import type { GoalSnapshot } from "./types.js";
 
 const base: GoalSnapshot = {
   goalId: "g", revision: 2, condition: "写完", status: "active",
-  roundsStarted: 3, maxRounds: 256, createdAt: "t", updatedAt: "t", ranMs: 0,
+  roundsStarted: 3, runNumber: 1, runRoundsStarted: 3, conditionRevision: 1, maxRounds: 256, createdAt: "t", updatedAt: "t", ranMs: 0,
 };
 
 describe("goalStatusSentence", () => {
@@ -18,6 +18,12 @@ describe("goalStatusSentence", () => {
 });
 
 describe("formatGoalReceipt", () => {
+  it("explains max-rounds restart without hiding lifetime rounds", () => {
+    const text = formatGoalReceipt({ ...base, status: "paused", runNumber: 2, runRoundsStarted: 2, roundsStarted: 4, maxRounds: 2, pauseReason: { code: "max-rounds" } });
+    expect(text).toContain("第 2 批 2/2（累计 4 轮）");
+    expect(text).toContain("人工恢复将开启新批次");
+  });
+
   it("omits goalId and revision and includes blocked reason", () => {
     const text = formatGoalReceipt({
       ...base,
@@ -25,7 +31,7 @@ describe("formatGoalReceipt", () => {
       activation: "disarmed",
       blockedReason: { code: "model-reported", message: "缺密钥" },
     });
-    expect(text).toBe("受阻的目标 · 写完 · 3/256 · disarmed · 缺密钥");
+    expect(text).toBe("受阻的目标 · 写完 · 第 1 批 3/256（累计 3 轮） · disarmed · 缺密钥");
     expect(text).not.toContain("\n");
     expect(text).not.toContain("goalId");
     expect(text).not.toMatch(/\bg\b/);
@@ -34,7 +40,7 @@ describe("formatGoalReceipt", () => {
 
   it("joins active receipt as a single toast line", () => {
     expect(formatGoalReceipt({ ...base, activation: "armed" })).toBe(
-      "执行中的目标 · 写完 · 3/256 · armed",
+      "执行中的目标 · 写完 · 第 1 批 3/256（累计 3 轮） · armed",
     );
   });
 });

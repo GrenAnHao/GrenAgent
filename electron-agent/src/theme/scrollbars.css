@@ -1,0 +1,31 @@
+/* Also injected into the diff viewer's shadow root. Leave intentionally hidden scrollers alone. */
+html,
+html * {
+  /* Lobe sets both properties on *. Non-auto values suppress Chromium's scrollbar pseudos.
+     Keep specificity below a component's class so intentionally hidden scrollers stay hidden. */
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--gren-scrollbar-thumb);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gren-scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}

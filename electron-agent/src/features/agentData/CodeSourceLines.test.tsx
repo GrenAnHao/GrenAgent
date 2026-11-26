@@ -6,6 +6,8 @@ import { CodeSourceLines, type CodeSourceLinesHandle } from './CodeSourceLines';
 
 // jsdom 没有布局：CM 的居中滚动落到 scrollTo 时给个无操作替身，真实几何由 ui-harness 验证。
 beforeEach(() => {
+  Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] });
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() });
   Object.defineProperty(Element.prototype, 'scrollTo', { configurable: true, value: () => {} });
 });
 afterEach(cleanup);

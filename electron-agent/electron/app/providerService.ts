@@ -164,16 +164,28 @@ export class ProviderService {
   /**
    * 显式写入/清除内置供应商的 API Key。官方 CredentialStore 按 providerId 只存一份凭据，
    * API Key 与 OAuth 互斥；清空时若当前是 OAuth 凭据则不动，避免把登录状态删掉。
+   *
+   * 必须写进官方 AuthStorage（auth.json），不能用 setRuntimeApiKey：那只是进程内 overlay，
+   * 重启即丢，重新打开设置页也读不回来（loadState 只读 auth.json）。清除走官方 logout。
    */
   async setApiKey(providerId: string, key: string | null): Promise<void> {
     const runtime = await this.requireRuntime();
     if (key === null) {
       const current = (await runtime.listCredentials()).find((c) => c.providerId === providerId);
       if (current && current.type !== 'api_key') return;
-      await runtime.removeRuntimeApiKey(providerId);
+      await runtime.logout(providerId);
+      await this.refresh();
       return;
     }
-    await runtime.setRuntimeApiKey(providerId, key);
+    // 拒绝给 OAuth-only 供应商（如 openai-codex）写 API Key：写进去运行时也解析不到，
+    // 只会让凭据状态谎报「已配置」。
+    const provider = runtime.getProviders().find((p) => p.id === providerId);
+    if (provider && !provider.auth.apiKey) {
+      throw new Error(`${provider.name ?? providerId} 不支持 API Key 登录，请使用账号登录。`);
+    }
+    await writeStoredApiKey(runtime, providerId, key);
+    // 主进程与 agent 子进程各持一份 ModelRuntime，两边都要重读 auth.json。
+    await this.refresh();
   }
 
   async getCredentials(): Promise<ProviderCredentialStatus[]> {
@@ -268,7 +280,7 @@ export class ProviderService {
           prompt: {
             type: request.type,
             message: request.message,
-            ...(request.placeholder ? { placeholder: request.placeholder } : {}),
+            ...('placeholder' in request && request.placeholder ? { placeholder: request.placeholder } : {}),
             ...(options ? { options } : {}),
           },
         });
@@ -524,6 +536,59 @@ async function loginWithOptions(
     return;
   }
   await runtime.login(providerId, 'oauth', interaction);
+}
+
+/**
+ * 官方 api-key login 流程的交互面：首个 secret 提示回填用户填的 key，select 取首选项，
+ * 其余 provider env 提示给空串。只在内部凭据存储不可用时作为退化路径使用。
+ */
+function apiKeyLoginInteraction(key: string): LoginInteraction {
+  let secretAnswered = false;
+  return {
+    signal: new AbortController().signal,
+    notify: () => {},
+    prompt: async (request) => {
+      if (request.type === 'secret' && !secretAnswered) {
+        secretAnswered = true;
+        return key;
+      }
+      if (request.type === 'select') return request.options[0]?.id ?? '';
+      return '';
+    },
+  } as LoginInteraction;
+}
+
+/**
+ * 官方运行时的 CredentialStore（auth.json 落盘）。凭据写入必须经过它：
+ * setRuntimeApiKey 只是进程内 overlay，重启就丢，设置页重开也读不回来。
+ */
+type StoredCredential = { type?: string; key?: string; env?: Record<string, string> };
+interface CredentialStoreLike {
+  modify(
+    providerId: string,
+    fn: (current: StoredCredential | undefined) => Promise<StoredCredential | undefined>,
+  ): Promise<StoredCredential | undefined>;
+}
+function credentialStoreOf(runtime: ModelRuntime): CredentialStoreLike | undefined {
+  const store = (runtime as unknown as { models?: { credentials?: CredentialStoreLike } }).models?.credentials;
+  return typeof store?.modify === 'function' ? store : undefined;
+}
+
+/**
+ * 把 API Key 写进 auth.json。保留同供应商已存的 provider env（Cloudflare account id、
+ * AWS profile 等），否则一次改 key 会把它们冲掉。内部结构变化时失败关闭，退回公开 login。
+ */
+async function writeStoredApiKey(runtime: ModelRuntime, providerId: string, key: string): Promise<void> {
+  const store = credentialStoreOf(runtime);
+  if (store) {
+    await store.modify(providerId, async (current) => ({
+      type: 'api_key',
+      key,
+      ...(current?.type === 'api_key' && current.env ? { env: current.env } : {}),
+    }));
+    return;
+  }
+  await runtime.login(providerId, 'api_key', apiKeyLoginInteraction(key));
 }
 
 /** 把官方英文 OAuth 错误转成可操作的中文提示，界面不再直接显示英文异常。 */

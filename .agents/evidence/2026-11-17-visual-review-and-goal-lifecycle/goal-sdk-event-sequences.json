@@ -1,0 +1,627 @@
+[
+  {
+    "label": "review-redo-approval",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "57ac9dfe-b85c-415e-b674-3a032cd771d5",
+        "revision": 1,
+        "at": "2026-11-17T07:44:52.428Z",
+        "payload": {
+          "condition": "review this design",
+          "operationId": "cc6ce6e8-4254-4a0c-8fcd-4da10b0cb3c9",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"cc6ce6e8-4254-4a0c-8fcd-4da10b0cb3c9\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"review this design\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "57ac9dfe-b85c-415e-b674-3a032cd771d5",
+        "revision": 2,
+        "at": "2026-11-17T07:44:52.428Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "complete",
+        "goalId": "57ac9dfe-b85c-415e-b674-3a032cd771d5",
+        "revision": 3,
+        "at": "2026-11-17T07:44:52.570Z",
+        "payload": {}
+      }
+    ],
+    "sdkEvents": [
+      {
+        "previews": [
+          "6bf85b0b-27bd-475b-b0fb-ab9efb5a233f",
+          "be5e7f7b-5d3f-4c32-a296-22eddedec987"
+        ],
+        "reviews": [
+          {
+            "review": {
+              "previewId": "6bf85b0b-27bd-475b-b0fb-ab9efb5a233f",
+              "requestId": "tool:1794901492450:gxfhi0fny2j",
+              "outcome": "redo"
+            }
+          },
+          {
+            "review": {
+              "previewId": "be5e7f7b-5d3f-4c32-a296-22eddedec987",
+              "requestId": "tool:1794901492527:43as38b1st3",
+              "outcome": "approved"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "review-redo-compaction-failure",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "5e1ce208-a49f-4590-94c3-0f37fae8bfc4",
+        "revision": 1,
+        "at": "2026-11-17T07:44:52.857Z",
+        "payload": {
+          "condition": "review and revise",
+          "operationId": "396644fa-cd77-42d4-bf62-3be70e8d43db",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"396644fa-cd77-42d4-bf62-3be70e8d43db\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"review and revise\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "5e1ce208-a49f-4590-94c3-0f37fae8bfc4",
+        "revision": 2,
+        "at": "2026-11-17T07:44:52.858Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "pause",
+        "goalId": "5e1ce208-a49f-4590-94c3-0f37fae8bfc4",
+        "revision": 3,
+        "at": "2026-11-17T07:44:52.946Z",
+        "payload": {
+          "pauseReason": {
+            "code": "request-error",
+            "message": "最终请求失败，请检查连接或供应商设置。"
+          }
+        }
+      }
+    ],
+    "sdkEvents": [
+      {
+        "previews": [
+          "33c17a6d-9fe3-4289-acea-cd248c3c964a"
+        ],
+        "sdkEvents": [
+          {
+            "type": "compaction_start",
+            "reason": "threshold"
+          },
+          {
+            "type": "compaction_end",
+            "reason": "threshold",
+            "errorMessage": "Auto-compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete"
+          },
+          {
+            "type": "compaction_start",
+            "reason": "threshold"
+          },
+          {
+            "type": "compaction_end",
+            "reason": "threshold",
+            "errorMessage": "Auto-compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "review-user-pause-late-approval",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "bd522eda-31c2-4a8b-9c3f-91d989a0c04d",
+        "revision": 1,
+        "at": "2026-11-17T07:44:53.304Z",
+        "payload": {
+          "condition": "review and wait",
+          "operationId": "0e97628d-1ce0-4565-b20a-35a086d83f45",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"0e97628d-1ce0-4565-b20a-35a086d83f45\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"review and wait\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "bd522eda-31c2-4a8b-9c3f-91d989a0c04d",
+        "revision": 2,
+        "at": "2026-11-17T07:44:53.304Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "pause",
+        "goalId": "bd522eda-31c2-4a8b-9c3f-91d989a0c04d",
+        "revision": 3,
+        "at": "2026-11-17T07:44:53.370Z",
+        "payload": {
+          "pauseReason": {
+            "code": "user"
+          },
+          "operationId": "7d802668-1cd6-49f4-bc75-2a4e19bd154b",
+          "controlAction": "pause",
+          "expectedRevision": 2,
+          "expectedConditionRevision": 1,
+          "controlRequest": "{\"operationId\":\"7d802668-1cd6-49f4-bc75-2a4e19bd154b\",\"action\":\"pause\",\"goalId\":\"bd522eda-31c2-4a8b-9c3f-91d989a0c04d\",\"expectedRevision\":2,\"expectedConditionRevision\":1}"
+        }
+      }
+    ],
+    "sdkEvents": [
+      {
+        "previewId": "d95e55e7-ead5-4fd3-8d4c-66c7df2cd253",
+        "lateUpdate": {
+          "role": "toolResult",
+          "toolCallId": "tool:1794901493375:idhe4qoubdk",
+          "toolName": "update_goal",
+          "content": [
+            {
+              "type": "text",
+              "text": "GOAL_TOOL_ROUND_STALE"
+            }
+          ],
+          "details": {},
+          "isError": true,
+          "durationMs": 0,
+          "timestamp": 1794901493376
+        }
+      }
+    ]
+  },
+  {
+    "label": "review-compaction-redo-approval",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "4ead8f2b-5d29-4b57-87b0-a4e400ec703d",
+        "revision": 1,
+        "at": "2026-11-17T07:44:53.675Z",
+        "payload": {
+          "condition": "review each design",
+          "operationId": "0cb95ffe-de22-4fe9-82bf-6b96fbe658e8",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"0cb95ffe-de22-4fe9-82bf-6b96fbe658e8\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"review each design\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "4ead8f2b-5d29-4b57-87b0-a4e400ec703d",
+        "revision": 2,
+        "at": "2026-11-17T07:44:53.675Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "4ead8f2b-5d29-4b57-87b0-a4e400ec703d",
+        "revision": 3,
+        "at": "2026-11-17T07:44:53.797Z",
+        "payload": {
+          "round": 2,
+          "runNumber": 1,
+          "runRound": 2
+        }
+      },
+      {
+        "kind": "complete",
+        "goalId": "4ead8f2b-5d29-4b57-87b0-a4e400ec703d",
+        "revision": 4,
+        "at": "2026-11-17T07:44:53.923Z",
+        "payload": {}
+      }
+    ],
+    "sdkEvents": [
+      {
+        "previews": [
+          "2e41637d-aca3-4c92-8d44-e91c31c3e2e9",
+          "c9c2e920-7767-4f65-89b6-839833917523",
+          "f7783d07-fd08-4335-b413-f98bfcd55338"
+        ],
+        "reviews": [
+          {
+            "review": {
+              "previewId": "c9c2e920-7767-4f65-89b6-839833917523",
+              "requestId": "tool:1794901493808:ftu5x6uhsff",
+              "outcome": "redo"
+            }
+          },
+          {
+            "review": {
+              "previewId": "f7783d07-fd08-4335-b413-f98bfcd55338",
+              "requestId": "tool:1794901493873:qwy2mujnnf",
+              "outcome": "approved"
+            }
+          }
+        ],
+        "sdkEvents": [
+          {
+            "type": "compaction_start",
+            "reason": "manual"
+          },
+          {
+            "type": "compaction_end",
+            "reason": "manual"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "compaction-success",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "a51fabf6-8efd-418b-b482-efe7d0628e24",
+        "revision": 1,
+        "at": "2026-11-17T07:44:54.173Z",
+        "payload": {
+          "condition": "summarizing",
+          "operationId": "8c5b681f-108d-4101-8cdd-a90785e85570",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"8c5b681f-108d-4101-8cdd-a90785e85570\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"summarizing\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "a51fabf6-8efd-418b-b482-efe7d0628e24",
+        "revision": 2,
+        "at": "2026-11-17T07:44:54.173Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "a51fabf6-8efd-418b-b482-efe7d0628e24",
+        "revision": 3,
+        "at": "2026-11-17T07:44:54.247Z",
+        "payload": {
+          "round": 2,
+          "runNumber": 1,
+          "runRound": 2
+        }
+      }
+    ],
+    "sdkEvents": [
+      {
+        "type": "compaction_start",
+        "reason": "threshold"
+      },
+      {
+        "type": "compaction_end",
+        "reason": "threshold"
+      }
+    ]
+  },
+  {
+    "label": "compaction-failure",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "77839767-30a2-4f62-a01d-1fd819cb43f0",
+        "revision": 1,
+        "at": "2026-11-17T07:44:54.555Z",
+        "payload": {
+          "condition": "summarize-and-work",
+          "operationId": "f04210a2-1d2d-46d5-84aa-ec78797cc64a",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"f04210a2-1d2d-46d5-84aa-ec78797cc64a\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"summarize-and-work\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "77839767-30a2-4f62-a01d-1fd819cb43f0",
+        "revision": 2,
+        "at": "2026-11-17T07:44:54.555Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "pause",
+        "goalId": "77839767-30a2-4f62-a01d-1fd819cb43f0",
+        "revision": 3,
+        "at": "2026-11-17T07:44:54.566Z",
+        "payload": {
+          "pauseReason": {
+            "code": "request-error",
+            "message": "最终请求失败，请检查连接或供应商设置。"
+          }
+        }
+      }
+    ],
+    "sdkEvents": [
+      {
+        "type": "compaction_start",
+        "reason": "threshold"
+      },
+      {
+        "type": "compaction_end",
+        "reason": "threshold"
+      },
+      {
+        "type": "compaction_start",
+        "reason": "threshold"
+      },
+      {
+        "type": "compaction_end",
+        "reason": "threshold",
+        "errorMessage": "Auto-compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete"
+      }
+    ]
+  },
+  {
+    "label": "user-stop-and-resume",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "738a61e8-3f97-4f68-a98a-e39f611a90c4",
+        "revision": 1,
+        "at": "2026-11-17T07:44:54.803Z",
+        "payload": {
+          "condition": "cancel-test",
+          "operationId": "fae956d0-b6bc-46ec-9d15-76f1e0daa7f7",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"fae956d0-b6bc-46ec-9d15-76f1e0daa7f7\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"cancel-test\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "738a61e8-3f97-4f68-a98a-e39f611a90c4",
+        "revision": 2,
+        "at": "2026-11-17T07:44:54.803Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "pause",
+        "goalId": "738a61e8-3f97-4f68-a98a-e39f611a90c4",
+        "revision": 3,
+        "at": "2026-11-17T07:44:54.878Z",
+        "payload": {
+          "pauseReason": {
+            "code": "user",
+            "message": "用户已停止本轮。"
+          }
+        }
+      },
+      {
+        "kind": "resume",
+        "goalId": "738a61e8-3f97-4f68-a98a-e39f611a90c4",
+        "revision": 4,
+        "at": "2026-11-17T07:44:54.879Z",
+        "payload": {
+          "operationId": "f9114fd5-5ef0-43d8-83f8-84afc27f525d",
+          "controlAction": "resume",
+          "expectedRevision": 3,
+          "expectedConditionRevision": 1,
+          "controlRequest": "{\"operationId\":\"f9114fd5-5ef0-43d8-83f8-84afc27f525d\",\"action\":\"resume\",\"goalId\":\"738a61e8-3f97-4f68-a98a-e39f611a90c4\",\"expectedRevision\":3,\"expectedConditionRevision\":1}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "738a61e8-3f97-4f68-a98a-e39f611a90c4",
+        "revision": 5,
+        "at": "2026-11-17T07:44:54.879Z",
+        "payload": {
+          "round": 2,
+          "runNumber": 1,
+          "runRound": 2
+        }
+      },
+      {
+        "kind": "complete",
+        "goalId": "738a61e8-3f97-4f68-a98a-e39f611a90c4",
+        "revision": 6,
+        "at": "2026-11-17T07:44:54.887Z",
+        "payload": {}
+      }
+    ],
+    "sdkEvents": []
+  },
+  {
+    "label": "failure-pull-resume-edit-cap-restart-complete",
+    "goalEvents": [
+      {
+        "kind": "create",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 1,
+        "at": "2026-11-17T07:44:55.097Z",
+        "payload": {
+          "condition": "original",
+          "maxRounds": 3,
+          "operationId": "chain-create",
+          "controlAction": "create",
+          "expectedRevision": 0,
+          "expectedConditionRevision": 0,
+          "controlRequest": "{\"operationId\":\"chain-create\",\"action\":\"create\",\"goalId\":\"\",\"expectedRevision\":0,\"expectedConditionRevision\":0,\"condition\":\"original\",\"maxRounds\":3}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 2,
+        "at": "2026-11-17T07:44:55.097Z",
+        "payload": {
+          "round": 1,
+          "runNumber": 1,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "pause",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 3,
+        "at": "2026-11-17T07:44:55.102Z",
+        "payload": {
+          "pauseReason": {
+            "code": "request-error",
+            "message": "最终请求失败，请检查连接或供应商设置。"
+          }
+        }
+      },
+      {
+        "kind": "resume",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 4,
+        "at": "2026-11-17T07:44:55.162Z",
+        "payload": {
+          "operationId": "c9ca15ce-7e92-49e5-a71d-df48c29a78cc",
+          "controlAction": "resume",
+          "expectedRevision": 3,
+          "expectedConditionRevision": 1,
+          "controlRequest": "{\"operationId\":\"c9ca15ce-7e92-49e5-a71d-df48c29a78cc\",\"action\":\"resume\",\"goalId\":\"4dbef816-686a-4153-b3c4-39cffa27dab7\",\"expectedRevision\":3,\"expectedConditionRevision\":1}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 5,
+        "at": "2026-11-17T07:44:55.163Z",
+        "payload": {
+          "round": 2,
+          "runNumber": 1,
+          "runRound": 2
+        }
+      },
+      {
+        "kind": "edit",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 6,
+        "at": "2026-11-17T07:44:55.222Z",
+        "payload": {
+          "condition": "updated",
+          "operationId": "c46164d2-690e-4cdd-85d6-79930cff6c9b",
+          "controlAction": "edit",
+          "expectedRevision": 5,
+          "expectedConditionRevision": 1,
+          "controlRequest": "{\"operationId\":\"c46164d2-690e-4cdd-85d6-79930cff6c9b\",\"action\":\"edit\",\"goalId\":\"4dbef816-686a-4153-b3c4-39cffa27dab7\",\"expectedRevision\":5,\"expectedConditionRevision\":1,\"condition\":\"updated\"}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 7,
+        "at": "2026-11-17T07:44:55.229Z",
+        "payload": {
+          "round": 3,
+          "runNumber": 1,
+          "runRound": 3
+        }
+      },
+      {
+        "kind": "pause",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 8,
+        "at": "2026-11-17T07:44:55.237Z",
+        "payload": {
+          "pauseReason": {
+            "code": "max-rounds",
+            "message": "已达到本批次轮次上限。"
+          }
+        }
+      },
+      {
+        "kind": "restart",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 9,
+        "at": "2026-11-17T07:44:55.285Z",
+        "payload": {
+          "runNumber": 2,
+          "operationId": "f1c24dfd-ecae-4ef3-9429-a725f39e21a8",
+          "controlAction": "resume",
+          "expectedRevision": 8,
+          "expectedConditionRevision": 2,
+          "controlRequest": "{\"operationId\":\"f1c24dfd-ecae-4ef3-9429-a725f39e21a8\",\"action\":\"resume\",\"goalId\":\"4dbef816-686a-4153-b3c4-39cffa27dab7\",\"expectedRevision\":8,\"expectedConditionRevision\":2}"
+        }
+      },
+      {
+        "kind": "round",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 10,
+        "at": "2026-11-17T07:44:55.286Z",
+        "payload": {
+          "round": 4,
+          "runNumber": 2,
+          "runRound": 1
+        }
+      },
+      {
+        "kind": "complete",
+        "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+        "revision": 11,
+        "at": "2026-11-17T07:44:55.292Z",
+        "payload": {}
+      }
+    ],
+    "sdkEvents": [
+      {
+        "type": "canonical-pull",
+        "snapshot": {
+          "goalId": "4dbef816-686a-4153-b3c4-39cffa27dab7",
+          "revision": 3,
+          "condition": "original",
+          "status": "paused",
+          "roundsStarted": 1,
+          "runNumber": 1,
+          "runRoundsStarted": 1,
+          "conditionRevision": 1,
+          "maxRounds": 3,
+          "createdAt": "2026-11-17T07:44:55.097Z",
+          "updatedAt": "2026-11-17T07:44:55.102Z",
+          "ranMs": 5,
+          "pauseReason": {
+            "code": "request-error",
+            "message": "最终请求失败，请检查连接或供应商设置。"
+          },
+          "activation": "disarmed"
+        }
+      }
+    ]
+  }
+]

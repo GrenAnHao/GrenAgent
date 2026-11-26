@@ -41,7 +41,6 @@ const styles = createStaticStyles(({ css }) => ({
     box-shadow: ${cssVar.boxShadowSecondary};
   `,
   scroll: css`
-    scrollbar-width: thin;
 
     overflow-y: auto;
 

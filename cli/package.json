@@ -22,14 +22,14 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.45.3",
-    "@earendil-works/pi-ai": "1.5.1",
-    "@earendil-works/pi-coding-agent": "1.5.1",
-    "typebox": "*"
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "typebox": "1.4.7"
   },
   "devDependencies": {
-    "@types/node": "^22.19.21",
+    "@types/node": "^22.20.5",
     "esbuild": "^0.23.0",
-    "tsx": "^4.16.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.5.0"
   }
 }

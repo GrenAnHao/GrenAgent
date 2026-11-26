@@ -1,0 +1,135 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs subagent-conversation attention-toast
+
+构建：场景有增减
+场景已构建（生产模式，9.5s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+  [page] ResizeObserver loop completed with undelivered notifications.
+
+▸ subagent-conversation
+  PASS 长工具循环：只挂载视口附近的工具（21/180）
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 整轮正文：仅一个复制入口
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 挂载后立刻上滚：停在用户滚到的位置（离底 199px，scrollTop 12108）
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 完成思考：展开按钮滚动停下后可以被点中
+  PASS 完成思考：展开沿用流式 160px 上限
+  PASS 完成思考：正文可以内部滚动
+  PASS 完成思考：长内容没有撑开整列
+  PASS 完成思考：滚动停下后正文可以被指针命中
+  PASS 完成思考：真实滚轮推进内部正文
+  INFO 截图 thinking-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-thinking-expanded.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 历史：滚到顶部后任务仍可访问
+  PASS 历史：顶部同样没有全量挂载工具
+  PASS 历史：底部正文离屏后卸载
+  INFO 截图 history-top  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-history-top.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 回到底部：最终正文重新显示
+  PASS 回到底部：无错误边界降级
+  PASS 回到底部：贴底时末尾留白就是最后一行
+  PASS 回到底部：最后一行离面板底边留出空白
+  INFO 截图 long-bottom  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-long-bottom.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 间距对照：两列均渲染三条工具
+  PASS 子代理：思考与工具行距和主对话一致
+  INFO 截图 compact-row-spacing  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-compact-row-spacing.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 后台子代理：启动工具已返回仍显示正在深度思考
+  PASS 折叠思考：只显示外部单行预览
+  PASS 折叠思考：追加文字时外部预览持续滑动
+  PASS 折叠思考：滑动方向连续向最新内容推进
+  PASS 折叠思考：预览保持单行裁切
+  PASS 运行中：「正在处理」下面留出末尾空白（95.9999942779541px）
+  INFO 截图 live-thinking-preview  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-live-thinking-preview.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 流式思考：展开正文仍限制 160px
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 流式思考：再次折叠后恢复外部预览
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 子代理真正完成：停止预览与运行状态
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 结果不带路径：运行中靠登记表路径接上子会话事件流
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 结果不带路径：完成后仍显示子会话正文
+  PASS 结果不带路径：完成后思考仍在
+  INFO 截图 nopath-finished  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-nopath-finished.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 终态挂载缺路径：补查登记表后显示完整子会话
+  PASS 终态挂载缺路径：只补查一次，不常驻轮询（1 → 1）
+  PASS 终态挂载缺路径：轮询释放后正文仍在
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS pi grep：有命中的折叠行写「2 处」（检索 CodeRetrievalPanel · 2 处）
+  PASS pi grep：真的没命中才写「0 处」（检索 NoSuchSymbolAnywhere · 0 处）
+  PASS pi grep：行可以被点中
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS pi grep：展开后是按文件分组的命中卡
+  PASS pi grep：展开不显示「未找到匹配」
+  PASS pi grep：匹配行带行号
+  PASS pi grep：上下文行用「N-」区分
+  PASS pi grep：上限提示画成已截断
+  [page] ResizeObserver loop completed with undelivered notifications.
+  INFO 截图 pi-grep-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-conversation-pi-grep-expanded.png
+  ── 41 passed, 0 failed
+
+[39912:1124/175229.279:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[39912:1124/175229.279:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[39912:1124/175229.279:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[39912:1124/175229.284:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[39912:1124/175229.284:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+[39912:1124/175229.284:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[39912:1124/175229.284:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+[39912:1124/175229.284:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[39912:1124/175229.284:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+
+▸ attention-toast
+  PASS 场景渲染出来
+  PASS Goal 续跑：没有发完成提醒
+  PASS Goal 续跑：没有提示
+  PASS 完成：2.5 秒内出现提示
+  PASS 完成：主进程被问了一次
+  PASS 完成：标题写会话名和状态
+  PASS 完成：不计入任务栏数字
+  PASS 完成：有「前往」按钮
+  PASS 完成：深色主题下提示是深色浮层
+  INFO 截图 done  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\attention-toast-done.png
+  PASS 完成：7,999ms 真实帧处理后提示仍可见
+  PASS 完成：7,999ms 尚未开始退出
+  PASS 完成：8,000ms 开始退出
+  PASS 完成：真实退出动画后移除提示
+  PASS 失败：出现提示
+  PASS 失败：正文是报错
+  PASS 失败：任务栏计数变成 1
+  PASS 失败：「前往」打开了 B
+  PASS 失败：提示收起
+  PASS 失败：打开后未读清掉，任务栏计数回到 0
+  PASS 审批：出现提示
+  PASS 审批：正文是审批标题
+  PASS 审批：标题写「等待批准」
+  PASS 审批：任务栏计数变成 1
+  PASS 审批：9 秒后仍在
+  PASS 审批：答复前仍可操作
+  PASS 审批：答复后收起
+  PASS 审批：任务栏计数回到 0
+  PASS 当前会话：没有问主进程
+  PASS 当前会话：没有提示
+  PASS 浅色：出现失败提示
+  PASS 浅色：提示背景是浅色主题的浮层色
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\attention-toast-light.png
+  ── 31 passed, 0 failed
+
+通过：subagent-conversation, attention-toast（31.7s）。只跑了 2/63 个场景，其余 61 个没指定，未运行

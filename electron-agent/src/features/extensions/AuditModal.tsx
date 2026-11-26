@@ -33,7 +33,8 @@ const styles = createStaticStyles(({ css }) => ({
   ts: css`
     flex: 0 0 auto;
     color: ${cssVar.colorTextTertiary};
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
   `,
   tool: css`
     flex: 1;

@@ -29,6 +29,7 @@ import { useFileMention } from './useFileMention';
 import { useSlashOptions } from './useSlashOptions';
 import { useTauriFileDrop } from './useTauriFileDrop';
 import { useGoalStore, type GoalSnapshot } from '../../../../stores/goalStore';
+import { useSessionStore } from '../../../../store/session';
 import { draftShouldForwardWheel } from '../../composerWheel';
 import { ComposerCompactProvider, composerIsCompact } from '../composerCompact';
 
@@ -124,7 +125,6 @@ const styles = createStaticStyles(({ css }) => ({
     padding-right: 28px;
   `,
   body: css`
-    scrollbar-width: thin;
 
     overflow-y: auto;
 
@@ -197,6 +197,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   const surfaceRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLDivElement>(null);
   const [goalDrawerSessionId, setGoalDrawerSessionId] = useState<string>();
+  const [goalDrawerPath, setGoalDrawerPath] = useState<string | null>();
   const goalDrawerSnapshot = useGoalStore((state) =>
     goalDrawerSessionId ? state.bySession[goalDrawerSessionId] : undefined,
   );
@@ -291,12 +292,13 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   return (
     <ComposerCompactProvider compact={compact}>
     <div ref={zoneRef} className={styles.zone}>
-      <div data-testid="composer-dock" className={styles.dock}><SteerQueue /><TodoDockFromStore /><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} /></div>
+      <div data-testid="composer-dock" className={styles.dock}><SteerQueue /><TodoDockFromStore /><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => { setGoalDrawerSessionId(snapshot.sessionId); setGoalDrawerPath(useSessionStore.getState().activeSessionPath); }} /></div>
       <SessionGoalDrawer
         onClose={() => setGoalDrawerSessionId(undefined)}
         onSnapshot={(snapshot) => setGoalSnapshot(snapshot.sessionId, snapshot)}
         open={!!goalDrawerSessionId}
         sessionId={goalDrawerSessionId ?? ''}
+        sessionPath={goalDrawerPath}
         snapshot={goalDrawerSnapshot}
       />
       <PromptRequestCard />

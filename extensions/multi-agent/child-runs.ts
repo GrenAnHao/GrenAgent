@@ -8,6 +8,7 @@ export interface ChildSettlement {
   childId: string;
   parentSessionId: string;
   stopReason: SubagentStopReason;
+  reason?: "background-bash-timeout";
 }
 
 /** settled 缺省表示子代理没有结算就离开了（回滚、删除时被静默），不发通知，wait_agent 也不算它。 */

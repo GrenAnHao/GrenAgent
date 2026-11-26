@@ -88,6 +88,8 @@ export function openLauncherTab(input: {
   }
 
   if (kind === 'terminal') {
+    // 终端不跨项目复用：会话移动后旧终端仍启动在原目录，目标项目里再开会建一个新的。
+    // originWorkspace 让界面和 probe 能看出这个 shell 属于哪个项目，不把它当目标终端。
     const id = `terminal-${Date.now()}`;
     useDockStore.getState().addTab({
       id,
@@ -95,7 +97,7 @@ export function openLauncherTab(input: {
       region,
       title: defaultTerminalTitle(),
       closable: true,
-      payload: { status: 'idle' },
+      payload: { status: 'idle', ...(workspace ? { originWorkspace: workspace } : {}) },
     });
     return id;
   }
@@ -107,7 +109,7 @@ export function openLauncherTab(input: {
       activateExisting(existing, region);
       return existing.id;
     }
-    const payload: FilePayload = { workspace };
+    const payload: FilePayload = { workspace, sessionWorkspace: workspace };
     const id = uniqueId(fileTabId(region, workspace));
     useDockStore.getState().addTab({
       id,

@@ -17,6 +17,7 @@ export const convStyles = createStaticStyles(({ css }) => ({
   `,
   mono: css`
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-feature-settings: 'liga' 0;
   `,
   // 行首 lead 槽（状态图标固定宽度，保证名称左缘对齐）

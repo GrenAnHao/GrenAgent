@@ -30,10 +30,15 @@ async function exists(url) {
 
 export async function resolve(specifier, context, nextResolve) {
   try {
-    return await nextResolve(specifier, context);
+    // Externalized CodeMirror plugins need the same view singleton as renderer.resolve.dedupe.
+    return await nextResolve(specifier, specifier === '@codemirror/view' ? { ...context, parentURL: import.meta.url } : context);
   } catch (error) {
     const code = error?.code;
     if (code !== 'ERR_UNSUPPORTED_DIR_IMPORT' && code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    // rc-picker imports dayjs' concrete CJS plugin files without the .js that native ESM requires.
+    if (code === 'ERR_MODULE_NOT_FOUND' && /^dayjs\/(?:plugin|locale)\/[\w-]+$/.test(specifier)) {
+      return nextResolve(specifier + '.js', context);
+    }
     // 相对/绝对说明符才做回退：裸说明符交给 Node 的包解析，避免掩盖真正的依赖缺失。
     if (!specifier.startsWith('.') && !specifier.startsWith('/')) throw error;
 

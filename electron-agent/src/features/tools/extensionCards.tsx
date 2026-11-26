@@ -31,6 +31,7 @@ import * as m from 'motion/react-m';
 import { LazyMarkdown } from '../chat/LazyMarkdown';
 import { useDockStore } from '../../stores/dockStore';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { resolveSessionFile } from '../chat/sessionCwd';
 import { files } from '../../lib/files';
 import { extractText, getArgString, getDetails } from './toolUtils';
 
@@ -39,6 +40,8 @@ export interface ExtensionCardProps {
   args: unknown;
   result: unknown;
   status: 'running' | 'done' | 'error';
+  sourceCwd?: string;
+  sourceRefs?: Record<string, string>;
 }
 
 function basename(p: string): string {
@@ -467,12 +470,16 @@ const ImageThumb: FC<{ workspace: string; path: string; w: number; h: number }> 
   );
 };
 
-const GenerateImageCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
+const GenerateImageCard: FC<ExtensionCardProps> = ({ args, result, status, sourceCwd, sourceRefs }) => {
   const { workspace } = useAgentStoreContext();
   const d = getDetails(result);
   // 兼容单图(path)与多图(paths)：统一成数组。
   const rawPaths = Array.isArray(d?.paths) ? (d?.paths as unknown[]) : asString(d?.path) ? [d?.path] : [];
-  const paths = rawPaths.map(asString).filter(Boolean);
+  const paths = rawPaths.map((value, index) => {
+    const path = asString(value);
+    const cwd = sourceRefs?.[`paths.${index}`] ?? sourceRefs?.path ?? sourceCwd;
+    return path ? resolveSessionFile(workspace, cwd, path) : null;
+  }).filter((item): item is NonNullable<typeof item> => item !== null);
   const prompt = getArgString(args, 'prompt');
   const refCount = Number(d?.references) || 0;
   const meta = [asString(d?.model), asString(d?.size), refCount > 0 ? `参考图×${refCount}` : '']
@@ -485,7 +492,7 @@ const GenerateImageCard: FC<ExtensionCardProps> = ({ args, result, status }) => 
   const multi = paths.length > 1;
   // 标题用提示词（加粗单行截断），文件名收进 hover tooltip。
   const title = prompt || (loading ? '图片生成中…' : '生成图片');
-  const filename = paths[0] ? basename(paths[0]) : undefined;
+  const filename = paths[0] ? basename(paths[0].absolute) : undefined;
   const single = frameSize(ratio, 480, 440);
   const cell = frameSize(ratio, 200, 200);
 
@@ -504,9 +511,9 @@ const GenerateImageCard: FC<ExtensionCardProps> = ({ args, result, status }) => 
               icon={Download}
               size="small"
               title="下载图片"
-              onClick={() => void Promise.all(paths.map((p) => downloadImage(workspace, p)))}
+              onClick={() => void Promise.all(paths.map((p) => downloadImage(p.root, p.absolute)))}
             />
-            <RevealFileButton path={paths[0]} toolName="generate_image" title="在文件夹中显示" />
+            <RevealFileButton path={paths[0]?.absolute ?? ''} toolName="generate_image" title="在文件夹中显示" />
           </div>
         ) : null}
       </div>
@@ -522,11 +529,11 @@ const GenerateImageCard: FC<ExtensionCardProps> = ({ args, result, status }) => 
           {multi ? (
             <div className={genImageStyles.grid}>
               {paths.map((p) => (
-                <ImageThumb key={p} workspace={workspace} path={p} w={cell.width} h={cell.height} />
+                <ImageThumb key={p.absolute} workspace={p.root} path={p.absolute} w={cell.width} h={cell.height} />
               ))}
             </div>
           ) : (
-            <ImageThumb key={paths[0]} workspace={workspace} path={paths[0]} w={single.width} h={single.height} />
+            <ImageThumb key={paths[0].absolute} workspace={paths[0].root} path={paths[0].absolute} w={single.width} h={single.height} />
           )}
         </Image.PreviewGroup>
       ) : (
@@ -748,10 +755,11 @@ const speakCardStyles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-const SpeakCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
+const SpeakCard: FC<ExtensionCardProps> = ({ args, result, status, sourceCwd, sourceRefs }) => {
   const { workspace } = useAgentStoreContext();
   const d = getDetails(result);
   const path = asString(d?.path);
+  const resource = path ? resolveSessionFile(workspace, sourceRefs?.path ?? sourceCwd, path) : null;
   const voice = asString(d?.voice);
   // 标题用朗读文本的首句（语义化），文件名退到 hover 提示 + 文件夹按钮；取不到文本再回退文件名。
   const title = deriveAudioTitle(getArgString(args, 'text')) || basename(path);
@@ -771,14 +779,14 @@ const SpeakCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
               {title}
             </span>
             {voice ? <span className={speakCardStyles.voice}>{voice}</span> : null}
-            <RevealFileButton path={path} toolName="speak" title="在文件夹中显示" />
+            <RevealFileButton path={resource?.absolute ?? ''} toolName="speak" title="在文件夹中显示" />
           </>
         )}
       </div>
       {loading ? (
         <Skeleton.Block active style={{ borderRadius: 999, height: 28, width: '100%' }} />
-      ) : path ? (
-        <AudioPlayer workspace={workspace} path={path} />
+      ) : resource ? (
+        <AudioPlayer workspace={resource.root} path={resource.absolute} />
       ) : (
         <span style={labelStyle}>（无音频输出）</span>
       )}
@@ -1147,6 +1155,7 @@ const mcpAddStyles = createStaticStyles(({ css }) => ({
     border-radius: 6px;
     background: ${cssVar.colorFillTertiary};
     font-family: ${cssVar.fontFamilyCode};
+    font-variant-ligatures: none;
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;

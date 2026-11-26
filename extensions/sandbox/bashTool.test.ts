@@ -115,7 +115,7 @@ describe("bash · schema and prompt (pi 1.0.2 contract)", () => {
 
   it("strict sampling rejects an escalation with the empty reason from the reported call", () => {
     const t = withBashUiDescription(tool(scriptedExec()));
-    const strict = { ...t, parameters: makeStrictJsonSchema(t.parameters) as typeof t.parameters };
+    const strict = { ...t, parameters: makeStrictJsonSchema(t.parameters) };
     const call = {
       type: "toolCall" as const, id: "strict-bash", name: "bash",
       arguments: {
@@ -830,7 +830,7 @@ describe("bash on a real shell", () => {
     const base = { description: "Check ordinary bash execution", command: "printf 'ordinary-call\\n'" };
     const strictArgs = { ...base, timeout: null, run_in_background: null, sandbox_permissions: null, justification: null };
     const call = { type: "toolCall" as const, id: "ordinary-bash", name: "bash", arguments: strictArgs };
-    const wireTool = { ...t, parameters: makeStrictJsonSchema(t.parameters) as typeof t.parameters };
+    const wireTool = { ...t, parameters: makeStrictJsonSchema(t.parameters) };
     const wireArgs = validateToolArguments(wireTool, call);
     const params = validateToolArguments(t, { ...call, arguments: wireArgs });
     expect(params).toEqual(base);

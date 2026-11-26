@@ -1,4 +1,5 @@
 import { normalizeTodos, todoListFinishedInTranscript, type TodoTranscriptMessage } from '@extensions/_shared/todo-model';
+import { RULE_INJECTION_ENTRY, ruleInjectionMessage } from '@extensions/context-rules/injectionNotice';
 import { reconcileTodoResults } from './sessionMessageSync';
 import { closedChainSteps, closedParallelTasks, closedStringField, closedTopLevelString, type NormalizedTask } from '@extensions/multi-agent/tasks';
 import { findPendingAskUser } from '../features/chat/pendingAskUser';
@@ -30,6 +31,8 @@ export type ChatMessage =
       timestamp?: number;
       /** 会话文件条目 id；截断 / 回退 / 重新生成 / 删除的定位键。后端投影带回前可能缺省。 */
       entryId?: string;
+      /** 迁移前此条历史的来源目录；不能回退为当前项目同名路径。 */
+      sourceCwd?: string;
       /** 子代理任务提示词：气泡内限高，不把全文铺在面板上。 */
       promptFrame?: boolean;
     }
@@ -43,6 +46,8 @@ export type ChatMessage =
       text: string;
       thinking: string;
       streaming: boolean;
+      entryId?: string;
+      sourceCwd?: string;
       /** 保留 SDK 已有的停止原因，供缓存/截断后的 todo 派生状态重建。 */
       stopReason?: string;
       /** pi 消息自带的 Unix ms 时间戳，用作推理时长持久化的 key。 */
@@ -59,6 +64,9 @@ export type ChatMessage =
       toolName: string;
       args: unknown;
       result: unknown;
+      entryId?: string;
+      sourceCwd?: string;
+      sourceRefs?: Record<string, string>;
       status: 'running' | 'done' | 'error';
       /** false = 参数仍在生成；缺省视为完整。不进历史文件。 */
       argsComplete?: boolean;
@@ -99,7 +107,7 @@ export interface AgentState {
    * auto 表示是 pi 自己的接口错误重试（auto_retry_*），这期间的报错写进 error、不弹红条；
    * 没有 auto 的是界面发送没被收下时的重试。attempt 为 0 表示 pi 已说要重试、还没报次数。
    */
-  retrying?: { attempt: number; max: number; auto?: boolean; error?: string };
+  retrying?: { attempt: number; max: number; auto?: boolean; error?: string; responseAttempt?: { runId: number; attempt: number }; recovered?: boolean };
   /** 用户主动中断进行中：abort 触发的 "request aborted" 类报错不该弹红条，置位期间 reducer 丢弃这些
    * 错误（仅抑制用户主动中断，不影响真实失败）。由 ChatView 点停止时置位，agent_start/agent_end 清位。 */
   aborting?: boolean;
@@ -109,6 +117,10 @@ export interface AgentState {
   /** 上下文压缩进行中：由 pi 的 compaction_start/compaction_end 事件驱动，UI 据此显示「正在压缩上下文…」。
    * 此前这两个事件被前端丢弃，压缩（手动 /compact 或自动）全程无任何状态反馈。 */
   compacting?: boolean;
+  /** 宿主活动补拉暂不可用；保留最后已知活动直到权威终态或重试确认。 */
+  compactionUnconfirmed?: boolean;
+  compaction?: { ownerEpoch: string; operationId: string; phase: 'preparing' | 'running'; startedAt: number; sequence: number };
+  contextRevision?: number;
   /** 扩展正在等 ctx.ui 提示（批准 / 确认 / 输入）。由 setStatus('ui-prompt') 写入，agent_end 清掉。 */
   waitingUiPrompt?: WaitingUiPrompt;
   /**
@@ -753,7 +765,10 @@ function customNotice(msg: AgentMessage): Extract<ChatMessage, { kind: 'notice' 
     ? raw.details as Record<string, unknown> : undefined;
   if (!content.trim() && !(AGENT_NOTICE_TYPES.has(customType) && details &&
     ['from', 'childId', 'jobId'].some((key) => typeof details[key] === 'string' && (details[key] as string).trim()))) return null;
-  return { kind: 'notice', id: nextId(), customType, content,
+  const id = customType === RULE_INJECTION_ENTRY && typeof msg.entryId === 'string'
+    ? `${RULE_INJECTION_ENTRY}:${msg.entryId}`
+    : nextId();
+  return { kind: 'notice', id, customType, content,
     ...(details ? { details } : {}),
     ...(messageTimestamp(msg) !== undefined ? { sourceTimestamp: messageTimestamp(msg) } : {}),
   };
@@ -842,8 +857,22 @@ function assistantUsageMetadata(message:AgentMessage,historical=false):Partial<E
   };
 }
 
+function recoveredAttempt(state: AgentState, event: AgentEvent, meaningful: boolean): AgentState {
+  const retrying = state.retrying;
+  const identity = (event as { responseAttempt?: { runId: number; attempt: number } }).responseAttempt;
+  if (!meaningful || !retrying?.auto || retrying.recovered || !identity || !retrying.responseAttempt
+    || identity.runId !== retrying.responseAttempt.runId || identity.attempt !== retrying.responseAttempt.attempt) return state;
+  return { ...state, retrying: { ...retrying, recovered: true, error: undefined }, lastError: undefined };
+}
+
 export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
+    case 'entry_appended': {
+      const message = ruleInjectionMessage(event.entry);
+      const notice = message && customNotice(message);
+      if (!notice || state.messages.some((item) => item.id === notice.id)) return state;
+      return { ...state, messages: [...state.messages, notice] };
+    }
     case 'agent_start':
       // 一轮真正开始流式：清掉「正在重试」指示（成功重连/重发）、上一条错误与中断标记，
       // 并清掉「准备响应中」占位（由 isStreaming 接管等待指示，无缝过渡）。
@@ -873,7 +902,6 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const ended = {
         awaitingResponse: false,
         aborting: false,
-        compacting: false,
         waitingUiPrompt: undefined,
         assistantStop: assistantStopFromMessages(
           (event as { messages?: { role?: unknown; stopReason?: unknown }[] }).messages,
@@ -920,7 +948,6 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         runOpening: false,
         awaitingResponse: false,
         aborting: false,
-        compacting: false,
         waitingUiPrompt: undefined,
         messages,
         ...settleAutoRetry(state),
@@ -973,15 +1000,18 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       if (ev.message.role !== 'assistant') return state;
       const { text, thinking } = extractText(ev.message);
       const errMsg = messageError(ev.message);
+      state = recoveredAttempt(state, event, !errMsg && (Boolean(text || thinking) || extractToolCalls(ev.message).length > 0));
       const messages = [...state.messages];
       const idx = lastIndex(messages, (m) => m.kind === 'assistant' && m.streaming);
       // 用户主动中断期间，abort 触发的 errorMessage 不弹红条（aborting 由 ChatView 置位）。
-      const shownErr = errMsg && !state.aborting ? errMsg : undefined;
+      const internalAbort = (ev as { internalAbort?: { origin?: string; operationId?: string } }).internalAbort;
+      const plannedAbort = internalAbort?.origin === 'policy-auto' && state.compaction?.operationId === internalAbort.operationId;
+      const shownErr = errMsg && !state.aborting && !plannedAbort ? errMsg : undefined;
       // pi 接口重试进行中：这次失败只更新重试条，是否落红条等 agent_end 说不再重试。
       const errPatch: Partial<AgentState> = !shownErr
         ? {}
         : state.retrying?.auto
-          ? { retrying: { ...state.retrying, error: shownErr } }
+          ? { retrying: { ...state.retrying, recovered: false, error: shownErr } }
           : { lastError: shownErr };
       if (idx < 0) {
         // 无在流的 assistant 泡：有可见文本/思考才补一条终态 assistant；纯 toolCall（无文本/思考）
@@ -1060,6 +1090,11 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case 'message_update': {
       const ev = event as Extract<AgentEvent, { type: 'message_update' }>;
       const ame = ev.assistantMessageEvent as AssistantMessageEvent | undefined;
+      const rawDelta = ame && 'delta' in ame ? ame.delta : undefined;
+      const meaningful = typeof rawDelta === 'string' && rawDelta.length > 0
+        && (ame?.type === 'thinking_delta' || ame?.type === 'text_delta' || ame?.type === 'toolcall_delta');
+      const toolStart = ame?.type === 'toolcall_start' && Boolean((ame as { id?: string }).id);
+      state = recoveredAttempt(state, event, meaningful || toolStart);
       if (ame && (ame.type === 'toolcall_start' || ame.type === 'toolcall_delta' || ame.type === 'toolcall_end')) {
         return applyToolcallEvent(state, ame);
       }
@@ -1072,7 +1107,6 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const { text, thinking } = extractText(snapshot);
       // 有些模型（如部分 OpenAI 兼容 / MiMo）只在流式 thinking_delta 里给推理、不写进 message.content，
       // 这里把 delta 累积起来，作为 content 无 thinking 块时的兜底来源。正文同理需要 text_delta 累积。
-      const rawDelta = ame && 'delta' in ame ? ame.delta : undefined;
       const delta = typeof rawDelta === 'string' ? rawDelta : '';
       const thinkingDelta = ame?.type === 'thinking_delta' ? delta : '';
       const textDelta = ame?.type === 'text_delta' ? delta : '';
@@ -1201,12 +1235,17 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return {
         ...state,
         lastError: undefined,
-        retrying: { attempt: ev.attempt, max: ev.maxAttempts, auto: true, error: ev.errorMessage || state.retrying?.error },
+        retrying: { attempt: ev.attempt, max: ev.maxAttempts, auto: true, error: ev.errorMessage || state.retrying?.error,
+          ...((ev as typeof ev & { responseAttempt?: { runId: number; attempt: number } }).responseAttempt
+            ? { responseAttempt: (ev as typeof ev & { responseAttempt: { runId: number; attempt: number } }).responseAttempt } : {}) },
       };
     }
 
     case 'auto_retry_end': {
       const ev = event as Extract<AgentEvent, { type: 'auto_retry_end' }>;
+      const identity = (ev as { responseAttempt?: { runId: number; attempt: number } }).responseAttempt;
+      if (state.retrying?.responseAttempt && identity
+        && (state.retrying.responseAttempt.runId !== identity.runId || state.retrying.responseAttempt.attempt !== identity.attempt)) return state;
       const retrying = state.retrying?.auto ? undefined : state.retrying;
       if (ev.success) return { ...state, retrying, lastError: undefined };
       // 用户取消（pi 报 Retry cancelled）不算失败。
@@ -1220,12 +1259,21 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return { ...state, lastError: ev.error };
     }
 
+    case 'compaction_activity': {
+      const activity = (event as { compaction?: AgentState['compaction'] }).compaction;
+      if (!activity) return state;
+      if (state.compaction?.ownerEpoch === activity.ownerEpoch && state.compaction.sequence > activity.sequence) return state;
+      return { ...state, compacting: true, compactionUnconfirmed: false, compaction: activity };
+    }
+
     case 'compaction_start':
       // 自动压缩会先 abort 正在跑的回合，模型侧带着 "Request was aborted"。
       // 这不是给用户看的失败；压缩一开始就清掉，避免红条盖住「正在压缩」。
       return {
         ...state,
         compacting: true,
+        compactionUnconfirmed: false,
+        compaction: (event as { compaction?: AgentState['compaction'] }).compaction ?? state.compaction,
         ...(isAbortError(state.lastError) ? { lastError: undefined } : {}),
       };
 
@@ -1233,12 +1281,15 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const ev = event as Extract<AgentEvent, { type: 'compaction_end' }>;
       // pi 在上下文已超过 max token、压缩本身失败时仍会发 compaction_end，且 aborted 可能是 false。
       // 只有没有错误信息的结束才算真正压完；失败不留「已压缩」。
+      const finished = (ev as { compaction?: AgentState['compaction'] }).compaction;
+      if (state.compaction && finished && (finished.ownerEpoch !== state.compaction.ownerEpoch || finished.operationId !== state.compaction.operationId)) return state;
       const failed = ev.aborted || Boolean(ev.errorMessage);
       const lastError = failed && !ev.willRetry && ev.errorMessage ? ev.errorMessage : state.lastError;
       const messages = failed
         ? state.messages
         : [...state.messages, { kind: 'compaction' as const, id: nextId() }];
-      return { ...state, compacting: false, lastError, messages };
+      return { ...state, compacting: false, compactionUnconfirmed: false, compaction: undefined,
+        contextRevision: (ev as { contextRevision?: number }).contextRevision ?? state.contextRevision, lastError, messages };
     }
 
     default: {
@@ -1345,6 +1396,7 @@ export function messagesFromAgent(
       const images = extractImages(msg);
       const rawEntryId = (msg as { entryId?: unknown }).entryId;
       const entryId = typeof rawEntryId === 'string' && rawEntryId.trim() ? rawEntryId : undefined;
+      const sourceCwd = typeof msg.sourceCwd === 'string' && msg.sourceCwd.trim() ? msg.sourceCwd : undefined;
       if (text.trim() || images.length)
         out.push({
           kind: 'user',
@@ -1353,6 +1405,7 @@ export function messagesFromAgent(
           images: images.length ? images : undefined,
           timestamp: messageTimestamp(msg),
           entryId,
+          sourceCwd,
         });
       continue;
     }
@@ -1372,6 +1425,8 @@ export function messagesFromAgent(
           ...assistantUsageMetadata(msg,true),
           ...(typeof msg.stopReason === 'string' ? { stopReason: msg.stopReason } : {}),
           timestamp,
+          ...(typeof msg.entryId === 'string' ? { entryId: msg.entryId } : {}),
+          ...(typeof msg.sourceCwd === 'string' ? { sourceCwd: msg.sourceCwd } : {}),
           thinkingDuration: thinking.trim() ? getDuration?.(timestamp) : undefined,
         });
       }
@@ -1391,6 +1446,9 @@ export function messagesFromAgent(
         args: pending?.args ?? {},
         result: toolResultPayload(msg),
         status: raw.isError === true ? 'error' : 'done',
+        ...(typeof msg.entryId === 'string' ? { entryId: msg.entryId } : {}),
+        ...(typeof msg.sourceCwd === 'string' ? { sourceCwd: msg.sourceCwd } : {}),
+        ...(msg.sourceRefs && typeof msg.sourceRefs === 'object' && !Array.isArray(msg.sourceRefs) ? { sourceRefs: msg.sourceRefs as Record<string, string> } : {}),
       });
       pendingToolCalls.delete(toolCallId);
       trailingCalls.delete(toolCallId);

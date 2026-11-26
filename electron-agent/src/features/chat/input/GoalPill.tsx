@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ActionIcon, Icon } from '@lobehub/ui';
-import { Check, Maximize2, Pause, PencilLine, Play, Trash2, X } from 'lucide-react';
+import { memo, useEffect, useRef, useState } from 'react';
+import { ActionIcon } from '@lobehub/ui';
+import { Button } from 'antd';
+import { Check, Maximize2, Pause, PencilLine, Play, RotateCw, Trash2, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { pi } from '../../../lib/pi';
 import { refreshGoalStatus } from '../../extensionUi/goalStatus';
 import { sessionControlKey } from '../../../stores/modeStore';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
@@ -11,64 +11,35 @@ import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 import { SessionGoalDrawer } from './SessionGoalDrawer';
 import { dockCard } from './dockCard';
 import { formatGoalElapsed } from './goalElapsed';
+import { goalNeedsRestart, goalPauseLabel } from './goalStatusLabels';
+import { controlGoal, useGoalEditor } from './useGoalEditor';
 import { useAskConfirm } from '../../../components/askConfirm';
 
 const styles = createStaticStyles(({ css }) => ({
-  row: css`
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    min-width: 0;
-  `,
-  lamp: css`
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  `,
-  sentence: css`
-    flex: none;
-    font-size: 13px;
-    font-weight: 500;
-    color: ${cssVar.colorText};
-  `,
-  condition: css`
-    overflow: hidden;
-    flex: 1;
-    min-width: 0;
-
-    font-size: 13px;
-    color: ${cssVar.colorTextSecondary};
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  `,
-  elapsed: css`
-    flex: none;
-    font-size: 13px;
-    color: ${cssVar.colorTextQuaternary};
-  `,
-  actions: css`
-    display: flex;
-    flex: none;
-    gap: 2px;
-    margin-left: auto;
-  `,
+  row: css`display: flex; gap: 8px; align-items: center; min-width: 0;`,
+  lamp: css`flex: none; width: 8px; height: 8px; border-radius: 50%;`,
+  sentence: css`flex: none; font-size: 13px; font-weight: 500; color: ${cssVar.colorText};`,
+  condition: css`overflow: hidden; flex: 1; min-width: 0; font-size: 13px; color: ${cssVar.colorTextSecondary}; text-overflow: ellipsis; white-space: nowrap;`,
+  elapsed: css`flex: none; font-size: 13px; color: ${cssVar.colorTextQuaternary};`,
+  reason: css`flex: none; max-width: 32%; overflow: hidden; font-size: 12px; color: ${cssVar.colorTextSecondary}; text-overflow: ellipsis; white-space: nowrap;`,
+  actions: css`display: flex; flex: none; gap: 2px; margin-left: auto;`,
+  editorWrap: css`flex: 1; min-width: 0;`,
   editor: css`
-    display: flex;
-    flex: 1;
-    gap: 6px;
-    align-items: center;
-    min-width: 0;
-
+    display: flex; gap: 6px; align-items: center; min-width: 0;
     input {
-      min-width: 0;
-      flex: 1;
-      padding: 2px 8px;
-      border: 1px solid ${cssVar.colorBorder};
-      border-radius: ${cssVar.borderRadius};
-      color: ${cssVar.colorText};
-      background: ${cssVar.colorBgContainer};
-      outline: none;
+      min-width: 0; flex: 1; height: 28px; padding: 3px 8px;
+      border: 1px solid ${cssVar.colorBorder}; border-radius: ${cssVar.borderRadius};
+      color: ${cssVar.colorText}; background: ${cssVar.colorBgContainer}; outline: none;
+      &:focus-visible { border-color: ${cssVar.colorPrimary}; box-shadow: 0 0 0 2px ${cssVar.colorPrimaryBg}; }
+      &[aria-disabled="true"] { opacity: 0.55; }
+    }
+  `,
+  hint: css`margin: 4px 0 0; font-size: 12px; color: ${cssVar.colorTextSecondary};`,
+  warning: css`margin: 4px 0 0; font-size: 12px; color: ${cssVar.colorError};`,
+  resolution: css`display: flex; gap: 6px; margin-top: 4px;`,
+  compact: css`
+    @media (max-width: 500px) {
+      .goal-optional { display: none; }
     }
   `,
 }));
@@ -85,40 +56,21 @@ export function readSessionId(state: unknown): string | undefined {
 }
 
 function statusSentence(snapshot: GoalSnapshot): string {
-  if (snapshot.status === 'active') {
-    return snapshot.activation === 'armed' ? '执行中的目标' : '未运行的目标';
-  }
+  if (snapshot.runtimeUnavailable) return '目标已停止 · 暂停未保存';
+  if (snapshot.status === 'active') return snapshot.activation === 'armed' ? '执行中的目标' : '未运行的目标';
   if (snapshot.status === 'paused') return '已暂停的目标';
   if (snapshot.status === 'blocked') return '受阻的目标';
   return '已完成的目标';
 }
 
 function lampAppearance(snapshot: GoalSnapshot): { background: string; boxShadow: string } {
-  if (snapshot.status === 'active' && snapshot.activation === 'armed') {
+  if (snapshot.status === 'active' && snapshot.activation === 'armed' && !snapshot.runtimeUnavailable) {
     return { background: '#3dd68c', boxShadow: '0 0 0 3px #3dd68c2e' };
   }
-  if (snapshot.status === 'complete') {
-    return { background: '#3dd68c', boxShadow: 'none' };
-  }
-  if (snapshot.status === 'paused') {
-    return { background: '#f5a524', boxShadow: 'none' };
-  }
-  if (snapshot.status === 'blocked') {
-    return { background: '#f53f3f', boxShadow: 'none' };
-  }
+  if (snapshot.status === 'complete') return { background: '#3dd68c', boxShadow: 'none' };
+  if (snapshot.status === 'paused' || snapshot.runtimeUnavailable) return { background: '#f5a524', boxShadow: 'none' };
+  if (snapshot.status === 'blocked') return { background: '#f53f3f', boxShadow: 'none' };
   return { background: '#8b919c', boxShadow: 'none' };
-}
-
-function canToggle(snapshot: GoalSnapshot): boolean {
-  return snapshot.status === 'active' || snapshot.status === 'paused' || snapshot.status === 'blocked';
-}
-
-function canEdit(snapshot: GoalSnapshot): boolean {
-  return snapshot.status !== 'complete';
-}
-
-function showPause(snapshot: GoalSnapshot): boolean {
-  return snapshot.status === 'active' && snapshot.activation === 'armed';
 }
 
 function actionProps(label: string) {
@@ -127,181 +79,115 @@ function actionProps(label: string) {
 
 export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps) {
   const ask = useAskConfirm();
-  const { workspace, store } = useAgentStoreContext();
+  const { workspace } = useAgentStoreContext();
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
-  // 会话身份按路径取：推送信封和补拉结果都会记「路径 → sessionId」。
-  // 不再靠 getState：它只在切换会话时读一次，回合跑着时读不对就要等下次切换。
   const sessionId = useGoalStore((s) => (activeSessionPath ? s.sessionIdByPath[sessionControlKey(activeSessionPath)] : undefined));
+  const snapshot = useGoalStore((s) => (sessionId ? s.bySession[sessionId] : undefined));
+  const editor = useGoalEditor(workspace, activeSessionPath, snapshot);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const inflight = useRef(false);
-  const snapshot = useGoalStore((s) => (sessionId ? s.bySession[sessionId] : undefined));
+  const editorInput = useRef<HTMLInputElement>(null);
 
-  // 打开 / 切到一份会话就补拉一次。重启后首次打开时 session_start 的推送可能早于窗口就绪，
-  // 会话也可能根本不在 handle 上（只读了文件），都靠这一次补上。
-  useEffect(() => {
-    void refreshGoalStatus(workspace, activeSessionPath);
-  }, [workspace, activeSessionPath]);
-
-  useEffect(() => {
-    setEditing(false);
-    setDraft(snapshot?.condition ?? '');
-  }, [snapshot?.goalId, snapshot?.condition]);
-
+  useEffect(() => { void refreshGoalStatus(workspace, activeSessionPath); }, [workspace, activeSessionPath]);
+  useEffect(() => { setEditing(false); setActionError(''); }, [activeSessionPath, snapshot?.goalId]);
   useEffect(() => {
     if (!snapshot?.runStartedAt) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [snapshot?.goalId, snapshot?.runStartedAt]);
 
-  const runCommand = useCallback(async (message: string) => {
+  const runAction = async (action: 'pause' | 'resume' | 'clear', target: GoalSnapshot, path: string) => {
     if (!workspace || inflight.current) return;
     inflight.current = true;
     setBusy(true);
+    setActionError('');
     try {
-      const path = store.getLoadedSessionPath();
-      await pi.prompt(workspace, message, undefined, undefined, path);
+      await controlGoal(workspace, path, target, action);
       void refreshGoalStatus(workspace, path);
-    } catch {
-      // 动作失败不藏条；扩展回执会说明原因。
+    } catch (error) {
+      if (useSessionStore.getState().activeSessionPath === path) {
+        setActionError(error instanceof Error ? error.message : '目标操作未提交，请重新读取。');
+      }
     } finally {
       inflight.current = false;
       setBusy(false);
     }
-  }, [workspace]);
-
-  const saveEdit = useCallback(() => {
-    const condition = draft.trim();
-    if (!condition || inflight.current) return;
-    setEditing(false);
-    void runCommand(`/goal edit ${condition}`);
-  }, [draft, runCommand]);
-
-  if (!snapshot || !sessionId) return null;
-
-  const openDetails = () => {
-    if (onOpenDetails) onOpenDetails(snapshot);
-    else setDrawerOpen(true);
   };
 
-  const rowTitle = snapshot.status === 'blocked' ? snapshot.blockedReason?.message : undefined;
+  const saveEdit = () => {
+    void editor.save().then((done) => {
+      if (done) setEditing(false);
+      else if (activeSessionPath === useSessionStore.getState().activeSessionPath) editorInput.current?.focus();
+    });
+  };
+
+  if (!snapshot || !sessionId) return null;
+  const reason = goalPauseLabel(snapshot) ?? (snapshot.status === 'blocked' ? snapshot.blockedReason?.message : undefined);
+  const paused = snapshot.status === 'active' && snapshot.activation === 'armed' && !snapshot.runtimeUnavailable;
+  const restart = goalNeedsRestart(snapshot);
   const lamp = lampAppearance(snapshot);
 
   return (
     <>
       <div className={dockCard.card} data-cap-layer="" data-dock-card="">
-      <div className={styles.row} data-testid="goal-pill" title={rowTitle}>
-        <span
-          className={styles.lamp}
-          data-testid="goal-lamp"
-          ref={(node) => {
-            if (node) node.setAttribute('style', `background: ${lamp.background}; box-shadow: ${lamp.boxShadow};`);
-          }}
-        />
-        {editing ? (
-          <div className={styles.editor}>
-            <input
-              aria-label="目标条件"
-              disabled={busy}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  saveEdit();
-                }
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  setEditing(false);
-                  setDraft(snapshot.condition);
-                }
-              }}
-              value={draft}
-            />
-            <button
-              {...actionProps('保存目标')}
-              disabled={busy || !draft.trim()}
-              onClick={saveEdit}
-              type="button"
-            >
-              <Icon icon={Check} size={14} />
-            </button>
-            <button
-              {...actionProps('取消编辑')}
-              disabled={busy}
-              onClick={() => {
-                setEditing(false);
-                setDraft(snapshot.condition);
-              }}
-              type="button"
-            >
-              <Icon icon={X} size={14} />
-            </button>
-          </div>
-        ) : (
-          <>
-            <span className={styles.sentence}>{statusSentence(snapshot)}</span>
-            <span className={styles.condition} title={rowTitle ? undefined : snapshot.condition}>
-              · {snapshot.condition}
-            </span>
-            <span className={styles.elapsed}>· {formatGoalElapsed(snapshot.ranMs ?? 0, snapshot.runStartedAt, now)}</span>
-            <div className={styles.actions}>
-              {canToggle(snapshot) ? (
-                <ActionIcon
-                  {...actionProps(showPause(snapshot) ? '暂停目标' : '恢复目标')}
-                  disabled={busy}
-                  icon={showPause(snapshot) ? Pause : Play}
-                  onClick={() => void runCommand(showPause(snapshot) ? '/goal pause' : '/goal resume')}
-                  size="small"
-                />
-              ) : null}
-              {canEdit(snapshot) ? (
-                <ActionIcon
-                  {...actionProps('编辑目标')}
-                  disabled={busy}
-                  icon={PencilLine}
-                  onClick={() => {
-                    setDraft(snapshot.condition);
-                    setEditing(true);
+        <div className={`${styles.row} ${styles.compact}`} data-testid="goal-pill" title={reason}>
+          <span className={styles.lamp} data-testid="goal-lamp" ref={(node) => { if (node) node.setAttribute('style', `background: ${lamp.background}; box-shadow: ${lamp.boxShadow};`); }} />
+          {editing ? (
+            <div className={styles.editorWrap}>
+              <div className={styles.editor}>
+                <input
+                  ref={editorInput}
+                  aria-label="目标条件"
+                  aria-disabled={editor.busy}
+                  readOnly={editor.busy}
+                  maxLength={4000}
+                  onChange={(event) => editor.setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (editor.busy) return;
+                    if (event.key === 'Enter') { event.preventDefault(); saveEdit(); }
+                    if (event.key === 'Escape') { event.preventDefault(); editor.loadLatest(); setEditing(false); }
                   }}
-                  size="small"
+                  value={editor.draft}
                 />
-              ) : null}
-              <ActionIcon
-                {...actionProps('清除目标')}
-                disabled={busy}
-                icon={Trash2}
-                onClick={() => {
-                  if (inflight.current || busy) return;
-                  void (async () => {
-                    if (!(await ask({ title: '清除当前目标？' }))) return;
-                    void runCommand('/goal clear');
-                  })();
-                }}
-                size="small"
-              />
-              <ActionIcon
-                {...actionProps('展开目标详情')}
-                disabled={busy}
-                icon={Maximize2}
-                onClick={openDetails}
-                size="small"
-              />
+                <ActionIcon {...actionProps('保存目标')} disabled={editor.busy || editor.conflict || !editor.draft.trim() || !editor.dirty} icon={Check} onClick={saveEdit} size="small" />
+                <ActionIcon {...actionProps('取消编辑')} disabled={editor.busy} icon={X} onClick={() => { editor.loadLatest(); setEditing(false); }} size="small" />
+              </div>
+              {editor.busy ? <p className={styles.hint}>正在保存…</p> : null}
+              {editor.error ? <p role="alert" className={styles.warning}>{editor.error}</p> : null}
+              {editor.conflict ? <div className={styles.resolution}><Button size="small" type="text" onClick={editor.loadLatest}>载入最新版</Button><Button size="small" type="text" onClick={editor.rebase}>基于最新版提交</Button></div> : null}
             </div>
-          </>
-        )}
+          ) : (
+            <>
+              <span className={styles.sentence}>{statusSentence(snapshot)}</span>
+              <span className={`${styles.condition} goal-optional`} title={reason ? undefined : snapshot.condition}>· {snapshot.condition}</span>
+              <span className={`${styles.elapsed} goal-optional`}>· {formatGoalElapsed(snapshot.ranMs ?? 0, snapshot.runStartedAt, now)}</span>
+              {reason ? <span className={`${styles.reason} goal-optional`} data-testid="goal-reason" title={reason}>· {reason}</span> : null}
+              <div className={styles.actions}>
+                {snapshot.runtimeUnavailable ? (
+                  <ActionIcon {...actionProps('重新读取目标状态')} disabled={busy} icon={RotateCw} onClick={() => void refreshGoalStatus(workspace, activeSessionPath)} size="small" />
+                ) : snapshot.status !== 'complete' ? (
+                  <ActionIcon {...actionProps(paused ? '暂停目标' : restart ? '开启新批次' : '恢复目标')} disabled={busy} icon={paused ? Pause : Play} onClick={() => { if (activeSessionPath) void runAction(paused ? 'pause' : 'resume', snapshot, activeSessionPath); }} size="small" />
+                ) : null}
+                {snapshot.status !== 'complete' ? (
+                  <ActionIcon {...actionProps('编辑目标')} disabled={busy} icon={PencilLine} onClick={() => { editor.loadLatest(); setEditing(true); }} size="small" />
+                ) : null}
+                <ActionIcon {...actionProps('清除目标')} disabled={busy} icon={Trash2} onClick={() => {
+                  if (inflight.current || busy || !activeSessionPath) return;
+                  const path = activeSessionPath;
+                  void (async () => { if (await ask({ title: '清除当前目标？' })) void runAction('clear', snapshot, path); })();
+                }} size="small" />
+                <ActionIcon {...actionProps('展开目标详情')} disabled={busy} icon={Maximize2} onClick={() => { if (onOpenDetails) onOpenDetails(snapshot); else setDrawerOpen(true); }} size="small" />
+              </div>
+            </>
+          )}
+        </div>
+        {actionError ? <p role="alert" className={styles.warning}>{actionError}</p> : null}
       </div>
-      </div>
-      {onOpenDetails ? null : (
-        <SessionGoalDrawer
-          onClose={() => setDrawerOpen(false)}
-          open={drawerOpen}
-          sessionId={sessionId}
-          snapshot={snapshot}
-        />
-      )}
+      {onOpenDetails ? null : <SessionGoalDrawer onClose={() => setDrawerOpen(false)} open={drawerOpen} sessionId={sessionId} sessionPath={activeSessionPath} snapshot={snapshot} />}
     </>
   );
 });

@@ -18,6 +18,7 @@ export interface QSData {
   allowExtra?: boolean;
   allowExtraImages?: boolean;
   extraPlaceholder?: string;
+  visualReview?: { previewId: string };
 }
 
 function formatChoiceLabels(
@@ -111,14 +112,25 @@ export function parseAnswerBlock(text: string, titles?: readonly string[]): Pars
 export function encodeAskUserAnswer(
   text: string,
   images?: Array<{ mimeType: string; data: string }>,
+  review?: { previewId: string; outcome: 'approved' | 'redo' },
 ): string {
   const imgs = (images ?? []).filter((img) => img.mimeType && img.data);
-  if (imgs.length === 0) return text;
+  if (imgs.length === 0 && !review) return text;
   return JSON.stringify({
     __askUserAnswer: 1,
     text,
     images: imgs.map((img) => ({ mimeType: img.mimeType, data: img.data })),
+    ...(review ? { review } : {}),
   });
+}
+
+/** 评审结论只取固定选项 id；文本、补充和页面的 postMessage 都不能替它作决定。 */
+export function selectedVisualReview(data: QSData, selected: Record<string, string[]>): { previewId: string; outcome: 'approved' | 'redo' } | undefined {
+  if (!data.visualReview?.previewId) return undefined;
+  const ids = selected['visual-review'] ?? [];
+  if (ids.length !== 1 || !data.questions.some((q) => q.id === 'visual-review' && q.allowCustom === false)) return undefined;
+  if (ids[0] !== 'approve' && ids[0] !== 'redo') return undefined;
+  return { previewId: data.visualReview.previewId, outcome: ids[0] === 'approve' ? 'approved' : 'redo' };
 }
 
 /** 解析 ask_user 经 ctx.ui.input 传来的载荷（哨兵 __askUser）。非该载荷返回 null。 */

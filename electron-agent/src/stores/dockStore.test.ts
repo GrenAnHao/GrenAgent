@@ -695,3 +695,4 @@ describe('dockStore session-owned tabs', () => {
     expect(useDockStore.getState().closedTabs).toEqual([]);
   });
 });
+

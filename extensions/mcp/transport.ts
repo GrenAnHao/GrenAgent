@@ -1,3 +1,4 @@
+import { duringAttempt } from "./attempt.js";
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -24,6 +25,10 @@ import {
 } from "./oauthRules.js";
 
 export interface OAuthConnectHooks {
+  signal?: AbortSignal;
+  onStderr?: (chunk: string) => void;
+  onExit?: (exit: string) => void;
+  onDisconnected?: () => void;
   /** 登录地址已经生成。打开浏览器失败时也要先记下，面板才能复制。 */
   onLoginUrl?: (url: string) => void;
   /** 测试或宿主可以替换系统浏览器。缺省用操作系统打开。 */
@@ -73,14 +78,29 @@ export function remoteRequestInit(headers?: Record<string, string>): { requestIn
   return { requestInit: { headers: clean } };
 }
 
-export function createMcpTransport(s: McpServerConfig, authOptions?: McpTransportAuth): Transport {
+export function createMcpTransport(s: McpServerConfig, authOptions?: McpTransportAuth, hooks?: OAuthConnectHooks): Transport {
   if (s.transport === "stdio" || !s.url) {
-    return new StdioClientTransport({
+    const transport = new StdioClientTransport({
+      ...(hooks?.onStderr && { stderr: "pipe" as const }),
       command: s.command ?? "",
       args: s.args ?? [],
       ...(s.cwd ? { cwd: s.cwd } : {}),
       env: { ...(process.env as Record<string, string>), ...(s.env ?? {}) },
     });
+    if (hooks?.onStderr && transport.stderr) {
+      (transport.stderr as import("node:stream").Readable).setEncoding("utf8");
+      transport.stderr.on("data", hooks.onStderr);
+      // The SDK exposes pid/stderr but discards the exit code in onclose.
+      // Observe its spawned child when available; transport behavior stays with the SDK.
+      const start = transport.start.bind(transport);
+      transport.start = async () => {
+        const pending = start();
+        const child = (transport as unknown as { _process?: import("node:child_process").ChildProcess })._process;
+        child?.once("exit", (code, signal) => hooks.onExit?.(code == null ? String(signal) : String(code)));
+        await pending;
+      };
+    }
+    return transport;
   }
   const opts: StreamableHTTPClientTransportOptions = {
     ...remoteRequestInit(s.headers),
@@ -123,13 +143,16 @@ export async function establishMcpConnection<T>(
     return connectTransport(createMcpTransport(server, { fetch: fetchFn }));
   }
   const session = await startOAuthSession(server, hooks);
-  if (!session) return connectTransport(createMcpTransport(server));
+  if (!session) return connectTransport(createMcpTransport(server, undefined, hooks));
   try {
+    hooks?.signal?.throwIfAborted();
     try {
       return await connectTransport(session.transport);
     } catch (error) {
       if (!(error instanceof UnauthorizedError)) throw error;
-      await session.exchangeCode();
+      hooks?.signal?.throwIfAborted();
+      await duringAttempt(session.exchangeCode(), hooks?.signal);
+      hooks?.signal?.throwIfAborted();
       return await connectTransport(session.nextTransport());
     }
   } finally {
@@ -155,7 +178,11 @@ async function startOAuthSession(server: McpServerConfig, hooks: OAuthConnectHoo
       record.callback_port = boundPort;
     });
   }
-  const fetchFn = createOAuthFetch(() => store.read().scope);
+  const oauthFetch = createOAuthFetch(() => store.read().scope);
+  const fetchFn: FetchLike = (input, init) => {
+    const signal = hooks?.signal;
+    return oauthFetch(input, signal ? { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal } : init);
+  };
   const provider = new FileOAuthProvider(config, callback.redirectUrl, store, hooks);
   const authOptions = { authProvider: provider, fetch: fetchFn };
   const serverUrl = server.url;
@@ -265,7 +292,7 @@ async function bindCallback(config: McpOAuthConfig): Promise<{ redirectUrl: stri
   return {
     redirectUrl: redirect.toString(),
     result,
-    close: () => closeServer(server),
+    close: () => { settle({error: "登录监听已结束"}); return closeServer(server); },
   };
 }
 
@@ -381,6 +408,7 @@ class FileOAuthProvider implements OAuthClientProvider {
   }
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
+    this.hooks?.signal?.throwIfAborted();
     const url = authorizationUrl.toString();
     this.hooks?.onLoginUrl?.(url);
     try {

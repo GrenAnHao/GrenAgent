@@ -24,7 +24,7 @@ export function WorkbenchThemeProvider({ appearance, children }: {
   const antdTheme = useMemo(() => workbenchTheme(dark), [dark]);
 
   return (
-    <ThemeProvider themeMode={mode} appearance={mode} theme={antdTheme}>
+    <ThemeProvider themeMode={mode} appearance={mode} theme={antdTheme} enableCustomFonts={false}>
       <ConfigProvider motion={m}>
         <ThemeBridge />
         {children}

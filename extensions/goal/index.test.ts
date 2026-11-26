@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { __resetForTest } from "../_shared/runtime-config.js";
-import { hasGoalRound, setGoalRoundPending, __resetGoalAuthForTest } from "./auth.js";
+import { occupiedGoalRound, __resetGoalAuthForTest } from "./auth.js";
+import { __resetGoalControlsForTest } from "./control.js";
+import { __resetGoalActivationsForTest } from "./status.js";
 import { __resetGoalContinueForTest } from "./continue.js";
-import { foldGoal } from "./fold.js";
 import factory from "./index.js";
 import { getActivation } from "./session.js";
 import { DEFAULT_MAX_ROUNDS } from "./types.js";
@@ -41,7 +42,9 @@ function setup() {
       calls.send.push(a);
     },
     on: (e: string, h: Function) => {
-      handlers[e] = h;
+      handlers[e] = e === "agent_end"
+        ? async (event: unknown, ctx: unknown) => { await handlers.agent_start?.({}, ctx); await h(event, ctx); }
+        : h;
     },
     registerCommand: (n: string, def: { handler: Handler; description?: string }) => {
       commands.push(n);
@@ -64,7 +67,11 @@ function setup() {
     },
   };
 
-  return { handler: handler as Handler, ctx, calls, commands, handlers, description, entries };
+  const settledCommand: Handler = async (args, context) => {
+    await handler!(args, context);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // owner dispatch after committed receipt
+  };
+  return { handler: settledCommand, ctx, calls, commands, handlers, description, entries };
 }
 
 function lastNotify(calls: { notify: unknown[][] }): [string, string] {
@@ -87,6 +94,7 @@ function goalEvents(entries: GoalEntry[]) {
   return entries.filter((entry) => entry.customType === "goal").map((entry) => entry.data);
 }
 
+beforeEach(() => { __resetGoalControlsForTest(); __resetGoalActivationsForTest(); });
 afterEach(() => {
   __resetForTest();
   __resetGoalContinueForTest();
@@ -133,9 +141,9 @@ describe("goal extension factory", () => {
       expect.objectContaining({
         kind: "create",
         revision: 1,
-        payload: { condition: "写完" },
+        payload: expect.objectContaining({ condition: "写完", operationId: expect.any(String) }),
       }),
-      expect.objectContaining({ kind: "round", revision: 2, payload: { round: 1 } }),
+      expect.objectContaining({ kind: "round", revision: 2, payload: expect.objectContaining({ round: 1, runNumber: 1 }) }),
     ]);
     expect(calls.send[0]?.[0]).toMatchObject({
       customType: "goal-round",
@@ -151,8 +159,8 @@ describe("goal extension factory", () => {
       workspace: "/repo",
     });
     expect(envelope.history).toEqual([
-      expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: { condition: "写完" } }),
-      expect.objectContaining({ source: "event", kind: "round", payload: { round: 1 } }),
+      expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: expect.objectContaining({ condition: "写完" }) }),
+      expect.objectContaining({ source: "event", kind: "round", payload: expect.objectContaining({ round: 1 }) }),
     ]);
     expect(envelope.snapshot).toMatchObject({ status: "active", activation: "armed", condition: "写完" });
 
@@ -172,7 +180,7 @@ describe("goal extension factory", () => {
     expect(goalEvents(entries).filter((event) => event.kind === "create")).toHaveLength(1);
     const [text, level] = lastNotify(calls);
     expect(level).toBe("error");
-    expect(text).toMatch(/edit|clear/i);
+    expect(text).toMatch(/GOAL_ALREADY_ACTIVE|edit|clear/i);
   });
 
   it("allows create after a complete event without clear, new goalId at revision 1", async () => {
@@ -197,7 +205,7 @@ describe("goal extension factory", () => {
     expect(next).toMatchObject({
       kind: "create",
       revision: 1,
-      payload: { condition: "新目标" },
+      payload: expect.objectContaining({ condition: "新目标" }),
     });
     expect(next?.goalId).toBeTruthy();
     expect(next?.goalId).not.toBe(created.goalId);
@@ -209,7 +217,7 @@ describe("goal extension factory", () => {
     expect(goalEvents(entries)[0]).toMatchObject({
       kind: "create",
       revision: 1,
-      payload: { condition: "pause after verify" },
+      payload: expect.objectContaining({ condition: "pause after verify" }),
     });
   });
 
@@ -227,14 +235,15 @@ describe("goal extension factory", () => {
     await handler("写完", ctx);
     await handler("pause", ctx);
     await handler("resume", ctx);
-    expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "round" });
+    // A still-live old runner occupies the slot; resume cannot launch a parallel round.
+    expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "resume" });
     expect(goalEvents(entries).some((event) => event.kind === "resume")).toBe(true);
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
     expect(lastNotify(calls)[1]).toBe("info");
     expect(calls.send.at(-1)?.[0]).toMatchObject({ customType: "goal-round" });
   });
 
-  it("re-arms an active disarmed goal on resume without writing a resume event", async () => {
+  it("re-arms an active disarmed goal with an idempotent control resume event", async () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
     await handlers.session_start?.({}, ctx);
@@ -242,10 +251,9 @@ describe("goal extension factory", () => {
 
     const sendBefore = calls.send.length;
     await handler("resume", ctx);
-    expect(goalEvents(entries).some((event) => event.kind === "resume")).toBe(false);
+    expect(goalEvents(entries).some((event) => event.kind === "resume")).toBe(true);
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
-    expect(calls.send.length).toBeGreaterThan(sendBefore);
-    expect(calls.send.at(-1)?.[0]).toMatchObject({ customType: "goal-round" });
+    expect(calls.send.length).toBe(sendBefore); // Old execution slot has not settled.
   });
 
   it("clears the goal and pushes a null snapshot", async () => {
@@ -256,8 +264,8 @@ describe("goal extension factory", () => {
     const envelope = lastEnvelope(calls);
     expect(envelope.snapshot).toBeNull();
     expect(envelope.history).toEqual([
-      expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: { condition: "写完" } }),
-      expect.objectContaining({ source: "event", kind: "round", payload: { round: 1 } }),
+      expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: expect.objectContaining({ condition: "写完" }) }),
+      expect.objectContaining({ source: "event", kind: "round", payload: expect.objectContaining({ round: 1 }) }),
       expect.objectContaining({ source: "event", kind: "clear" }),
     ]);
     expect(lastNotify(calls)[1]).toBe("info");
@@ -275,7 +283,7 @@ describe("goal extension factory", () => {
     const { handler, ctx, calls, entries } = setup();
     await handler("edit 新", ctx);
     expect(entries).toEqual([]);
-    expect(lastNotify(calls)).toEqual(["当前没有生效的目标。", "error"]);
+    expect(lastNotify(calls)).toEqual(["INVALID_GOAL_ID", "error"]);
   });
 
   it("uses info for success, error for failure, and warning when no goal", async () => {
@@ -320,10 +328,12 @@ describe("goal extension factory", () => {
     const [message, options] = calls.send.at(-1) as [Record<string, unknown>, Record<string, unknown>];
     expect(message.customType).toBe("goal-round");
     expect(message.display).toBe(false);
-    expect(message.details).toEqual({
+    expect(message.details).toMatchObject({
       goalId: created.goalId,
       revision: 3,
       round: 2,
+      runNumber: 1,
+      runRound: 2,
     });
     expect(options).toEqual({ triggerTurn: true });
   });
@@ -338,21 +348,19 @@ describe("goal extension factory", () => {
     await handlers.agent_settled?.({}, ctx);
 
     expect(calls.send).toHaveLength(sendBefore);
-    expect(goalEvents(entries).map((event) => event.kind)).toEqual(kindsBefore);
-    expect(getActivation("session-a")).toBe("armed");
+    expect(goalEvents(entries).map((event) => event.kind)).toEqual([...kindsBefore, "pause"]);
+    expect(getActivation("session-a")).toBe("disarmed");
   });
 
-  it("treats settle without a prior agent_end as a normal end and reenters", async () => {
+  it("ignores a settled notification without an agent_end identity", async () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
     const sendBefore = calls.send.length;
 
     await handlers.agent_settled?.({}, ctx);
 
-    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(2);
-    expect(calls.send).toHaveLength(sendBefore + 1);
-    const [message] = calls.send.at(-1) as [Record<string, unknown>];
-    expect(message.customType).toBe("goal-round");
+    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(1);
+    expect(calls.send).toHaveLength(sendBefore);
   });
 
   it("notifies max rounds once and does not send", async () => {
@@ -387,38 +395,27 @@ describe("goal extension factory", () => {
     expect(calls.send).toHaveLength(sendBefore);
   });
 
-  it("clears the previous pending mark and sets the folded one on reenter", async () => {
-    const { handler, ctx, handlers, entries } = setup();
+  it("a duplicate settled notification does not release the new round or dispatch twice", async () => {
+    const { handler, ctx, handlers, entries, calls } = setup();
     await handler("写完", ctx);
-    const created = goalEvents(entries)[0];
-    const oldRef = { goalId: created.goalId as string, revision: 1, round: 0 };
-    setGoalRoundPending("session-a", oldRef);
-
     await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
     await handlers.agent_settled?.({}, ctx);
-
-    const snapshot = foldGoal(entries);
-    expect(snapshot).toBeTruthy();
-    expect(hasGoalRound("session-a", oldRef)).toBe(false);
-    expect(hasGoalRound("session-a", {
-      goalId: snapshot!.goalId,
-      revision: snapshot!.revision,
-      round: snapshot!.roundsStarted,
-    })).toBe(true);
+    const fresh = occupiedGoalRound("session-a");
+    const sent = calls.send.length;
+    await handlers.agent_settled?.({}, ctx);
+    expect(occupiedGoalRound("session-a")).toEqual(fresh);
+    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(2);
+    expect(calls.send).toHaveLength(sent);
   });
 
-  it("clears the previous pending mark when abort prevents reenter", async () => {
-    const { handler, ctx, calls, handlers, entries } = setup();
+  it("aborted settled run disarms and cannot reenter", async () => {
+    const { handler, ctx, calls, handlers } = setup();
     await handler("写完", ctx);
-    const created = goalEvents(entries)[0];
-    const oldRef = { goalId: created.goalId as string, revision: 1, round: 0 };
-    setGoalRoundPending("session-a", oldRef);
-
     await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason: "aborted" }] }, ctx);
-    await handlers.agent_settled?.({}, ctx);
-
+    await handlers.agent_settled?.({ aborted: true }, ctx);
     expect(calls.send).toHaveLength(1);
-    expect(hasGoalRound("session-a", oldRef)).toBe(false);
+    expect(getActivation("session-a")).toBe("disarmed");
+    expect(occupiedGoalRound("session-a")).toBeUndefined();
   });
 
   it("disarms on session_start by default and does not reenter", async () => {
@@ -442,8 +439,8 @@ describe("goal extension factory", () => {
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
-    expect(goalEvents(entries).filter((event) => event.kind === "round").length).toBe(roundsBefore + 1);
-    expect(calls.send).toHaveLength(sendBefore + 1);
+    expect(goalEvents(entries).filter((event) => event.kind === "round").length).toBe(roundsBefore);
+    expect(calls.send).toHaveLength(sendBefore);
     const [message, options] = calls.send.at(-1) as [Record<string, unknown>, Record<string, unknown>];
     expect(message.customType).toBe("goal-round");
     expect(message.display).toBe(false);
@@ -496,7 +493,7 @@ describe("goal extension factory", () => {
     const before = calls.notify.length;
     await handlers.session_start?.({}, ctx);
 
-    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "paused", activation: "disarmed", pauseReason: { code: "max-rounds" } });
     expect(calls.send).toHaveLength(sendBefore);
     expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(2);
     const opened = calls.notify.slice(before) as [string, string][];
@@ -513,8 +510,8 @@ describe("goal extension factory", () => {
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
-    expect(goalEvents(entries).filter((event) => event.kind === "round").length).toBeGreaterThan(1);
-    expect(calls.send).toHaveLength(sendBefore + 1);
+    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(1);
+    expect(calls.send).toHaveLength(sendBefore);
   });
 });
 

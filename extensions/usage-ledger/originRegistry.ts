@@ -66,6 +66,8 @@ export class UsageOriginRegistry {
   }
   /** Called only for an entry actually appended by a locally executing SDK request. */
   ownsSessionPath(sessionId:string,path:string):boolean {const row=this.db.prepare('SELECT path FROM session_paths WHERE session_id=?').get(sessionId) as {path:string}|undefined;return row?.path===resolve(path);}
+  /** Registered canonical path for a local session; undefined when the session never recorded local usage. */
+  sessionPath(sessionId:string):string|undefined {const row=this.db.prepare('SELECT path FROM session_paths WHERE session_id=?').get(sessionId) as {path:string}|undefined;return row?.path;}
   registerLocalEntry(ref: UsageEntryRef,sessionPath?:string|null): void {
     if(sessionPath){
       const path=resolve(sessionPath);const existing=this.db.prepare('SELECT path FROM session_paths WHERE session_id=?').get(ref.sessionId) as {path:string}|undefined;

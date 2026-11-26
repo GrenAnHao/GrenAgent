@@ -159,7 +159,7 @@ describeWindows("reclaimGrants: what the review found", () => {
     });
     const o = opts();
     reclaimGrants(grants, o);
-    const order = o.revoke.mock.calls.map((call) => String(call[0]).match(/p(\d)$/)?.[1]);
+    const order = vi.mocked(o.revoke).mock.calls.map((call) => String(call[0]).match(/p(\d)$/)?.[1]);
     expect(order).toEqual(["1", "3", "2"]);
   });
 
@@ -200,7 +200,7 @@ describeWindows("reclaimGrants: what the review found", () => {
     };
     const o = opts({ keep: [] });
     reclaimGrants(grants, o);
-    const revoked = o.revoke.mock.calls.map((call) => String(call[0]));
+    const revoked = vi.mocked(o.revoke).mock.calls.map((call) => String(call[0]));
     expect(revoked).toEqual([expect.stringMatching(/work-old$/)]);
     expect(grants[parent]).toBe("M");
   });
