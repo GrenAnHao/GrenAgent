@@ -12,6 +12,8 @@ import { openResumedChildSession } from "./activation.js";
 import { isUltraRouting } from "../_shared/ultra-context.js";
 import { resolveUltraRoute } from "./routing.js";
 import type { RouteModel } from "./model-selection.js";
+import { defaultLedgerPath, sharedLedger } from "../usage-ledger/ledger.js";
+import { sharedOriginRegistry } from "../usage-ledger/originRegistry.js";
 
 let dir = "";
 let server: Server | undefined;
@@ -20,7 +22,12 @@ afterEach(async () => {
   resetRuntimeConfig();
   vi.unstubAllEnvs();
   if (server) { server.closeAllConnections(); await new Promise<void>((resolve) => server!.close(() => resolve())); server = undefined; }
-  if (dir) await rm(dir, { recursive: true, force: true });
+  if (dir) {
+    sharedLedger(defaultLedgerPath(dir)).close();
+    sharedOriginRegistry(dir).close();
+    await rm(dir, { recursive: true, force: true });
+    dir = "";
+  }
 });
 
 describe("Ultra real SDK sessions", () => {

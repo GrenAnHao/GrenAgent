@@ -39,7 +39,7 @@ if (source.includes(patchMarker)) {
 }
 
 const helperAnchor = 'function isLegacyWslBashPath(path) {';
-const fallbackAnchor = '// 3. Fallback: search bash.exe on PATH (Cygwin, MSYS2, WSL, etc.)';
+const fallbackAnchor = '// 4. Fallback: search bash.exe on PATH (Cygwin, MSYS2, WSL, etc.)';
 const upstreamWhere = /const result = spawnSync\("where", \[executable\], \{[\s\S]*?\}\);/g;
 if (source.includes('function getWindowsSearchPath()') ||
     source.split(helperAnchor).length !== 2 || source.split(fallbackAnchor).length !== 2 ||

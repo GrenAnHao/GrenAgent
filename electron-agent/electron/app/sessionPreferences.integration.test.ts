@@ -16,6 +16,8 @@ import {
   readRequestedPreferences,
   readSessionPreferences,
 } from '../../../extensions/_shared/session-preferences.js';
+import { defaultLedgerPath, sharedLedger } from '../../../extensions/usage-ledger/ledger.js';
+import { sharedOriginRegistry } from '../../../extensions/usage-ledger/originRegistry.js';
 
 /**
  * 真实 SDK（ModelRuntime + SettingsManager + AgentSession + SessionManager）上的冷恢复验证。
@@ -50,7 +52,12 @@ beforeEach(async () => {
 
 afterEach(async () => {
   __resetForTest();
-  if (dir) await rm(dir, { recursive: true, force: true });
+  if (dir) {
+    sharedLedger(defaultLedgerPath(dir)).close();
+    sharedOriginRegistry(dir).close();
+    await rm(dir, { recursive: true, force: true });
+    dir = '';
+  }
 });
 
 async function modelRuntime(): Promise<ModelRuntime> {

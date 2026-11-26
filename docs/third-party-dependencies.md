@@ -8,9 +8,9 @@
 
 | 许可证 | 包数 |
 | --- | --- |
-| MIT | 787 |
-| ISC | 56 |
-| Apache-2.0 | 42 |
+| MIT | 788 |
+| ISC | 55 |
+| Apache-2.0 | 43 |
 | BSD-3-Clause | 33 |
 | apache-2.0 | 7 |
 | BlueOak-1.0.0 | 3 |
@@ -114,14 +114,14 @@
 - @dnd-kit/modifiers@9.0.0
 - @dnd-kit/sortable@10.0.0
 - @dnd-kit/utilities@3.2.2
-- @earendil-works/pi-agent-core@1.6.0
-- @earendil-works/pi-ai@1.6.0
-- @earendil-works/pi-codemode@1.6.0
-- @earendil-works/pi-coding-agent@1.6.0
-- @earendil-works/pi-mcp@1.6.0
-- @earendil-works/pi-schema@1.6.0
-- @earendil-works/pi-telemetry@1.6.0
-- @earendil-works/pi-tui@1.6.0
+- @earendil-works/pi-agent-core@1.6.1
+- @earendil-works/pi-ai@1.6.1
+- @earendil-works/pi-codemode@1.6.1
+- @earendil-works/pi-coding-agent@1.6.1
+- @earendil-works/pi-mcp@1.6.1
+- @earendil-works/pi-schema@1.6.1
+- @earendil-works/pi-telemetry@1.6.1
+- @earendil-works/pi-tui@1.6.1
 - @emoji-mart/data@1.2.1
 - @emoji-mart/react@1.1.1
 - @emotion/babel-plugin@11.13.5
@@ -337,6 +337,7 @@
 - @types/mdast@4.0.4
 - @types/mdx@2.0.14
 - @types/ms@2.1.0
+- @types/node@22.20.5
 - @types/node@25.9.6
 - @types/parse-json@4.0.2
 - @types/retry@0.12.0
@@ -696,7 +697,6 @@
 - react-dropzone@12.1.0
 - react-error-boundary@6.1.4
 - react-fast-compare@3.2.2
-- react-hotkeys-hook@5.3.3
 - react-hotkeys-hook@5.4.0
 - react-is@16.13.1
 - react-is@18.3.1
@@ -794,6 +794,7 @@
 - type-is@2.1.0
 - typebox@1.3.27
 - undici@8.12.4
+- undici-types@6.21.0
 - undici-types@7.24.6
 - unified@11.0.5
 - unist-util-find-after@5.0.0
@@ -879,7 +880,6 @@
 - isexe@2.0.0
 - lucide-react@0.469.0
 - lucide-react@0.562.0
-- lucide-react@1.47.0
 - lucide-react@1.78.0
 - once@1.4.0
 - picocolors@1.1.1
@@ -901,6 +901,7 @@
 - @aws-sdk/credential-provider-http@3.972.73
 - @aws-sdk/credential-provider-ini@3.973.16
 - @aws-sdk/credential-provider-login@3.972.78
+- @aws-sdk/credential-provider-node@3.972.82
 - @aws-sdk/credential-provider-node@3.972.83
 - @aws-sdk/credential-provider-process@3.972.71
 - @aws-sdk/credential-provider-sso@3.973.15
@@ -915,7 +916,7 @@
 - @aws-sdk/xml-builder@3.972.40
 - @aws/lambda-invoke-store@0.3.0
 - @chevrotain/types@11.1.2
-- @google/genai@2.32.0
+- @google/genai@3.6.1
 - @silvia-odwyer/photon-node@0.3.4
 - @smithy/core@3.33.3
 - @smithy/credential-provider-imds@4.5.2
@@ -987,7 +988,7 @@
 ### BlueOak-1.0.0
 
 - @isaacs/nonrecursive-glob-match@1.1.0
-- lru-cache@11.5.2
+- lru-cache@11.5.3
 - minimatch@11.0.3
 
 ### BSD-2-Clause

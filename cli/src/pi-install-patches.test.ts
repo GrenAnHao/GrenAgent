@@ -128,6 +128,32 @@ test("patched resolver finds nondefault Git Bash with stale process PATH", (t) =
   assert.equal(JSON.stringify(resolver.getShellConfig().args), '["-c"]');
 });
 
+// Catches upstream 1.6.1 git-var discovery losing trusted where / registry PATH wiring.
+test("patched resolver supports Pi 1.6.1 git var GIT_SHELL_PATH with shim git.exe and stale PATH", (t) => {
+  const f = fixture(t);
+  assert.equal(f.run(scripts[0], "cli").status, 0);
+  const shimGit = "D:\\Shims\\git.exe";
+  const gitBash = "D:\\CustomGit\\bin\\bash.exe";
+  let sawGitVar = false;
+  const resolver = shell(readFileSync(f.packageFile("cli", shellFile), "utf8"), [shimGit, gitBash], (command, args, options) => {
+    if (command === "E:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe") {
+      return { status: 0, stdout: "D:\\Shims;C:\\Stale\n" };
+    }
+    if (command === "E:\\Windows\\System32\\where.exe" && args[0] === "git.exe" &&
+      options.env.PATH === "C:\\Stale;D:\\Shims") {
+      return { status: 0, stdout: `${shimGit}\r\n` };
+    }
+    if (command === shimGit && args[0] === "var" && args[1] === "GIT_SHELL_PATH") {
+      sawGitVar = true;
+      return { status: 0, stdout: "D:\\CustomGit\\usr\\bin\\sh.exe\r\n" };
+    }
+    return { status: 1, stdout: "" };
+  });
+  assert.equal(resolver.getShellConfig().shell, gitBash);
+  assert.equal(sawGitVar, true);
+  assert.equal(JSON.stringify(resolver.getShellConfig().args), '["-c"]');
+});
+
 // Catches a fallback that keeps using bare where or throws away the registry PATH.
 test("patched resolver also finds PATH bash outside a Git installation", (t) => {
   const f = fixture(t);
